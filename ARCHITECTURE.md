@@ -6,7 +6,7 @@
 
 ## 1. Name Candidates
 
-Since "unbrowse" is taken:
+Since "apitab" is taken:
 
 | Name | CLI Command | Vibe |
 |------|-------------|------|

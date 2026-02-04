@@ -1,4 +1,4 @@
-# ApiTab — Brainstorming Brief
+# apitap — Brainstorming Brief
 
 ## What We're Building
 An open-source tool that intercepts internal API calls from websites (SPAs, React apps, dashboards) and turns them into reusable API templates that AI agents can call directly — bypassing browser automation entirely.

@@ -6,7 +6,7 @@
 
 ## 1. Name Candidates
 
-Since "apitab" is taken:
+Since "apitap" is taken:
 
 | Name | CLI Command | Vibe |
 |------|-------------|------|

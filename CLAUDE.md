@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ApiTap intercepts web API traffic during normal browsing and generates portable JSON "skill files" so AI agents can call APIs directly instead of using browser automation. This eliminates the 50-200K token cost of DOM-based scraping, replacing it with direct API calls at ~1-5K tokens.
 
-**Status:** Pre-implementation. Architecture in PROJECT.md, design decisions in `docs/plans/2026-02-04-architecture-design.md`.
+**Status:** v0.1 MVP. Architecture in PROJECT.md, design decisions in `docs/plans/2026-02-04-architecture-design.md`.
 
 ## Architecture
 
@@ -54,10 +54,20 @@ GET endpoints are auto-verified during capture (Playwright response vs raw `fetc
 
 ## Build & Development
 
-No build system configured yet. Planned stack:
-- TypeScript on Node.js 18+
-- CLI entry point: `src/cli.ts`
-- Plugin entry point: `src/plugin.ts` (OpenClaw integration)
-- Tests: `test/` directory (framework TBD)
+**Install:** `npm install`
 
-When setting up the project, establish: `package.json`, `tsconfig.json`, and npm scripts for `build`, `dev`, `test`, and `lint`.
+**Run tests:** `npm test` (Node built-in test runner + tsx)
+
+**Run single test:** `node --import tsx --test test/path/to/test.ts`
+
+**Type check:** `npm run typecheck`
+
+**Build:** `npm run build` (compiles to `dist/`)
+
+**Dev CLI:** `npx tsx src/cli.ts <command>`
+
+**Usage:**
+- `npx tsx src/cli.ts capture <url>` — capture API traffic
+- `npx tsx src/cli.ts list` — list skill files
+- `npx tsx src/cli.ts show <domain>` — show endpoints
+- `npx tsx src/cli.ts replay <domain> <endpoint-id>` — replay an endpoint

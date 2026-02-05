@@ -67,4 +67,27 @@ describe('skill store', () => {
     const summaries = await listSkillFiles(testDir);
     assert.deepEqual(summaries, []);
   });
+
+  it('creates .gitignore in base dir on first write', async () => {
+    const baseDir = join(testDir, '.apitap');
+    const skillsDir = join(baseDir, 'skills');
+    await writeSkillFile(makeSkill('example.com'), skillsDir);
+
+    const { readFile } = await import('node:fs/promises');
+    const gitignore = await readFile(join(baseDir, '.gitignore'), 'utf-8');
+    assert.ok(gitignore.includes('auth.enc'));
+  });
+
+  it('does not overwrite existing .gitignore', async () => {
+    const baseDir = join(testDir, '.apitap');
+    const skillsDir = join(baseDir, 'skills');
+    const { writeFile: wf, mkdir: mk, readFile: rf } = await import('node:fs/promises');
+    await mk(baseDir, { recursive: true });
+    await wf(join(baseDir, '.gitignore'), 'custom content\n');
+
+    await writeSkillFile(makeSkill('example.com'), skillsDir);
+
+    const gitignore = await rf(join(baseDir, '.gitignore'), 'utf-8');
+    assert.equal(gitignore, 'custom content\n');
+  });
 });

@@ -75,12 +75,18 @@ export class SkillGenerator {
   private endpoints = new Map<string, SkillEndpoint>();
   private captureCount = 0;
   private filteredCount = 0;
+  private baseUrl: string | null = null;
 
   /** Add a captured exchange. Returns the new endpoint if first seen, null if duplicate. */
   addExchange(exchange: CapturedExchange): SkillEndpoint | null {
     this.captureCount++;
 
     const url = new URL(exchange.request.url);
+
+    // Track baseUrl from the first captured exchange
+    if (!this.baseUrl) {
+      this.baseUrl = url.origin;
+    }
     const key = `${exchange.request.method} ${url.pathname}`;
 
     if (this.endpoints.has(key)) {
@@ -118,7 +124,7 @@ export class SkillGenerator {
       version: '1.0',
       domain,
       capturedAt: new Date().toISOString(),
-      baseUrl: `https://${domain}`,
+      baseUrl: this.baseUrl ?? `https://${domain}`,
       endpoints: Array.from(this.endpoints.values()),
       metadata: {
         captureCount: this.captureCount,

@@ -9,6 +9,8 @@ import { join } from 'node:path';
 import { capture } from '../../src/capture/monitor.js';
 import { writeSkillFile, readSkillFile } from '../../src/skill/store.js';
 import { replayEndpoint } from '../../src/replay/engine.js';
+import { signSkillFile } from '../../src/skill/signing.js';
+import { deriveKey } from '../../src/auth/crypto.js';
 
 describe('end-to-end: capture → skill file → replay', () => {
   let server: Server;
@@ -59,6 +61,7 @@ describe('end-to-end: capture → skill file → replay', () => {
       url: serverUrl,
       duration: 3,
       launch: true,
+      allDomains: true,  // localhost would be filtered by domain-only mode
       onEndpoint: () => {},
       onFiltered: () => {},
     });
@@ -67,17 +70,33 @@ describe('end-to-end: capture → skill file → replay', () => {
     assert.ok(result.generators.size > 0, 'Should have at least one domain');
     const domain = Array.from(result.generators.keys())[0];
     const gen = result.generators.get(domain)!;
-    const skill = gen.toSkillFile(domain);
+    let skill = gen.toSkillFile(domain);
 
     assert.ok(skill.endpoints.length >= 2, `Expected >= 2 endpoints, got ${skill.endpoints.length}`);
 
-    // 3. Write and re-read skill file
+    // 3. Verify v0.2 features
+    assert.equal(skill.version, '1.1');
+    assert.equal(skill.provenance, 'unsigned');  // Before signing
+
+    // Sign the skill file
+    const key = deriveKey('test-machine-id');
+    skill = signSkillFile(skill, key);
+    assert.equal(skill.provenance, 'self');
+    assert.ok(skill.signature?.startsWith('hmac-sha256:'));
+
+    // Verify response previews are null by default
+    for (const ep of skill.endpoints) {
+      assert.equal(ep.examples.responsePreview, null, `Preview should be null for ${ep.id}`);
+    }
+
+    // 4. Write and re-read skill file
     await writeSkillFile(skill, testDir);
     const loaded = await readSkillFile(domain, testDir);
     assert.ok(loaded, 'Skill file should be readable');
     assert.equal(loaded!.endpoints.length, skill.endpoints.length);
+    assert.equal(loaded!.provenance, 'self');
 
-    // 4. Replay an endpoint
+    // 5. Replay an endpoint
     const itemsEndpoint = skill.endpoints.find(e => e.path === '/api/items');
     assert.ok(itemsEndpoint, 'Should have /api/items endpoint');
 

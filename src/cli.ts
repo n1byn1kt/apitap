@@ -2,6 +2,12 @@
 import { capture } from './capture/monitor.js';
 import { writeSkillFile, readSkillFile, listSkillFiles } from './skill/store.js';
 import { replayEndpoint } from './replay/engine.js';
+import { AuthManager, getMachineId } from './auth/manager.js';
+import { deriveKey } from './auth/crypto.js';
+import { signSkillFile } from './skill/signing.js';
+import { importSkillFile } from './skill/importer.js';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 interface ParsedArgs {
   command: string;
@@ -42,15 +48,24 @@ function printUsage(): void {
     apitap show <domain>       Show endpoints for a domain
     apitap replay <domain> <endpoint-id> [key=value...]
                                Replay an API endpoint
+    apitap import <file>       Import a skill file with safety validation
 
-  Options:
+  Capture options:
     --json                     Output machine-readable JSON
     --duration <seconds>       Stop capture after N seconds
     --port <port>              Connect to specific CDP port
     --launch                   Always launch a new browser
     --attach                   Only attach to existing browser
+    --all-domains              Capture traffic from all domains (default: target only)
+    --preview                  Include response data previews in skill files
+    --no-scrub                 Disable PII scrubbing
+
+  Import options:
+    --yes                      Skip confirmation prompt
   `.trim());
 }
+
+const APITAP_DIR = join(homedir(), '.apitap');
 
 async function handleCapture(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
   const url = positional[0];
@@ -65,7 +80,8 @@ async function handleCapture(positional: string[], flags: Record<string, string 
   const port = typeof flags.port === 'string' ? parseInt(flags.port, 10) : undefined;
 
   if (!json) {
-    console.log(`\n  🔍 Capturing ${url}...${duration ? ` (${duration}s)` : ' (Ctrl+C to stop)'}\n`);
+    const domainOnly = flags['all-domains'] !== true;
+    console.log(`\n  🔍 Capturing ${url}...${duration ? ` (${duration}s)` : ' (Ctrl+C to stop)'}${domainOnly ? ' [domain-only]' : ' [all domains]'}\n`);
   }
 
   let endpointCount = 0;
@@ -77,6 +93,9 @@ async function handleCapture(positional: string[], flags: Record<string, string 
     port,
     launch: flags.launch === true,
     attach: flags.attach === true,
+    allDomains: flags['all-domains'] === true,
+    enablePreview: flags.preview === true,
+    scrub: flags['no-scrub'] !== true,
     onEndpoint: (ep) => {
       endpointCount++;
       if (!json) {
@@ -88,11 +107,25 @@ async function handleCapture(positional: string[], flags: Record<string, string 
     },
   });
 
+  // Get machine ID for signing and auth storage
+  const machineId = await getMachineId();
+  const key = deriveKey(machineId);
+  const authManager = new AuthManager(APITAP_DIR, machineId);
+
   // Write skill files for each domain
   const written: string[] = [];
   for (const [domain, generator] of result.generators) {
-    const skill = generator.toSkillFile(domain);
+    let skill = generator.toSkillFile(domain);
     if (skill.endpoints.length > 0) {
+      // Store extracted auth
+      const extractedAuth = generator.getExtractedAuth();
+      if (extractedAuth.length > 0) {
+        await authManager.store(domain, extractedAuth[0]);
+      }
+
+      // Sign the skill file
+      skill = signSkillFile(skill, key);
+
       const path = await writeSkillFile(skill);
       written.push(path);
     }
@@ -137,7 +170,8 @@ async function handleList(flags: Record<string, string | boolean>): Promise<void
   console.log();
   for (const s of summaries) {
     const ago = timeAgo(s.capturedAt);
-    console.log(`  ${s.domain.padEnd(30)} ${String(s.endpointCount).padStart(3)} endpoints   ${ago}`);
+    const prov = s.provenance === 'self' ? '✓' : s.provenance === 'imported' ? '⬇' : '?';
+    console.log(`  ${prov} ${s.domain.padEnd(28)} ${String(s.endpointCount).padStart(3)} endpoints   ${ago}`);
   }
   console.log();
 }
@@ -162,11 +196,14 @@ async function handleShow(positional: string[], flags: Record<string, string | b
     return;
   }
 
-  console.log(`\n  ${skill.domain} — ${skill.endpoints.length} endpoints (captured ${timeAgo(skill.capturedAt)})\n`);
+  const provLabel = skill.provenance === 'self' ? 'signed ✓' : skill.provenance === 'imported' ? 'imported ⬇' : 'unsigned';
+  console.log(`\n  ${skill.domain} — ${skill.endpoints.length} endpoints (captured ${timeAgo(skill.capturedAt)}) [${provLabel}]\n`);
   for (const ep of skill.endpoints) {
     const shape = ep.responseShape.type;
     const fields = ep.responseShape.fields?.length ?? 0;
-    console.log(`  ${ep.method.padEnd(6)} ${ep.path.padEnd(35)} ${shape}${fields ? ` (${fields} fields)` : ''}`);
+    const hasAuth = Object.values(ep.headers).some(v => v === '[stored]');
+    const authBadge = hasAuth ? ' 🔑' : '';
+    console.log(`  ${ep.method.padEnd(6)} ${ep.path.padEnd(35)} ${shape}${fields ? ` (${fields} fields)` : ''}${authBadge}`);
   }
   console.log(`\n  Replay: apitap replay ${skill.domain} <endpoint-id>\n`);
 }
@@ -193,6 +230,26 @@ async function handleReplay(positional: string[], flags: Record<string, string |
     }
   }
 
+  // Merge stored auth into endpoint headers for replay
+  const machineId = await getMachineId();
+  const authManager = new AuthManager(APITAP_DIR, machineId);
+  const storedAuth = await authManager.retrieve(domain);
+
+  // Check for [stored] placeholders and warn if auth missing
+  const endpoint = skill.endpoints.find(e => e.id === endpointId);
+  if (endpoint) {
+    const hasStoredPlaceholder = Object.values(endpoint.headers).some(v => v === '[stored]');
+    if (hasStoredPlaceholder && !storedAuth) {
+      console.error(`Warning: Endpoint requires auth but no stored credentials found for "${domain}".`);
+      console.error(`  Run \`apitap capture ${domain}\` to capture fresh credentials.\n`);
+    }
+
+    // Inject stored auth into a copy of the skill for replay
+    if (storedAuth) {
+      endpoint.headers[storedAuth.header] = storedAuth.value;
+    }
+  }
+
   const result = await replayEndpoint(skill, endpointId, Object.keys(params).length > 0 ? params : undefined);
   const json = flags.json === true;
 
@@ -202,6 +259,37 @@ async function handleReplay(positional: string[], flags: Record<string, string |
     console.log(`\n  Status: ${result.status}\n`);
     console.log(JSON.stringify(result.data, null, 2));
     console.log();
+  }
+}
+
+async function handleImport(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const filePath = positional[0];
+  if (!filePath) {
+    console.error('Error: File path required. Usage: apitap import <file>');
+    process.exit(1);
+  }
+
+  const json = flags.json === true;
+
+  // Get local key for signature verification
+  const machineId = await getMachineId();
+  const key = deriveKey(machineId);
+
+  const result = await importSkillFile(filePath, undefined, key);
+
+  if (!result.success) {
+    if (json) {
+      console.log(JSON.stringify({ success: false, reason: result.reason }));
+    } else {
+      console.error(`Error: ${result.reason}`);
+    }
+    process.exit(1);
+  }
+
+  if (json) {
+    console.log(JSON.stringify({ success: true, skillFile: result.skillFile }));
+  } else {
+    console.log(`\n  ✓ Imported skill file: ${result.skillFile}\n`);
   }
 }
 
@@ -231,6 +319,9 @@ async function main(): Promise<void> {
       break;
     case 'replay':
       await handleReplay(positional, flags);
+      break;
+    case 'import':
+      await handleImport(positional, flags);
       break;
     default:
       printUsage();

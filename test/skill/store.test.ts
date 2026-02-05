@@ -1,0 +1,69 @@
+// test/skill/store.test.ts
+import { describe, it, beforeEach, afterEach } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { writeSkillFile, readSkillFile, listSkillFiles } from '../../src/skill/store.js';
+import type { SkillFile } from '../../src/types.js';
+
+const makeSkill = (domain: string): SkillFile => ({
+  version: '1.0',
+  domain,
+  capturedAt: '2026-02-04T12:00:00.000Z',
+  baseUrl: `https://${domain}`,
+  endpoints: [
+    {
+      id: 'get-api-data',
+      method: 'GET',
+      path: '/api/data',
+      queryParams: {},
+      headers: {},
+      responseShape: { type: 'array', fields: ['id', 'name'] },
+      examples: {
+        request: { url: `https://${domain}/api/data`, headers: {} },
+        responsePreview: [{ id: 1, name: 'test' }],
+      },
+    },
+  ],
+  metadata: { captureCount: 10, filteredCount: 8, toolVersion: '0.1.0' },
+});
+
+describe('skill store', () => {
+  let testDir: string;
+
+  beforeEach(async () => {
+    testDir = await mkdtemp(join(tmpdir(), 'apitap-test-'));
+  });
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true });
+  });
+
+  it('writes and reads a skill file', async () => {
+    const skill = makeSkill('example.com');
+    await writeSkillFile(skill, testDir);
+    const loaded = await readSkillFile('example.com', testDir);
+    assert.deepEqual(loaded, skill);
+  });
+
+  it('lists skill files', async () => {
+    await writeSkillFile(makeSkill('example.com'), testDir);
+    await writeSkillFile(makeSkill('api.github.com'), testDir);
+
+    const summaries = await listSkillFiles(testDir);
+    const domains = summaries.map(s => s.domain).sort();
+    assert.deepEqual(domains, ['api.github.com', 'example.com']);
+    assert.equal(summaries[0].endpointCount, 1);
+  });
+
+  it('returns null for non-existent skill file', async () => {
+    const result = await readSkillFile('nonexistent.com', testDir);
+    assert.equal(result, null);
+  });
+
+  it('returns empty list when no skill files exist', async () => {
+    const summaries = await listSkillFiles(testDir);
+    assert.deepEqual(summaries, []);
+  });
+});

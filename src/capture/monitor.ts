@@ -1,7 +1,8 @@
 // src/capture/monitor.ts
 import { chromium, type Browser, type Page } from 'playwright';
 import { shouldCapture } from './filter.js';
-import { SkillGenerator } from '../skill/generator.js';
+import { isDomainMatch } from './domain.js';
+import { SkillGenerator, type GeneratorOptions } from '../skill/generator.js';
 import type { CapturedExchange } from '../types.js';
 
 export interface CaptureOptions {
@@ -10,6 +11,9 @@ export interface CaptureOptions {
   launch?: boolean;
   attach?: boolean;
   duration?: number;
+  allDomains?: boolean;
+  enablePreview?: boolean;
+  scrub?: boolean;
   onEndpoint?: (endpoint: { id: string; method: string; path: string }) => void;
   onFiltered?: () => void;
 }
@@ -50,6 +54,14 @@ export async function capture(options: CaptureOptions): Promise<CaptureResult> {
   let totalRequests = 0;
   let filteredRequests = 0;
 
+  // Extract target domain for domain-only filtering
+  const targetUrl = options.url;
+
+  const generatorOptions: GeneratorOptions = {
+    enablePreview: options.enablePreview ?? false,
+    scrub: options.scrub ?? true,
+  };
+
   let page: Page;
   if (launched) {
     const context = await browser.newContext();
@@ -71,6 +83,16 @@ export async function capture(options: CaptureOptions): Promise<CaptureResult> {
     const status = response.status();
     const contentType = response.headers()['content-type'] ?? '';
 
+    // Domain-only filtering (before any other processing)
+    if (!options.allDomains) {
+      const hostname = safeHostname(url);
+      if (hostname && !isDomainMatch(hostname, targetUrl)) {
+        filteredRequests++;
+        options.onFiltered?.();
+        return;
+      }
+    }
+
     if (!shouldCapture({ url, status, contentType })) {
       filteredRequests++;
       const hostname = safeHostname(url);
@@ -87,7 +109,7 @@ export async function capture(options: CaptureOptions): Promise<CaptureResult> {
       const hostname = new URL(url).hostname;
 
       if (!generators.has(hostname)) {
-        generators.set(hostname, new SkillGenerator());
+        generators.set(hostname, new SkillGenerator(generatorOptions));
       }
       const gen = generators.get(hostname)!;
 

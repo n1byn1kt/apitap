@@ -44,6 +44,7 @@ describe('SkillGenerator', () => {
     const skill = gen.toSkillFile('api.example.com');
 
     assert.equal(skill.version, '1.1');
+    assert.equal(skill.provenance, 'unsigned');
     assert.equal(skill.domain, 'api.example.com');
     assert.equal(skill.endpoints.length, 2);
     assert.equal(skill.metadata.captureCount, 2);
@@ -133,8 +134,8 @@ describe('SkillGenerator', () => {
 
     const skill = gen.toSkillFile('example.com');
     const h = skill.endpoints[0].headers;
-    assert.equal(h['authorization'], 'Bearer tok123');
-    assert.equal(h['x-api-key'], 'key123');
+    assert.equal(h['authorization'], '[stored]');
+    assert.equal(h['x-api-key'], '[stored]');
     assert.equal(h['user-agent'], undefined);
     assert.equal(h['accept-encoding'], undefined);
   });
@@ -149,5 +150,95 @@ describe('SkillGenerator', () => {
     const skill = gen.toSkillFile('example.com');
     assert.equal(skill.metadata.filteredCount, 3);
     assert.equal(skill.metadata.captureCount, 1);
+  });
+
+  it('replaces auth headers with [stored] placeholder', () => {
+    const gen = new SkillGenerator();
+    gen.addExchange(mockExchange({
+      requestHeaders: {
+        'authorization': 'Bearer secret-token',
+        'x-api-key': 'secret-key',
+        'content-type': 'application/json',
+      },
+    }));
+
+    const skill = gen.toSkillFile('example.com');
+    const h = skill.endpoints[0].headers;
+    assert.equal(h['authorization'], '[stored]');
+    assert.equal(h['x-api-key'], '[stored]');
+    assert.equal(h['content-type'], 'application/json');
+
+    // Example headers should also be scrubbed
+    const exH = skill.endpoints[0].examples.request.headers;
+    assert.equal(exH['authorization'], '[stored]');
+    assert.equal(exH['x-api-key'], '[stored]');
+  });
+
+  it('exposes extracted auth credentials', () => {
+    const gen = new SkillGenerator();
+    gen.addExchange(mockExchange({
+      requestHeaders: {
+        'authorization': 'Bearer secret-token',
+      },
+    }));
+
+    const extracted = gen.getExtractedAuth();
+    assert.equal(extracted.length, 1);
+    assert.equal(extracted[0].type, 'bearer');
+    assert.equal(extracted[0].header, 'authorization');
+    assert.equal(extracted[0].value, 'Bearer secret-token');
+  });
+
+  it('omits responsePreview by default', () => {
+    const gen = new SkillGenerator();
+    gen.addExchange(mockExchange({
+      body: JSON.stringify([{ id: 1, name: 'test' }]),
+    }));
+
+    const skill = gen.toSkillFile('example.com');
+    assert.equal(skill.endpoints[0].examples.responsePreview, null);
+  });
+
+  it('includes responsePreview when enablePreview is true', () => {
+    const gen = new SkillGenerator({ enablePreview: true });
+    gen.addExchange(mockExchange({
+      body: JSON.stringify([{ id: 1, name: 'test' }]),
+    }));
+
+    const skill = gen.toSkillFile('example.com');
+    assert.deepEqual(skill.endpoints[0].examples.responsePreview, [{ id: 1, name: 'test' }]);
+  });
+
+  it('scrubs PII from query param examples', () => {
+    const gen = new SkillGenerator();
+    gen.addExchange(mockExchange({
+      url: 'https://example.com/api/search?email=john@test.com&limit=10',
+    }));
+
+    const skill = gen.toSkillFile('example.com');
+    const params = skill.endpoints[0].queryParams;
+    assert.equal(params['email'].example, '[email]');
+    assert.equal(params['limit'].example, '10');
+  });
+
+  it('scrubs PII from example request URL', () => {
+    const gen = new SkillGenerator();
+    gen.addExchange(mockExchange({
+      url: 'https://example.com/api/users/john@test.com/profile',
+    }));
+
+    const skill = gen.toSkillFile('example.com');
+    assert.ok(skill.endpoints[0].examples.request.url.includes('[email]'));
+    assert.ok(!skill.endpoints[0].examples.request.url.includes('john@test.com'));
+  });
+
+  it('skips PII scrubbing when scrub is false', () => {
+    const gen = new SkillGenerator({ scrub: false });
+    gen.addExchange(mockExchange({
+      url: 'https://example.com/api/search?email=john@test.com',
+    }));
+
+    const skill = gen.toSkillFile('example.com');
+    assert.equal(skill.endpoints[0].queryParams['email'].example, 'john@test.com');
   });
 });

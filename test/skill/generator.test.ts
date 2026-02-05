@@ -43,7 +43,7 @@ describe('SkillGenerator', () => {
 
     const skill = gen.toSkillFile('api.example.com');
 
-    assert.equal(skill.version, '1.0');
+    assert.equal(skill.version, '1.1');
     assert.equal(skill.domain, 'api.example.com');
     assert.equal(skill.endpoints.length, 2);
     assert.equal(skill.metadata.captureCount, 2);

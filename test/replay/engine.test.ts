@@ -35,7 +35,7 @@ describe('replayEndpoint', () => {
 
   function makeSkill(): SkillFile {
     return {
-      version: '1.0',
+      version: '1.1',
       domain: 'localhost',
       capturedAt: '2026-02-04T12:00:00.000Z',
       baseUrl,
@@ -65,7 +65,8 @@ describe('replayEndpoint', () => {
           },
         },
       ],
-      metadata: { captureCount: 2, filteredCount: 0, toolVersion: '0.1.0' },
+      metadata: { captureCount: 2, filteredCount: 0, toolVersion: '0.2.0' },
+      provenance: 'unsigned',
     };
   }
 

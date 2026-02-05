@@ -8,7 +8,7 @@ import { writeSkillFile, readSkillFile, listSkillFiles } from '../../src/skill/s
 import type { SkillFile } from '../../src/types.js';
 
 const makeSkill = (domain: string): SkillFile => ({
-  version: '1.0',
+  version: '1.1',
   domain,
   capturedAt: '2026-02-04T12:00:00.000Z',
   baseUrl: `https://${domain}`,
@@ -26,7 +26,8 @@ const makeSkill = (domain: string): SkillFile => ({
       },
     },
   ],
-  metadata: { captureCount: 10, filteredCount: 8, toolVersion: '0.1.0' },
+  metadata: { captureCount: 10, filteredCount: 8, toolVersion: '0.2.0' },
+  provenance: 'unsigned',
 });
 
 describe('skill store', () => {

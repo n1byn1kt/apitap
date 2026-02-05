@@ -121,7 +121,7 @@ export class SkillGenerator {
   /** Generate the complete skill file for a domain. */
   toSkillFile(domain: string): SkillFile {
     return {
-      version: '1.0',
+      version: '1.1',
       domain,
       capturedAt: new Date().toISOString(),
       baseUrl: this.baseUrl ?? `https://${domain}`,
@@ -129,8 +129,9 @@ export class SkillGenerator {
       metadata: {
         captureCount: this.captureCount,
         filteredCount: this.filteredCount,
-        toolVersion: '0.1.0',
+        toolVersion: '0.2.0',
       },
+      provenance: 'unsigned' as const,
     };
   }
 }

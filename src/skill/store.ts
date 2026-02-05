@@ -53,6 +53,7 @@ export async function listSkillFiles(
         skillFile: join(skillsDir, file),
         endpointCount: skill.endpoints.length,
         capturedAt: skill.capturedAt,
+        provenance: skill.provenance ?? 'unsigned',
       });
     }
   }

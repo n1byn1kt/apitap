@@ -16,6 +16,13 @@ export interface CapturedExchange {
   timestamp: string;
 }
 
+/** Stored auth credentials for a domain */
+export interface StoredAuth {
+  type: 'bearer' | 'api-key' | 'cookie' | 'custom';
+  header: string;
+  value: string;
+}
+
 /** A single API endpoint in a skill file */
 export interface SkillEndpoint {
   id: string;
@@ -42,6 +49,8 @@ export interface SkillFile {
     filteredCount: number;
     toolVersion: string;
   };
+  provenance: 'self' | 'imported' | 'unsigned';
+  signature?: string;
 }
 
 /** Summary returned by `apitap list` */
@@ -50,4 +59,5 @@ export interface SkillSummary {
   skillFile: string;
   endpointCount: number;
   capturedAt: string;
+  provenance: 'self' | 'imported' | 'unsigned';
 }

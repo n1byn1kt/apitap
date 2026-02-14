@@ -1,0 +1,26 @@
+// src/index.ts
+export { capture, type CaptureOptions, type CaptureResult } from './capture/monitor.js';
+export { shouldCapture } from './capture/filter.js';
+export { isBlocklisted } from './capture/blocklist.js';
+export { isDomainMatch } from './capture/domain.js';
+export { scrubPII } from './capture/scrubber.js';
+export { SkillGenerator } from './skill/generator.js';
+export { writeSkillFile, readSkillFile, listSkillFiles } from './skill/store.js';
+export { signSkillFile, verifySignature } from './skill/signing.js';
+export { validateImport, importSkillFile } from './skill/importer.js';
+export { validateUrl, validateSkillFileUrls, resolveAndValidateUrl, resolveAndValidateSkillFileUrls } from './skill/ssrf.js';
+export { replayEndpoint, type ReplayResult } from './replay/engine.js';
+export { peek, read, type PeekOptions, type ReadOptions } from './read/index.js';
+export type { PeekResult, ReadResult, Decoder } from './read/types.js';
+export { AuthManager, getMachineId } from './auth/manager.js';
+export { parameterizePath, cleanFrameworkPath } from './capture/parameterize.js';
+export { detectPagination } from './capture/pagination.js';
+export { verifyEndpoints } from './capture/verifier.js';
+export { IdleTracker } from './capture/idle.js';
+export { isPathNoise } from './capture/filter.js';
+export { searchSkills, type SearchResult, type SearchResponse } from './skill/search.js';
+export { createPlugin, type Plugin, type ToolDefinition, type PluginOptions } from './plugin.js';
+export { shannonEntropy, isLikelyToken, parseJwtClaims, type TokenClassification, type JwtClaims } from './capture/entropy.js';
+export { isOAuthTokenRequest, type OAuthInfo } from './capture/oauth-detector.js';
+export { CaptureSession, type SessionOptions, type InteractionAction } from './capture/session.js';
+export type { SkillFile, SkillEndpoint, SkillSummary, CapturedExchange, StoredAuth, OAuthConfig, Replayability, PaginationInfo, PageSnapshot, PageElement, InteractionResult, FinishResult } from './types.js';

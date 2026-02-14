@@ -1,0 +1,60 @@
+Business Source License 1.1
+
+Parameters
+Licensor: ApiTap Contributors
+Licensed Work: ApiTap
+Change Date: February 7, 2029
+Change License: Apache License 2.0
+
+Notice
+
+Business Source License 1.1
+
+This Business Source License (this "License") is not an Open Source license.
+However, the Licensed Work will eventually be made available under an Open Source License, as stated in this License.
+
+License text Copyright (c) 2023 Hashicorp, Inc. "Business Source License" is a trademark of Hashicorp, Inc.
+
+---
+
+Terms
+
+The Licensor hereby grants you the right to copy, modify, create derivative works, and distribute the Licensed Work. However, if you receive the Licensed Work from Licensor and you do not have a license agreement with Licensor for the Licensed Work, then your rights under this License will end on the earlier of: (i) the date such proprietary rights notice is first received by you, or (ii) the Change Date.
+
+Violation of Licensor's intellectual property rights (including patent, trademark, and/or trade secret) is prohibited.
+
+You are granted a personal, non-exclusive, non-transferable license to use the Licensed Work in a non-competing manner.
+
+Restrictions:
+1. **No Competing Commercial Use:** You may not offer the Licensed Work as a commercial service that competes with a hosting or software-as-a-service offering by Licensor or any of its affiliates.
+
+   Non-competing uses include:
+   - Self-hosted deployment for your own use
+   - Internal company deployment
+   - Open source forks and contributions
+   - Academic or non-profit use
+   - Educational use
+   - Research use
+
+   Competing uses include (prohibited until Change Date):
+   - Offering hosted/cloud ApiTap as a service
+   - Rebranding ApiTap and selling it
+   - Providing ApiTap services to third parties for commercial gain
+
+2. **Patent Rights:** Licensor grants you a license to any patent rights controlled by Licensor that are necessarily infringed by the Licensed Work as provided in source code form.
+
+3. **Open Source Exceptions:** The restrictions in Section 1 do not apply to any fork or modification that is properly made available under an Open Source License as defined by the Open Source Initiative (www.opensource.org), provided that you make the source code of any such fork publicly available.
+
+4. **No Other Rights:** Except as expressly stated herein, Licensor retains all right, title, and interest in the Licensed Work.
+
+---
+
+Change Date
+
+On the Change Date (February 7, 2029), or if earlier, upon the occurrence of an event specified by Licensor, the Licensed Work automatically converts to the Change License, which is the Apache License 2.0. At that time, the restrictions in Section 1 will no longer apply, and the Licensed Work will be available under Apache License 2.0.
+
+---
+
+Disclaimer of Warranties
+
+The Licensed Work is provided "AS-IS" without warranty of any kind, express, implied, or statutory, including but not limited to warranties of merchantability, fitness for a particular purpose, and non-infringement. In no event shall Licensor be liable for any indirect, incidental, special, exemplary, or consequential damages.

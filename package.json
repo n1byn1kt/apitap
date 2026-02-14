@@ -1,0 +1,58 @@
+{
+  "name": "apitap",
+  "version": "1.0.0",
+  "description": "Intercept web API traffic during browsing. Generate portable skill files so AI agents can call APIs directly instead of scraping.",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "apitap": "dist/cli.js",
+    "apitap-mcp": "dist/mcp.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts",
+    "test": "node --import tsx --test 'test/**/*.test.ts'",
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "BSL-1.1",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/n1byn1kt/apitap.git"
+  },
+  "homepage": "https://github.com/n1byn1kt/apitap#readme",
+  "bugs": {
+    "url": "https://github.com/n1byn1kt/apitap/issues"
+  },
+  "author": "ApiTap Contributors",
+  "keywords": [
+    "api",
+    "interception",
+    "ai-agent",
+    "mcp",
+    "browser-automation",
+    "web-scraping",
+    "playwright",
+    "skill-file",
+    "api-discovery"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist/",
+    "src/",
+    "LICENSE",
+    "README.md",
+    "SKILL.md"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "playwright": "^1.58.1",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "^25.2.0",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

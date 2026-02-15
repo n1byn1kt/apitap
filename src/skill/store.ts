@@ -46,14 +46,34 @@ export async function writeSkillFile(
 export async function readSkillFile(
   domain: string,
   skillsDir: string = DEFAULT_SKILLS_DIR,
+  options?: { verifySignature?: boolean; signingKey?: Buffer }
 ): Promise<SkillFile | null> {
   // Validate domain before file I/O — path traversal should throw, not return null
   const path = skillPath(domain, skillsDir);
   try {
     const content = await readFile(path, 'utf-8');
-    return JSON.parse(content) as SkillFile;
-  } catch {
-    return null;
+    const skill = JSON.parse(content) as SkillFile;
+
+    // If verification requested, check signature
+    if (options?.verifySignature && options.signingKey) {
+      if (skill.provenance === 'imported') {
+        // Imported files had foreign signature stripped — can't verify, warn only
+        // Future: re-sign on import with local key
+      } else if (!skill.signature) {
+        // No signature present on non-imported file
+        throw new Error(`Skill file for ${domain} has no signature — file may be tampered`);
+      } else {
+        const { verifySignature } = await import('./signing.js');
+        if (!verifySignature(skill, options.signingKey)) {
+          throw new Error(`Skill file signature verification failed for ${domain} — file may be tampered`);
+        }
+      }
+    }
+
+    return skill;
+  } catch (e: unknown) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    throw e;
   }
 }
 

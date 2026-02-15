@@ -7,6 +7,26 @@ import { refreshTokens } from '../auth/refresh.js';
 import { truncateResponse } from './truncate.js';
 import { resolveAndValidateUrl } from '../skill/ssrf.js';
 
+// Header security: prevent header injection from skill files
+const ALLOWED_SKILL_HEADERS = new Set([
+  'accept', 'accept-language', 'accept-encoding',
+  'content-type', 'content-length',
+  'x-requested-with', 'x-api-key',
+  'origin', 'referer',
+  'user-agent',
+  // Auth headers are injected separately from encrypted storage, not from skill file
+]);
+
+const BLOCKED_HEADERS = new Set([
+  'host', 'x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto',
+  'x-real-ip', 'forwarded', 'via',
+  'cookie', 'set-cookie',
+  'authorization',  // Must come from auth manager, not skill file
+  'proxy-authorization',
+  'transfer-encoding', 'te', 'trailer',
+  'connection', 'upgrade',
+]);
+
 export interface ReplayOptions {
   /** User-provided parameters for path, query, and body substitution */
   params?: Record<string, string>;
@@ -166,17 +186,43 @@ export async function replayEndpoint(
     }
   }
 
-  // SSRF validation — block requests to private/internal IPs
+  // SSRF validation — block requests to private/internal IPs and get resolved URL
+  let fetchUrl = url.toString();
   if (!options._skipSsrfCheck) {
     const ssrfCheck = await resolveAndValidateUrl(url.toString());
     if (!ssrfCheck.safe) {
       throw new Error(`SSRF blocked: ${ssrfCheck.reason}`);
+    }
+    // Use resolved IP to prevent DNS rebinding
+    if (ssrfCheck.resolvedUrl) {
+      fetchUrl = ssrfCheck.resolvedUrl;
     }
   }
 
   // Prepare request body if present
   let body: string | undefined;
   const headers = { ...endpoint.headers };
+
+  // Filter headers from skill file — block dangerous headers
+  for (const key of Object.keys(headers)) {
+    const lower = key.toLowerCase();
+    if (BLOCKED_HEADERS.has(lower) || (!ALLOWED_SKILL_HEADERS.has(lower) && !lower.startsWith('x-'))) {
+      delete headers[key];
+    }
+  }
+
+  // If using DNS-pinned URL, preserve original Host header
+  if (fetchUrl !== url.toString()) {
+    headers['host'] = url.hostname;
+  }
+
+  // Inject auth header from auth manager (if available)
+  if (authManager && domain) {
+    const auth = await authManager.retrieve(domain);
+    if (auth && auth.header && auth.value) {
+      headers[auth.header] = auth.value;
+    }
+  }
 
   if (endpoint.requestBody) {
     let processedBody = endpoint.requestBody.template;
@@ -253,12 +299,39 @@ export async function replayEndpoint(
     }
   }
 
-  const response = await fetch(url.toString(), {
+  let response = await fetch(fetchUrl, {
     method: endpoint.method,
     headers,
     body,
     signal: AbortSignal.timeout(30_000),
+    redirect: 'manual',  // Don't auto-follow redirects
   });
+
+  // Handle redirects with SSRF validation (single hop only)
+  if (response.status >= 300 && response.status < 400) {
+    const location = response.headers.get('location');
+    if (location) {
+      const redirectUrl = new URL(location, url);
+      let redirectFetchUrl = redirectUrl.toString();
+      if (!options._skipSsrfCheck) {
+        const redirectCheck = await resolveAndValidateUrl(redirectUrl.toString());
+        if (!redirectCheck.safe) {
+          throw new Error(`Redirect blocked (SSRF): ${redirectCheck.reason}`);
+        }
+        if (redirectCheck.resolvedUrl) {
+          redirectFetchUrl = redirectCheck.resolvedUrl;
+          headers['host'] = redirectUrl.hostname;
+        }
+      }
+      // Follow the redirect manually (single hop to prevent chains)
+      response = await fetch(redirectFetchUrl, {
+        method: 'GET',  // Redirects typically become GET
+        headers,  // Forward headers (already filtered)
+        signal: AbortSignal.timeout(30_000),
+        redirect: 'manual',  // Prevent chaining
+      });
+    }
+  }
 
   // Reactive: retry on 401/403 if we haven't already refreshed
   if (
@@ -277,12 +350,38 @@ export async function replayEndpoint(
       }
 
       // Retry the request
-      const retryResponse = await fetch(url.toString(), {
+      let retryResponse = await fetch(fetchUrl, {
         method: endpoint.method,
         headers,
         body,
         signal: AbortSignal.timeout(30_000),
+        redirect: 'manual',
       });
+
+      // Handle redirects on retry (single hop)
+      if (retryResponse.status >= 300 && retryResponse.status < 400) {
+        const location = retryResponse.headers.get('location');
+        if (location) {
+          const redirectUrl = new URL(location, url);
+          let retryRedirectFetchUrl = redirectUrl.toString();
+          if (!options._skipSsrfCheck) {
+            const redirectCheck = await resolveAndValidateUrl(redirectUrl.toString());
+            if (!redirectCheck.safe) {
+              throw new Error(`Redirect blocked (SSRF): ${redirectCheck.reason}`);
+            }
+            if (redirectCheck.resolvedUrl) {
+              retryRedirectFetchUrl = redirectCheck.resolvedUrl;
+              headers['host'] = redirectUrl.hostname;
+            }
+          }
+          retryResponse = await fetch(retryRedirectFetchUrl, {
+            method: 'GET',
+            headers,
+            signal: AbortSignal.timeout(30_000),
+            redirect: 'manual',
+          });
+        }
+      }
 
       const retryHeaders: Record<string, string> = {};
       retryResponse.headers.forEach((value, key) => {

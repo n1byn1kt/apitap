@@ -5,6 +5,9 @@ import type { SkillFile } from '../types.js';
 export interface ValidationResult {
   safe: boolean;
   reason?: string;
+  resolvedUrl?: string;
+  resolvedIp?: string;
+  originalHost?: string;
 }
 
 const INTERNAL_HOSTNAMES = ['localhost'];
@@ -170,12 +173,20 @@ export async function resolveAndValidateUrl(urlString: string): Promise<Validati
     if (privateReason) {
       return { safe: false, reason: `DNS rebinding: ${hostname} resolves to ${address} (${privateReason})` };
     }
+
+    // Return the resolved URL with IP pinned to prevent DNS rebinding
+    const pinnedUrl = new URL(urlString);
+    pinnedUrl.hostname = address;
+    return {
+      safe: true,
+      resolvedUrl: pinnedUrl.toString(),
+      resolvedIp: address,
+      originalHost: hostname
+    };
   } catch {
     // DNS resolution failed — hostname doesn't exist
     return { safe: false, reason: `DNS resolution failed for ${hostname}` };
   }
-
-  return { safe: true };
 }
 
 /**

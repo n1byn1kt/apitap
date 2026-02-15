@@ -67,6 +67,7 @@ export async function refreshOAuth(
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: body.toString(),
+      signal: AbortSignal.timeout(15_000),  // 15s timeout for token refresh
     });
 
     if (!response.ok) {

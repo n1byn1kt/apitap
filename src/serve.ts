@@ -75,6 +75,8 @@ export function buildServeTools(skill: SkillFile): ServeTool[] {
 export interface ServeOptions {
   skillsDir?: string;
   noAuth?: boolean;
+  /** @internal Skip SSRF validation — for testing only */
+  _skipSsrfCheck?: boolean;
 }
 
 /**
@@ -158,6 +160,7 @@ export async function createServeServer(
             params,
             authManager,
             domain,
+            _skipSsrfCheck: options._skipSsrfCheck,
           });
 
           return {

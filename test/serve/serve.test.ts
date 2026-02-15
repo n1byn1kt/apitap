@@ -142,7 +142,7 @@ describe('createServeServer', () => {
       examples: { request: { url: `${baseUrl}/trending`, headers: {} }, responsePreview: null },
     }]), testDir);
 
-    const server = await createServeServer('test-api.example.com', { skillsDir: testDir, noAuth: true });
+    const server = await createServeServer('test-api.example.com', { skillsDir: testDir, noAuth: true, _skipSsrfCheck: true });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     client = new Client({ name: 'test-client', version: '1.0.0' });
     await server.connect(serverTransport);

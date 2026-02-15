@@ -187,7 +187,7 @@ describe('apitap_replay tool execute', () => {
   });
 
   it('replays a green endpoint and returns data', async () => {
-    const plugin = createPlugin({ skillsDir: testDir });
+    const plugin = createPlugin({ skillsDir: testDir, _skipSsrfCheck: true });
     const replay = plugin.tools.find(t => t.name === 'apitap_replay')!;
     const result: any = await replay.execute({
       domain: 'test-api.example.com',

@@ -269,14 +269,45 @@ Imported files are re-signed with your local key and marked with `imported` prov
 
 ## Security
 
+ApiTap handles untrusted skill files from the internet and replays HTTP requests on your behalf. That's a high-trust position, and we treat it seriously.
+
+### Defense in Depth
+
 - **Auth encryption** — AES-256-GCM with PBKDF2 key derivation, keyed to your machine
 - **PII scrubbing** — Emails, phones, IPs, credit cards, SSNs detected and redacted during capture
-- **SSRF protection** — URL validation with DNS rebinding protection blocks private IPs and internal hostnames
-- **Skill signing** — HMAC-SHA256 signatures detect tampering; three-state provenance (self/imported/unsigned)
+- **SSRF protection** — Multi-layer URL validation blocks access to internal networks (see below)
+- **Header injection protection** — Allowlist prevents skill files from injecting dangerous HTTP headers (`Host`, `X-Forwarded-For`, `Cookie`, `Authorization`)
+- **Redirect validation** — Manual redirect handling with SSRF re-check prevents redirect-to-internal-IP attacks
+- **DNS rebinding prevention** — Resolved IPs are pinned to prevent TOCTOU attacks where DNS returns different IPs on second lookup
+- **Skill signing** — HMAC-SHA256 signatures detect tampering; three-state provenance tracking (self/imported/unsigned)
 - **No phone-home** — Everything runs locally. No external services, no telemetry
 - **Read-only capture** — Playwright intercepts responses only. No request modification or code injection
 
-See [docs/security-audit-v1.md](./docs/security-audit-v1.md) for the full security audit.
+### Why SSRF Protection Matters
+
+Since skill files can come from anywhere — shared by colleagues, downloaded from GitHub, or imported from untrusted sources — a malicious skill file is the primary threat vector. Here's what ApiTap defends against:
+
+**The attack:** An attacker crafts a skill file with `baseUrl: "http://169.254.169.254"` (the AWS/cloud metadata endpoint) or `baseUrl: "http://localhost:8080"` (your internal services). When you replay an endpoint, your machine makes the request, potentially leaking cloud credentials or hitting internal APIs.
+
+**The defense:** ApiTap validates every URL at multiple points:
+
+```
+Skill file imported
+  → validateUrl(): block private IPs, internal hostnames, non-HTTP schemes
+  → validateSkillFileUrls(): scan baseUrl + all endpoint example URLs
+
+Endpoint replayed
+  → resolveAndValidateUrl(): DNS lookup + verify resolved IP isn't private
+  → IP pinning: fetch uses resolved IP directly (prevents DNS rebinding)
+  → Header filtering: strip dangerous headers from skill file
+  → Redirect check: if server redirects, validate new target before following
+```
+
+**Blocked ranges:** `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16` (cloud metadata), `0.0.0.0`, IPv6 equivalents (`::1`, `fe80::/10`, `fc00::/7`, `::ffff:` mapped addresses), `localhost`, `.local`, `.internal`, `file://`, `javascript:` schemes.
+
+This is especially relevant now that [MCP servers are being used as attack vectors in the wild](https://cloud.google.com/blog/topics/threat-intelligence/distillation-experimentation-integration-ai-adversarial-use) — Google's Threat Intelligence Group recently documented underground toolkits built on compromised MCP servers. ApiTap is designed to be safe even when processing untrusted inputs.
+
+See [docs/security-audit-v1.md](./docs/security-audit-v1.md) for the full security audit (19 findings, current posture 9/10).
 
 ## CLI Reference
 

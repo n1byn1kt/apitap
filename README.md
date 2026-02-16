@@ -1,6 +1,6 @@
 # ApiTap
 
-[![npm version](https://badge.fury.io/js/apitap.svg)](https://www.npmjs.com/package/apitap)
+[![npm version](https://badge.fury.io/js/@apitap/core.svg)](https://www.npmjs.com/package/@apitap/core)
 [![tests](https://img.shields.io/badge/tests-721%20passing-brightgreen)](https://github.com/n1byn1kt/apitap)
 [![license](https://img.shields.io/badge/license-BSL--1.1-blue)](./LICENSE)
 
@@ -45,7 +45,7 @@ Replay:   Agent → Replay Engine (skill.json) → fetch() → API → JSON resp
 ## Install
 
 ```bash
-npm install -g apitap
+npm install -g @apitap/core
 ```
 
 Requires Node.js 20+. Playwright browsers are installed automatically on first capture.

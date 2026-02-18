@@ -46,9 +46,10 @@ Replay:   Agent → Replay Engine (skill.json) → fetch() → API → JSON resp
 
 ```bash
 npm install -g @apitap/core
+npx playwright install chromium
 ```
 
-Requires Node.js 20+. Playwright browsers are installed automatically on first capture.
+Requires Node.js 20+. The second command installs the Chromium browser needed for `capture` and `browse`. The `read`/`peek`/`discover` tools work without it.
 
 ## Quick Start
 
@@ -179,14 +180,31 @@ ApiTap includes an MCP server with 12 tools for Claude Desktop, Cursor, Windsurf
 apitap-mcp
 ```
 
-Add to your MCP config (e.g. `claude_desktop_config.json`):
+**Claude Code:**
+
+```bash
+claude mcp add -s user apitap -- apitap-mcp
+```
+
+**Claude Desktop / Cursor / Windsurf** — add to your MCP config:
 
 ```json
 {
   "mcpServers": {
     "apitap": {
-      "command": "npx",
-      "args": ["apitap-mcp"]
+      "command": "apitap-mcp"
+    }
+  }
+}
+```
+
+**VS Code (GitHub Copilot)** — add `.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "apitap": {
+      "command": "apitap-mcp"
     }
   }
 }

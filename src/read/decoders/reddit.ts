@@ -47,7 +47,47 @@ export const redditDecoder: Decoder = {
   },
 };
 
-function decodePostPage(url: string, data: any[]): ReadResult | null {
+/**
+ * Recover deleted/removed Reddit comments via PullPush archive.
+ * PullPush indexes Reddit comments continuously; deleted content
+ * may still be available if it was captured before deletion.
+ */
+async function recoverDeletedComments(
+  commentIds: string[],
+): Promise<Map<string, { author: string; body: string }>> {
+  const recovered = new Map<string, { author: string; body: string }>();
+  if (commentIds.length === 0) return recovered;
+
+  try {
+    const ids = commentIds.join(',');
+    const ppUrl = `https://api.pullpush.io/reddit/search/comment/?ids=${ids}`;
+    const response = await fetch(ppUrl, {
+      headers: { 'user-agent': 'apitap/1.0 (deleted comment recovery)' },
+      signal: AbortSignal.timeout(5_000),
+    });
+
+    if (!response.ok) return recovered;
+
+    const result = await response.json() as any;
+    const data = result?.data;
+    if (!Array.isArray(data)) return recovered;
+
+    for (const comment of data) {
+      if (comment.id && comment.body && comment.body !== '[deleted]' && comment.body !== '[removed]') {
+        recovered.set(comment.id, {
+          author: comment.author || '[deleted]',
+          body: comment.body,
+        });
+      }
+    }
+  } catch {
+    // PullPush unavailable — silently skip recovery
+  }
+
+  return recovered;
+}
+
+async function decodePostPage(url: string, data: any[]): Promise<ReadResult | null> {
   try {
     const postData = data[0]?.data?.children?.[0]?.data;
     if (!postData) return null;
@@ -60,17 +100,43 @@ function decodePostPage(url: string, data: any[]): ReadResult | null {
 
     // Extract comments
     const commentChildren = data[1]?.data?.children || [];
-    const comments = commentChildren
+    let comments = commentChildren
       .filter((c: any) => c.kind === 't1' && c.data)
       .slice(0, 25)
       .map((c: any) => ({
+        id: c.data.id || '',
         author: c.data.author || '[deleted]',
         body: c.data.body || '',
         score: c.data.score ?? 0,
       }));
 
+    // Recover deleted/removed comments via PullPush archive
+    const deletedComments = comments.filter(
+      (c: any) => (c.body === '[deleted]' || c.body === '[removed]') && c.id
+    );
+    if (deletedComments.length > 0) {
+      const recovered = await recoverDeletedComments(deletedComments.map((c: any) => c.id));
+      if (recovered.size > 0) {
+        comments = comments.map((c: any) => {
+          const original = recovered.get(c.id);
+          if (original) {
+            return {
+              ...c,
+              author: original.author || c.author,
+              body: original.body,
+              recovered: true,
+            };
+          }
+          return c;
+        });
+      }
+    }
+
     const commentText = comments
-      .map((c: any) => `${c.author} (${c.score} pts): ${c.body}`)
+      .map((c: any) => {
+        const prefix = c.recovered ? '[recovered] ' : '';
+        return `${prefix}${c.author} (${c.score} pts): ${c.body}`;
+      })
       .join('\n\n');
 
     const content = selftext

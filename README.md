@@ -1,6 +1,6 @@
 # ApiTap
 
-[![npm version](https://badge.fury.io/js/@apitap/core.svg)](https://www.npmjs.com/package/@apitap/core)
+[![npm version](https://img.shields.io/npm/v/@apitap/core)](https://www.npmjs.com/package/@apitap/core)
 [![tests](https://img.shields.io/badge/tests-721%20passing-brightgreen)](https://github.com/n1byn1kt/apitap)
 [![license](https://img.shields.io/badge/license-BSL--1.1-blue)](./LICENSE)
 

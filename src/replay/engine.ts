@@ -186,16 +186,15 @@ export async function replayEndpoint(
     }
   }
 
-  // SSRF validation — block requests to private/internal IPs and get resolved URL
-  let fetchUrl = url.toString();
+  // SSRF validation — resolve DNS and check the IP isn't private/internal.
+  // We do NOT substitute the IP into the URL because that breaks TLS/SNI
+  // for sites behind CDNs (Cloudflare, etc.) where the cert is for the hostname.
+  // The DNS check still prevents rebinding attacks by validating at request time.
+  const fetchUrl = url.toString();
   if (!options._skipSsrfCheck) {
     const ssrfCheck = await resolveAndValidateUrl(url.toString());
     if (!ssrfCheck.safe) {
       throw new Error(`SSRF blocked: ${ssrfCheck.reason}`);
-    }
-    // Use resolved IP to prevent DNS rebinding
-    if (ssrfCheck.resolvedUrl) {
-      fetchUrl = ssrfCheck.resolvedUrl;
     }
   }
 
@@ -209,11 +208,6 @@ export async function replayEndpoint(
     if (BLOCKED_HEADERS.has(lower) || (!ALLOWED_SKILL_HEADERS.has(lower) && !lower.startsWith('x-'))) {
       delete headers[key];
     }
-  }
-
-  // If using DNS-pinned URL, preserve original Host header
-  if (fetchUrl !== url.toString()) {
-    headers['host'] = url.hostname;
   }
 
   // Inject auth header from auth manager (if available)
@@ -312,15 +306,11 @@ export async function replayEndpoint(
     const location = response.headers.get('location');
     if (location) {
       const redirectUrl = new URL(location, url);
-      let redirectFetchUrl = redirectUrl.toString();
+      const redirectFetchUrl = redirectUrl.toString();
       if (!options._skipSsrfCheck) {
         const redirectCheck = await resolveAndValidateUrl(redirectUrl.toString());
         if (!redirectCheck.safe) {
           throw new Error(`Redirect blocked (SSRF): ${redirectCheck.reason}`);
-        }
-        if (redirectCheck.resolvedUrl) {
-          redirectFetchUrl = redirectCheck.resolvedUrl;
-          headers['host'] = redirectUrl.hostname;
         }
       }
       // Follow the redirect manually (single hop to prevent chains)
@@ -363,15 +353,11 @@ export async function replayEndpoint(
         const location = retryResponse.headers.get('location');
         if (location) {
           const redirectUrl = new URL(location, url);
-          let retryRedirectFetchUrl = redirectUrl.toString();
+          const retryRedirectFetchUrl = redirectUrl.toString();
           if (!options._skipSsrfCheck) {
             const redirectCheck = await resolveAndValidateUrl(redirectUrl.toString());
             if (!redirectCheck.safe) {
               throw new Error(`Redirect blocked (SSRF): ${redirectCheck.reason}`);
-            }
-            if (redirectCheck.resolvedUrl) {
-              retryRedirectFetchUrl = redirectCheck.resolvedUrl;
-              headers['host'] = redirectUrl.hostname;
             }
           }
           retryResponse = await fetch(retryRedirectFetchUrl, {

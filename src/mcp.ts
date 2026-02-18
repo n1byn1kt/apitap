@@ -605,7 +605,8 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
 // Only start when run directly (not imported for testing)
 const isMainModule = process.argv[1] && (
   process.argv[1].endsWith('/mcp.ts') ||
-  process.argv[1].endsWith('/mcp.js')
+  process.argv[1].endsWith('/mcp.js') ||
+  process.argv[1].endsWith('/apitap-mcp')
 );
 
 if (isMainModule) {

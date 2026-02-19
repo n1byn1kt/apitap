@@ -18,6 +18,28 @@ import { join } from 'node:path';
 
 const APITAP_DIR = join(homedir(), '.apitap');
 
+/**
+ * Wrap response data with external content metadata.
+ * MCP clients that respect this can apply security wrappers (e.g., SECURITY NOTICE).
+ * Tier classification is about replay success, not content trustworthiness —
+ * all external API data should be marked as untrusted.
+ */
+function wrapExternalContent(data: unknown, source: string) {
+  return {
+    content: [{ 
+      type: 'text' as const, 
+      text: JSON.stringify(data),
+    }],
+    // MCP extension: mark as external untrusted content
+    _meta: {
+      externalContent: {
+        untrusted: true,
+        source,
+      },
+    },
+  };
+}
+
 export interface McpServerOptions {
   skillsDir?: string;
   /** @internal Skip SSRF check in replay — for testing only */
@@ -179,8 +201,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
         const cached = sessionCache.get(domain);
         const fromCache = !cached || cached.source === 'disk';
 
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify({
+        return wrapExternalContent({
             status: result.status,
             data: result.data,
             domain,
@@ -190,8 +211,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
             capturedAt: skill.capturedAt,
             ...(result.refreshed ? { refreshed: result.refreshed } : {}),
             ...(result.truncated ? { truncated: true } : {}),
-          }) }],
-        };
+          }, 'apitap_replay');
       } catch (err: any) {
         return {
           content: [{ type: 'text' as const, text: `Replay failed: ${err.message}` }],
@@ -231,9 +251,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
         params: r.params as Record<string, string> | undefined,
       }));
       const results = await replayMultiple(typed, { skillsDir, maxBytes, _skipSsrfCheck: options._skipSsrfCheck });
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(results) }],
-      };
+      return wrapExternalContent(results, 'apitap_replay_batch');
     },
   );
 
@@ -268,6 +286,10 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
         maxBytes: maxBytes ?? 50_000,
         _skipSsrfCheck: options._skipSsrfCheck,
       });
+      // Only mark as untrusted if it contains external data
+      if (result.success && result.data) {
+        return wrapExternalContent(result, 'apitap_browse');
+      }
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(result) }],
       };
@@ -293,9 +315,8 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     async ({ url }) => {
       try {
         const result = await peek(url);
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify(result) }],
-        };
+        // Peek returns metadata, not content — but still from external source
+        return wrapExternalContent(result, 'apitap_peek');
       } catch (err: any) {
         return {
           content: [{ type: 'text' as const, text: `Peek failed: ${err.message}` }],
@@ -332,9 +353,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
             isError: true,
           };
         }
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify(result) }],
-        };
+        return wrapExternalContent(result, 'apitap_read');
       } catch (err: any) {
         return {
           content: [{ type: 'text' as const, text: `Read failed: ${err.message}` }],
@@ -372,7 +391,9 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
       const { promisify } = await import('node:util');
       const execFileAsync = promisify(execFile);
 
-      const cliArgs = ['--import', 'tsx', 'src/cli.ts', 'capture', url, '--duration', String(dur), '--json', '--no-verify'];
+      // Use compiled dist/cli.js, not src/cli.ts (tsx is dev-only)
+      const cliPath = new URL('../cli.js', import.meta.url).pathname;
+      const cliArgs = [cliPath, 'capture', url, '--duration', String(dur), '--json', '--no-verify'];
       if (port) cliArgs.push('--port', String(port));
 
       try {
@@ -603,11 +624,11 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
 
 // --- stdio entry point ---
 // Only start when run directly (not imported for testing)
-const isMainModule = process.argv[1] && (
-  process.argv[1].endsWith('/mcp.ts') ||
-  process.argv[1].endsWith('/mcp.js') ||
-  process.argv[1].endsWith('/apitap-mcp')
-);
+// Normalize backslashes for Windows compatibility
+const _argv1 = (process.argv[1] || '').replace(/\\/g, '/');
+const isMainModule = _argv1.endsWith('/mcp.ts') ||
+  _argv1.endsWith('/mcp.js') ||
+  _argv1.endsWith('/apitap-mcp');
 
 if (isMainModule) {
   const server = createMcpServer();

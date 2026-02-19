@@ -273,6 +273,16 @@ describe('apitap_replay via MCP', () => {
     assert.equal(typeof data.fromCache, 'boolean');
   });
 
+  it('marks replay response as untrusted external content', async () => {
+    const result = await client.callTool({
+      name: 'apitap_replay',
+      arguments: { domain: 'test-api.example.com', endpointId: 'get-events' },
+    });
+    assert.equal(result.isError, undefined);
+    assert.equal((result as any)._meta?.externalContent?.untrusted, true);
+    assert.equal((result as any)._meta?.externalContent?.source, 'apitap_replay');
+  });
+
   it('returns error content for unknown endpoint', async () => {
     const result = await client.callTool({
       name: 'apitap_replay',
@@ -281,5 +291,36 @@ describe('apitap_replay via MCP', () => {
     assert.equal(result.isError, true);
     const text = (result.content as any)[0].text;
     assert.ok(text.includes('not found'));
+  });
+});
+
+describe('apitap_read via MCP', () => {
+  let client: Client;
+  let cleanup: () => Promise<void>;
+
+  beforeEach(async () => {
+    const server = createMcpServer({ _skipSsrfCheck: true });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    client = new Client({ name: 'test-client', version: '1.0.0' });
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    cleanup = async () => {
+      await client.close();
+      await server.close();
+    };
+  });
+
+  afterEach(async () => {
+    await cleanup();
+  });
+
+  it('marks read response as untrusted external content', async () => {
+    const result = await client.callTool({
+      name: 'apitap_read',
+      arguments: { url: 'https://en.wikipedia.org/wiki/Node.js' },
+    });
+    assert.equal(result.isError, undefined);
+    assert.equal((result as any)._meta?.externalContent?.untrusted, true);
+    assert.equal((result as any)._meta?.externalContent?.source, 'apitap_read');
   });
 });

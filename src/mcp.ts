@@ -63,14 +63,8 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'apitap_search',
     {
       description:
-        'Search available API skill files for a domain or endpoint. ' +
-        'Use this FIRST to check if ApiTap has captured a site\'s API before trying to replay. ' +
-        'Returns matching endpoints with replayability tiers: ' +
-        'green = public, no auth needed — safe to replay directly; ' +
-        'yellow = needs auth credentials but no signing/anti-bot; ' +
-        'orange = CSRF/session-bound, fragile replay; ' +
-        'red = anti-bot protection, needs browser. ' +
-        'If not found, use apitap_capture to capture the site first.',
+        'Find captured API endpoints by domain or keyword. ' +
+        'Returns endpoints with replayability tier (green/yellow/orange/red) and endpoint IDs for replay.',
       inputSchema: z.object({
         query: z.string().describe('Search query — domain name, endpoint path, or keyword (e.g. "polymarket", "events", "get-markets")'),
       }),
@@ -92,13 +86,9 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'apitap_discover',
     {
       description:
-        'Discover a site\'s APIs without launching a browser. ' +
-        'Detects frameworks (WordPress, Shopify, Next.js, GraphQL), ' +
-        'finds OpenAPI/Swagger specs, and probes common API paths. ' +
-        'Use this BEFORE apitap_capture to check if expensive browser-based capture is needed. ' +
-        'Returns { confidence, skillFile?, hints, frameworks?, specs?, probes? }. ' +
-        'If confidence is "high" or "medium", a skeleton skill file is generated — ' +
-        'try replaying its endpoints before resorting to capture.',
+        'Probe a site\'s APIs without a browser: detects frameworks, finds OpenAPI specs, ' +
+        'probes common paths. Returns { confidence, skillFile?, frameworks?, hints }. ' +
+        'High/medium confidence generates a skeleton skill file ready to replay.',
       inputSchema: z.object({
         url: z.string().describe('URL to discover (e.g. "https://example.com")'),
       }),
@@ -137,12 +127,9 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'apitap_replay',
     {
       description:
-        'Replay a captured API endpoint to get live data without a browser. ' +
-        'Check the endpoint tier first with apitap_search: ' +
-        'green = will work, yellow = needs auth, orange/red = may fail. ' +
-        'For POST endpoints with request bodies, params can include body variable paths ' +
-        '(e.g. "variables.limit": "25" for GraphQL). ' +
-        'Returns { status, data } with the API response.',
+        'Call a captured API endpoint and return live data. ' +
+        'Requires domain and endpointId from apitap_search. ' +
+        'Pass params for path variables, query params, or body variables (e.g. "variables.limit": "25" for GraphQL).',
       inputSchema: z.object({
         domain: z.string().describe('Domain of the API (e.g. "gamma-api.polymarket.com")'),
         endpointId: z.string().describe('Endpoint ID from search results (e.g. "get-events", "post-graphql-GetPosts")'),
@@ -226,10 +213,8 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'apitap_replay_batch',
     {
       description:
-        'Replay multiple API endpoints in parallel across different domains. ' +
-        'Use this when you need data from several sites at once (e.g. comparing prices across stores). ' +
-        'Each request gets its own result — one site failing does not affect others. ' +
-        'Returns an array of { domain, endpointId, status, data, error?, tier?, capturedAt? }.',
+        'Replay multiple captured endpoints in parallel across domains. ' +
+        'Returns array of { domain, endpointId, status, data, error? } — failures are isolated per request.',
       inputSchema: z.object({
         requests: z.array(z.object({
           domain: z.string().describe('Domain of the API'),
@@ -260,13 +245,8 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'apitap_browse',
     {
       description:
-        'High-level "just get me the data" tool. ' +
-        'Checks if a skill file exists for the site, runs discovery if needed, ' +
-        'and replays the best matching endpoint — all in one call. ' +
-        'Use this when you want data from a URL without manually chaining search → discover → replay. ' +
-        'Returns { success: true, data, domain, endpointId, tier } on success, ' +
-        'or { success: false, suggestion: "capture_needed" } if the site needs browser-based capture first. ' +
-        'For precise control over which endpoint to replay, use apitap_search + apitap_replay instead.',
+        'Get data from a URL in one call: checks skill files, runs discovery, replays best endpoint. ' +
+        'Returns { success, data, domain, endpointId, tier } or { success: false, suggestion } if capture needed.',
       inputSchema: z.object({
         url: z.string().describe('URL to browse (e.g. "https://zillow.com/rentals/portland")'),
         task: z.string().optional().describe('Optional task description (e.g. "find apartments under $1500") — passed through in response for correlation'),
@@ -301,9 +281,8 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'apitap_peek',
     {
       description:
-        'Zero-cost triage of a URL. HTTP HEAD only -- checks accessibility, ' +
-        'bot protection, framework detection. Use before apitap_read to avoid wasting ' +
-        'tokens on blocked sites. Returns { accessible, recommendation, botProtection, framework, signals }.',
+        'HTTP HEAD triage of a URL — checks accessibility, bot protection, framework. ' +
+        'Returns { accessible, recommendation, botProtection, framework }.',
       inputSchema: z.object({
         url: z.string().describe('URL to peek at (e.g. "https://example.com")'),
       }),
@@ -331,10 +310,8 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'apitap_read',
     {
       description:
-        'Extract content from a URL without a browser. Uses side-channel APIs ' +
-        'for known sites (Reddit, YouTube, Wikipedia, HN) and HTML content extraction for ' +
-        'everything else. Returns structured JSON with clean markdown content. 0-10K tokens ' +
-        'vs 50-200K for browser automation.',
+        'Extract content from a URL without a browser. Uses native APIs for Reddit/YouTube/Wikipedia/HN, ' +
+        'HTML extraction elsewhere. Returns clean markdown. ~10K tokens vs 200K for browser.',
       inputSchema: z.object({
         url: z.string().describe('URL to read (e.g. "https://en.wikipedia.org/wiki/TypeScript")'),
         maxBytes: z.number().optional().describe('Maximum content size in bytes. Content is truncated to fit.'),
@@ -368,11 +345,8 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'apitap_capture',
     {
       description:
-        'Capture a website\'s API traffic by launching an instrumented browser. ' +
-        'Use this when apitap_search returns no results for a site. ' +
-        'Navigates to the URL, captures API calls for the specified duration, ' +
-        'and generates skill files for future replay. ' +
-        'Returns { domains, totalRequests, filtered, skillFiles } summary.',
+        'Launch a browser to capture a site\'s API traffic and save skill files for replay. ' +
+        'Returns { domains, totalRequests, skillFiles }.',
       inputSchema: z.object({
         url: z.string().describe('URL to capture (e.g. "https://polymarket.com")'),
         duration: z.number().optional().describe('Capture duration in seconds (default: 30)'),
@@ -418,10 +392,8 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'apitap_capture_start',
     {
       description:
-        'Start an interactive browser capture session. ' +
-        'Launches a browser, navigates to the URL, and begins passively capturing API traffic. ' +
-        'Returns a sessionId and a page snapshot with interactive elements (buttons, links, inputs). ' +
-        'Use apitap_capture_interact to drive the browser and apitap_capture_finish to save skill files.',
+        'Start an interactive capture session. Launches browser, begins capturing API traffic. ' +
+        'Returns sessionId and page snapshot. Drive with apitap_capture_interact, save with apitap_capture_finish.',
       inputSchema: z.object({
         url: z.string().describe('URL to navigate to (e.g. "https://polymarket.com")'),
         headless: z.boolean().optional().describe('Run browser in headless mode (default: true)'),
@@ -466,11 +438,9 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'apitap_capture_interact',
     {
       description:
-        'Interact with a live capture session browser. ' +
-        'Actions: snapshot (get current state), click (ref), type (ref + text), select (ref + value), ' +
-        'navigate (url), scroll (direction), wait (seconds, max 10). ' +
-        'Every action returns a fresh page snapshot with updated elements and capture stats. ' +
-        'Use element refs (e.g. "e0", "e3") from the snapshot to target clicks and typing.',
+        'Drive a live capture session browser. ' +
+        'Actions: snapshot, click (ref), type (ref+text), select, navigate, scroll, wait. ' +
+        'Returns updated page snapshot after each action. Use element refs (e.g. "e0") from snapshots.',
       inputSchema: z.object({
         sessionId: z.string().describe('Session ID from apitap_capture_start'),
         action: z.enum(['snapshot', 'click', 'type', 'select', 'navigate', 'scroll', 'wait']).describe('Action to perform'),
@@ -524,10 +494,8 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'apitap_capture_finish',
     {
       description:
-        'Finish or abort a capture session. ' +
-        'Without abort: closes browser, verifies endpoints, signs and writes skill files. ' +
-        'With abort: closes browser without saving. ' +
-        'Returns { aborted, domains: [{ domain, endpointCount, tiers, skillFile }] }.',
+        'Finish a capture session: verifies endpoints and writes skill files. ' +
+        'Pass abort:true to close without saving. Returns { aborted, domains }.',
       inputSchema: z.object({
         sessionId: z.string().describe('Session ID from apitap_capture_start'),
         abort: z.boolean().optional().describe('Abort without saving (default: false)'),
@@ -579,12 +547,8 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     'apitap_auth_request',
     {
       description:
-        'Request human authentication for a site that requires login. ' +
-        'Opens a VISIBLE browser window where the human can log in, handle 2FA, solve CAPTCHAs. ' +
-        'Captures session cookies and auth tokens after login, stores them encrypted. ' +
-        'Default timeout is 5 minutes. ' +
-        'After success, use apitap_replay or apitap_capture with the domain — auth will be injected automatically. ' +
-        'Use this when: replay returns 401/403, discovery detects authRequired, or you know a site needs login.',
+        'Open a visible browser for human login (handles 2FA, CAPTCHAs). ' +
+        'Stores session tokens encrypted — auto-injected on future replay/capture calls.',
       inputSchema: z.object({
         domain: z.string().describe('Domain to authenticate (e.g. "github.com")'),
         loginUrl: z.string().optional().describe('Login page URL (defaults to https://<domain>)'),

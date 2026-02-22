@@ -374,7 +374,8 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
       const execFileAsync = promisify(execFile);
 
       // Use compiled dist/cli.js, not src/cli.ts (tsx is dev-only)
-      const cliPath = new URL('../cli.js', import.meta.url).pathname;
+      // Both mcp.js and cli.js compile to dist/ so path is ./cli.js not ../cli.js
+      const cliPath = new URL('./cli.js', import.meta.url).pathname;
       const cliArgs = [cliPath, 'capture', url, '--duration', String(dur), '--json', '--no-verify'];
       if (port) cliArgs.push('--port', String(port));
 

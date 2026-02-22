@@ -170,10 +170,11 @@ export async function createServeServer(
             }],
           };
         } catch (err: any) {
+          console.error('Replay failed:', err);
           return {
             content: [{
               type: 'text' as const,
-              text: `Replay failed: ${err.message}`,
+              text: 'Authentication failed',
             }],
             isError: true,
           };

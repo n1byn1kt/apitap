@@ -13,6 +13,7 @@ import { discover } from './discovery/index.js';
 import { SessionCache } from './orchestration/cache.js';
 import { peek } from './read/peek.js';
 import { read } from './read/index.js';
+import { resolveAndValidateUrl } from './skill/ssrf.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -323,6 +324,10 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     },
     async ({ url, maxBytes }) => {
       try {
+        const validation = await resolveAndValidateUrl(url);
+        if (!validation.safe) {
+          throw new Error(validation.reason ?? 'URL validation failed');
+        }
         const result = await read(url, { maxBytes: maxBytes ?? undefined });
         if (!result) {
           return {

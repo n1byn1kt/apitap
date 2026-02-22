@@ -10,3 +10,17 @@ docs/security-audit-v1.md
 docs/brainstorm-*.md
 docs/demo-picks.md
 docs/test-results-*.md
+
+# Secrets and keys
+.env
+.env.*
+*.pem
+*.key
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Built output (force-added files)
+dist/mcp.js

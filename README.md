@@ -332,7 +332,7 @@ Endpoint replayed
 
 This is especially relevant now that [MCP servers are being used as attack vectors in the wild](https://cloud.google.com/blog/topics/threat-intelligence/distillation-experimentation-integration-ai-adversarial-use) — Google's Threat Intelligence Group recently documented underground toolkits built on compromised MCP servers. ApiTap is designed to be safe even when processing untrusted inputs.
 
-See [docs/security-audit-v1.md](./docs/security-audit-v1.md) for the full security audit (19 findings, current posture 9/10).
+
 
 ## CLI Reference
 

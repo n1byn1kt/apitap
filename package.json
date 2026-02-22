@@ -1,6 +1,6 @@
 {
   "name": "@apitap/core",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Intercept web API traffic during browsing. Generate portable skill files so AI agents can call APIs directly instead of scraping.",
   "type": "module",
   "main": "dist/index.js",

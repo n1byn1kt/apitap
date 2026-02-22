@@ -5,15 +5,18 @@ import { mkdtemp, rm, readFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AuthManager } from '../../src/auth/manager.js';
+import { randomBytes } from 'node:crypto';
 import type { StoredAuth, StoredToken, StoredSession } from '../../src/types.js';
 
 describe('AuthManager', () => {
   let testDir: string;
+  let saltFile: string;
   let manager: AuthManager;
 
   beforeEach(async () => {
     testDir = await mkdtemp(join(tmpdir(), 'apitap-auth-'));
-    manager = new AuthManager(testDir, 'test-machine-id');
+    saltFile = join(testDir, 'install-salt');
+    manager = new AuthManager(testDir, 'test-machine-id', saltFile);
   });
 
   afterEach(async () => {

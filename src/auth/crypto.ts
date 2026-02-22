@@ -12,7 +12,24 @@ const ALGORITHM = 'aes-256-gcm';
 const KEY_LENGTH = 32; // 256 bits
 const IV_LENGTH = 16;
 const PBKDF2_ITERATIONS = 100_000;
-const PBKDF2_SALT = 'apitap-v0.2-key-derivation';
+// const PBKDF2_SALT = 'apitap-v0.2-key-derivation'; // fallback for migration
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+
+function getInstallSalt(saltFile?: string): string {
+  const saltPath = saltFile || `${homedir()}/.apitap/install-salt`;
+  if (existsSync(saltPath)) {
+    return readFileSync(saltPath, 'utf8').trim();
+  }
+  // Generate and save new salt
+  const salt = randomBytes(32).toString('hex');
+  try {
+    mkdirSync(saltPath.replace(/\/[^/]+$/, ''), { recursive: true });
+    writeFileSync(saltPath, salt, { mode: 0o600 });
+  } catch {}
+  return salt;
+}
+
 
 export interface EncryptedData {
   salt: string;
@@ -26,8 +43,14 @@ export interface EncryptedData {
  * Uses a fixed application salt — the entropy comes from the machine ID
  * being stretched through 100K iterations.
  */
-export function deriveKey(machineId: string): Buffer {
-  return pbkdf2Sync(machineId, PBKDF2_SALT, PBKDF2_ITERATIONS, KEY_LENGTH, 'sha512');
+export function deriveKey(machineId: string, saltFile?: string): Buffer {
+  // Try per-install salt first, fallback to old constant for migration
+  try {
+    return pbkdf2Sync(machineId, getInstallSalt(saltFile), PBKDF2_ITERATIONS, KEY_LENGTH, 'sha512');
+  } catch {
+    // Fallback for old installs (migration note: remove after all users migrated)
+    return pbkdf2Sync(machineId, 'apitap-v0.2-key-derivation', PBKDF2_ITERATIONS, KEY_LENGTH, 'sha512');
+  }
 }
 
 /**
@@ -43,7 +66,7 @@ export function encrypt(plaintext: string, key: Buffer): EncryptedData {
   const tag = cipher.getAuthTag();
 
   return {
-    salt: PBKDF2_SALT,
+    salt: 'apitap-v0.2-key-derivation', // Legacy: stored for reference, not used in decrypt
     iv: iv.toString('hex'),
     ciphertext,
     tag: tag.toString('hex'),

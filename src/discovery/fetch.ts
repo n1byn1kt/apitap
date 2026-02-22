@@ -48,10 +48,21 @@ export async function safeFetch(
         'User-Agent': USER_AGENT,
         'Accept': 'text/html,application/json,*/*',
       },
-      redirect: 'follow',
+      redirect: 'manual',
     });
 
     clearTimeout(timer);
+
+    // SSRF-safe manual redirect (one hop max)
+    if (response.status >= 300 && response.status < 400 && response.headers.has('location')) {
+      const location = response.headers.get('location');
+      if (!location) return null;
+      const redirectUrl = new URL(location, url).toString();
+      const ssrfResult = validateUrl(redirectUrl);
+      if (!ssrfResult.safe) return null;
+      // Follow one redirect hop only
+      return await safeFetch(redirectUrl, { ...options, skipSsrf: true });
+    }
 
     // Extract headers
     const headers: Record<string, string> = {};

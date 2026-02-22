@@ -14,8 +14,8 @@ export class AuthManager {
   private key: Buffer;
   private authPath: string;
 
-  constructor(baseDir: string, machineId: string) {
-    this.key = deriveKey(machineId);
+  constructor(baseDir: string, machineId: string, saltFile?: string) {
+    this.key = deriveKey(machineId, saltFile);
     this.authPath = join(baseDir, AUTH_FILENAME);
   }
 

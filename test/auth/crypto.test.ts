@@ -2,6 +2,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { encrypt, decrypt, deriveKey, hmacSign, hmacVerify } from '../../src/auth/crypto.js';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { randomBytes } from 'node:crypto';
 
 describe('crypto', () => {
   describe('encrypt/decrypt roundtrip', () => {
@@ -28,8 +31,9 @@ describe('crypto', () => {
     });
 
     it('fails to decrypt with wrong key', () => {
-      const key1 = deriveKey('machine-1');
-      const key2 = deriveKey('machine-2');
+      const saltFile = join(tmpdir(), 'apitap-test-salt-' + randomBytes(8).toString('hex'));
+      const key1 = deriveKey('machine-1', saltFile);
+      const key2 = deriveKey('machine-2', saltFile);
       const encrypted = encrypt('secret', key1);
 
       assert.throws(() => decrypt(encrypted, key2));
@@ -38,14 +42,16 @@ describe('crypto', () => {
 
   describe('deriveKey', () => {
     it('produces deterministic keys from same input', () => {
-      const a = deriveKey('test-id');
-      const b = deriveKey('test-id');
+      const saltFile = join(tmpdir(), 'apitap-test-salt-' + randomBytes(8).toString('hex'));
+      const a = deriveKey('test-id', saltFile);
+      const b = deriveKey('test-id', saltFile);
       assert.deepEqual(a, b);
     });
 
     it('produces different keys from different input', () => {
-      const a = deriveKey('id-1');
-      const b = deriveKey('id-2');
+      const saltFile = join(tmpdir(), 'apitap-test-salt-' + randomBytes(8).toString('hex'));
+      const a = deriveKey('id-1', saltFile);
+      const b = deriveKey('id-2', saltFile);
       assert.notDeepEqual(a, b);
     });
   });
@@ -67,8 +73,9 @@ describe('crypto', () => {
     });
 
     it('rejects wrong key', () => {
-      const key1 = deriveKey('id-1');
-      const key2 = deriveKey('id-2');
+      const saltFile = join(tmpdir(), 'apitap-test-salt-' + randomBytes(8).toString('hex'));
+      const key1 = deriveKey('id-1', saltFile);
+      const key2 = deriveKey('id-2', saltFile);
       const sig = hmacSign('data', key1);
       assert.equal(hmacVerify('data', sig, key2), false);
     });

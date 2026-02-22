@@ -118,7 +118,7 @@ ApiTap includes a text-mode browsing pipeline — `peek` and `read` — that let
 
 | Site | Decoder | Typical Tokens | vs Raw HTML |
 |------|---------|----------------|-------------|
-| Reddit | `reddit` | ~500 | 95% smaller |
+| Reddit | `reddit` | ~627 | 93% smaller |
 | YouTube | `youtube` | ~36 | 99% smaller |
 | Wikipedia | `wikipedia` | ~127 | 97% smaller |
 | Hacker News | `hackernews` | ~200 | 90% smaller |
@@ -135,7 +135,7 @@ apitap peek https://reddit.com/r/programming
 
 # Extract content — no browser needed
 apitap read https://reddit.com/r/programming
-  ✓ Reddit decoder: 12 posts, ~500 tokens
+  ✓ Reddit decoder: 12 posts, ~627 tokens
 
 # Works for any URL — falls back to generic HTML extraction
 apitap read https://example.com/blog/post

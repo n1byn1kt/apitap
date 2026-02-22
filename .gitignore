@@ -1,3 +1,7 @@
 node_modules/
 dist/
 .worktrees/
+
+# Internal planning docs — never commit
+docs/plans/
+docs/launch-announcements.md

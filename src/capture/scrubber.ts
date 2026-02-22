@@ -18,6 +18,10 @@ const CARD_RE = /\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b/g;
 // US SSN: 123-45-6789
 const SSN_RE = /\b\d{3}-\d{2}-\d{4}\b/g;
 
+// Auth tokens
+const BEARER_TOKEN_RE = /\bBearer\s+[A-Za-z0-9._~+/-]+=*\b/g;
+const JWT_RE = /\beyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\b/g;
+
 /**
  * Scrub PII from a string. Returns the string with PII replaced by placeholders.
  * Order matters: SSN before phone (SSN is more specific).
@@ -44,6 +48,10 @@ export function scrubPII(input: string): string {
   // Phone (international, then US)
   result = result.replace(PHONE_INTL_RE, '[phone]');
   result = result.replace(PHONE_US_RE, '[phone]');
+
+  // Auth tokens
+  result = result.replace(BEARER_TOKEN_RE, '[token]');
+  result = result.replace(JWT_RE, '[token]');
 
   return result;
 }

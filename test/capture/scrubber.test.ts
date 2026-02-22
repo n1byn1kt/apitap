@@ -57,4 +57,9 @@ describe('scrubPII', () => {
     assert.equal(scrubPII('limit=10&offset=20'), 'limit=10&offset=20');
     assert.equal(scrubPII(''), '');
   });
+
+  it('redacts bearer and JWT tokens', () => {
+    assert.equal(scrubPII('Authorization: Bearer abc.def.ghi'), 'Authorization: [token]');
+    assert.equal(scrubPII('token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.signature123'), 'token=[token]');
+  });
 });

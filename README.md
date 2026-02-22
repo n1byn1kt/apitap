@@ -122,7 +122,7 @@ ApiTap includes a text-mode browsing pipeline — `peek` and `read` — that let
 | YouTube | `youtube` | ~36 | 99% smaller |
 | Wikipedia | `wikipedia` | ~127 | 97% smaller |
 | Hacker News | `hackernews` | ~200 | 90% smaller |
-| Grokipedia | `grokipedia` | ~150 | 90% smaller |
+| Grokipedia | `grokipedia` | ~150–5000+ | varies by article length |
 | Twitter/X | `twitter` | ~80 | 95% smaller |
 | Any other site | `generic` | varies | ~74% avg |
 

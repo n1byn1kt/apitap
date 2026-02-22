@@ -2,6 +2,17 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Using ApiTap as an MCP Tool
+
+When asked to fetch data from a website, **always check for existing skill files first**:
+
+1. `apitap show <domain>` — check if a skill file already exists
+2. If it exists → use `apitap replay <domain> <endpoint-id>` (no browser needed)
+3. If no skill file → try `apitap read <url>` first (text extraction, no browser)
+4. Only use `apitap capture` or `apitap browse` as a last resort (requires browser)
+
+**The replay path is the fast path.** It calls APIs directly with `fetch()` — no browser, no Playwright, no Chrome. Don't open a browser if a skill file already exists.
+
 ## Commands
 
 ```bash

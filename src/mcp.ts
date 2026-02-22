@@ -14,10 +14,13 @@ import { SessionCache } from './orchestration/cache.js';
 import { peek } from './read/peek.js';
 import { read } from './read/index.js';
 import { resolveAndValidateUrl } from './skill/ssrf.js';
+import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 const APITAP_DIR = join(homedir(), '.apitap');
+const require = createRequire(import.meta.url);
+const { version: PACKAGE_VERSION } = require('../package.json') as { version: string };
 
 /**
  * Wrap response data with external content metadata.
@@ -56,7 +59,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
 
   const server = new McpServer({
     name: 'apitap',
-    version: '0.5.0',
+    version: PACKAGE_VERSION,
   });
 
   // --- apitap_search ---

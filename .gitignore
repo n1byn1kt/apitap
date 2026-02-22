@@ -5,3 +5,8 @@ dist/
 # Internal planning docs — never commit
 docs/plans/
 docs/launch-announcements.md
+docs/netsec-pitch.md
+docs/security-audit-v1.md
+docs/brainstorm-*.md
+docs/demo-picks.md
+docs/test-results-*.md

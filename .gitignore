@@ -5,11 +5,17 @@ dist/
 # Internal planning docs — never commit
 docs/plans/
 docs/launch-announcements.md
+docs/launch-announcements-final.md
 docs/netsec-pitch.md
 docs/security-audit-v1.md
 docs/brainstorm-*.md
 docs/demo-picks.md
 docs/test-results-*.md
+docs/website-brainstorm.md
+docs/launch-monitor-spec.md
+
+# Demo recordings — internal only
+demo/
 
 # Secrets and keys
 .env

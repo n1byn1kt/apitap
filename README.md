@@ -1,7 +1,7 @@
 # ApiTap
 
 [![npm version](https://img.shields.io/npm/v/@apitap/core)](https://www.npmjs.com/package/@apitap/core)
-[![tests](https://img.shields.io/badge/tests-721%20passing-brightgreen)](https://github.com/n1byn1kt/apitap)
+[![tests](https://img.shields.io/badge/tests-789%20passing-brightgreen)](https://github.com/n1byn1kt/apitap)
 [![license](https://img.shields.io/badge/license-BSL--1.1-blue)](./LICENSE)
 
 **The MCP server that turns any website into an API — no docs, no SDK, no browser.**
@@ -376,7 +376,7 @@ All commands support `--json` for machine-readable output.
 git clone https://github.com/n1byn1kt/apitap.git
 cd apitap
 npm install
-npm test          # 721 tests, Node built-in test runner
+npm test          # 789 tests, Node built-in test runner
 npm run typecheck # Type checking
 npm run build     # Compile to dist/
 npx tsx src/cli.ts capture <url>  # Run from source

@@ -6,6 +6,7 @@ export interface OAuthInfo {
   grantType: 'refresh_token' | 'client_credentials';
   scope?: string;
   clientSecret?: string;
+  refreshToken?: string;
 }
 
 /**
@@ -61,6 +62,8 @@ export function isOAuthTokenRequest(req: {
   const scope = params.get('scope');
   if (scope) result.scope = scope;
   if (clientSecret) result.clientSecret = clientSecret;
+  const refreshToken = params.get('refresh_token');
+  if (refreshToken) result.refreshToken = refreshToken;
 
   return result;
 }

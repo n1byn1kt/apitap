@@ -224,8 +224,12 @@ export class CaptureSession {
       const oauthConfig = generator.getOAuthConfig();
       if (oauthConfig) {
         const clientSecret = generator.getOAuthClientSecret();
-        if (clientSecret) {
-          await authManager.storeOAuthCredentials(domain, { clientSecret });
+        const refreshToken = generator.getOAuthRefreshToken();
+        if (clientSecret || refreshToken) {
+          await authManager.storeOAuthCredentials(domain, {
+            ...(clientSecret ? { clientSecret } : {}),
+            ...(refreshToken ? { refreshToken } : {}),
+          });
         }
       }
 

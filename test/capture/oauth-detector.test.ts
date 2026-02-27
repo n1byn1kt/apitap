@@ -172,4 +172,41 @@ describe('isOAuthTokenRequest', () => {
     assert.ok(result);
     assert.equal(result.grantType, 'client_credentials');
   });
+
+  it('extracts refreshToken from URL-encoded refresh_token grant', () => {
+    const result = isOAuthTokenRequest({
+      url: 'https://auth.example.com/oauth/token',
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      postData: 'grant_type=refresh_token&client_id=myapp&refresh_token=rt_secret_abc123',
+    });
+    assert.ok(result);
+    assert.equal(result.refreshToken, 'rt_secret_abc123');
+  });
+
+  it('extracts refreshToken from JSON-encoded refresh_token grant', () => {
+    const result = isOAuthTokenRequest({
+      url: 'https://auth.example.com/api/token',
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      postData: JSON.stringify({
+        grant_type: 'refresh_token',
+        client_id: 'json-app',
+        refresh_token: 'rt_json_xyz',
+      }),
+    });
+    assert.ok(result);
+    assert.equal(result.refreshToken, 'rt_json_xyz');
+  });
+
+  it('does not set refreshToken for client_credentials grant', () => {
+    const result = isOAuthTokenRequest({
+      url: 'https://auth.example.com/oauth/token',
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      postData: 'grant_type=client_credentials&client_id=myapp&client_secret=secret',
+    });
+    assert.ok(result);
+    assert.equal(result.refreshToken, undefined);
+  });
 });

@@ -28,7 +28,7 @@ apitap replay gamma-api.polymarket.com get-events  # Call the API directly
 
 No scraping. No browser. Just the API.
 
-![ApiTap demo](https://www.apitap.io/demo-screenshot.png)
+![ApiTap demo](https://raw.githubusercontent.com/n1byn1kt/apitap/main/docs/demo.gif)
 
 ---
 

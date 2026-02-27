@@ -2,6 +2,7 @@
 import type { SkillFile, StoredToken, StoredSession } from '../types.js';
 import type { AuthManager } from './manager.js';
 import { refreshOAuth, type OAuthRefreshResult } from './oauth-refresh.js';
+import { launchBrowser } from '../capture/browser.js';
 
 export interface RefreshOptions {
   domain: string;
@@ -197,22 +198,19 @@ async function doBrowserRefresh(
     return { success: oauthRefreshed, tokens: {}, oauthRefreshed: oauthRefreshed || undefined };
   }
 
-  const { chromium } = await import('playwright');
-
   const browserMode = options.browserMode || skill.auth?.browserMode || 'headless';
   const refreshUrl = options.refreshUrl || skill.auth?.refreshUrl || skill.baseUrl;
   const timeout = options.timeout || (skill.auth?.captchaRisk ? 300_000 : 30_000);
 
   // Try to restore session from cache
-  const cachedSession = await authManager.retrieveSession(options.domain);
+  const cachedSession = await authManager.retrieveSessionWithFallback(options.domain);
   const sessionValid = cachedSession && isSessionValid(cachedSession);
 
-  const browser = await chromium.launch({
+  const { browser, context } = await launchBrowser({
     headless: browserMode === 'headless',
   });
 
   try {
-    const context = await browser.newContext();
 
     // Restore cookies if session is valid
     if (sessionValid && cachedSession) {

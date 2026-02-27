@@ -1,6 +1,7 @@
 // src/auth/handoff.ts
 import type { AuthManager } from './manager.js';
 import type { StoredSession, StoredAuth } from '../types.js';
+import { launchBrowser } from '../capture/browser.js';
 
 export interface HandoffOptions {
   domain: string;
@@ -98,15 +99,12 @@ async function doHandoff(
   const loginUrl = options.loginUrl || `https://${domain}`;
   const timeout = options.timeout ?? 300_000; // 5 minutes
 
-  const { chromium } = await import('playwright');
-
-  const browser = await chromium.launch({ headless: false });
+  const { browser, context } = await launchBrowser({ headless: false });
 
   try {
-    const context = await browser.newContext();
 
     // Restore existing session cookies if available (warm start)
-    const cachedSession = await authManager.retrieveSession(domain);
+    const cachedSession = await authManager.retrieveSessionWithFallback(domain);
     if (cachedSession?.cookies?.length) {
       await context.addCookies(cachedSession.cookies);
     }
@@ -161,8 +159,13 @@ async function doHandoff(
       );
 
       if (hasSessionCookie || authDetected) {
-        // Wait a bit more for any final redirects/requests
-        await page.waitForTimeout(2000);
+        // Grace period: 4 additional polls at 2s each (~8s total)
+        // Allows time for MFA, CAPTCHAs, and post-login redirects
+        for (let grace = 0; grace < 4; grace++) {
+          if (page.isClosed()) break;
+          await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {});
+          await page.waitForTimeout(2000);
+        }
         loginDetected = true;
         break;
       }

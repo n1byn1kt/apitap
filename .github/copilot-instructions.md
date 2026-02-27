@@ -3,10 +3,12 @@
 ## Build and test commands
 - Install deps: `npm install`
 - Full test suite: `npm test` (Node test runner via `node --import tsx --test 'test/**/*.test.ts'`)
-- Single test file: `node --import tsx --test test/path/to/test.ts`
+- Single test file (example): `node --import tsx --test test/capture/filter.test.ts`
 - Type check: `npm run typecheck`
+- Lint: no dedicated lint script is configured in `package.json`
 - Build: `npm run build`
 - Run CLI from source: `npx tsx src/cli.ts <command> [args]`
+- Install Chromium for browser-required flows (`capture` / `browse`): `npx playwright install chromium`
 
 ## High-level architecture
 ApiTap has two primary execution paths that share skill-file artifacts:
@@ -22,6 +24,7 @@ Supporting layers:
 ## Key repository conventions
 - **ESM + NodeNext rules are strict:** use `.js` in TS imports (e.g. `import { x } from './y.js'`).
 - **CLI-first surface area:** keep behavior exposed via `src/cli.ts` commands, and ensure machine-readable `--json` output remains consistent.
+- **Website-fetch workflow priority:** when data is needed from a site, prefer `apitap show <domain>` → `apitap replay <domain> <endpoint-id>`; if no skill file exists, try `apitap read <url>` before browser-based `capture`/`browse`.
 - **Skill files are central artifacts:** endpoint metadata belongs in skill JSON, but auth secrets must never be stored there; auth stays in encrypted storage.
 - **Security checks are part of normal flow:** preserve SSRF validation, header filtering, DNS/redirect checks during import and replay paths.
 - **Test layout mirrors source layout:** add/update tests under `test/` matching `src/` paths; use Node's built-in `node:test` style.

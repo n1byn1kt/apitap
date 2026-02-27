@@ -212,6 +212,95 @@ describe('isOAuthTokenRequest', () => {
   });
 });
 
+describe('Supabase URL grant_type fallback', () => {
+  it('detects grant_type from URL query param', () => {
+    const result = isOAuthTokenRequest({
+      url: 'https://auth.supabase.co/token?grant_type=refresh_token',
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      postData: 'client_id=supabase-app&refresh_token=rt_supa',
+    });
+    assert.ok(result);
+    assert.equal(result.grantType, 'refresh_token');
+    assert.equal(result.clientId, 'supabase-app');
+    assert.equal(result.refreshToken, 'rt_supa');
+  });
+
+  it('body grant_type takes precedence over URL', () => {
+    const result = isOAuthTokenRequest({
+      url: 'https://auth.example.com/oauth/token?grant_type=client_credentials',
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      postData: 'grant_type=refresh_token&client_id=myapp&refresh_token=rt_body',
+    });
+    assert.ok(result);
+    assert.equal(result.grantType, 'refresh_token');
+  });
+
+  it('URL grant_type alone still requires client_id', () => {
+    const result = isOAuthTokenRequest({
+      url: 'https://auth.supabase.co/token?grant_type=refresh_token',
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      postData: 'refresh_token=rt_supa',
+    });
+    assert.equal(result, null);
+  });
+});
+
+describe('Firebase provider-specific detection', () => {
+  it('detects Firebase with key param + refresh_token in body', () => {
+    const result = isOAuthTokenRequest({
+      url: 'https://securetoken.googleapis.com/v1/token?key=AIzaSyB-test123',
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      postData: 'grant_type=refresh_token&refresh_token=firebase_rt_abc',
+    });
+    assert.ok(result);
+    assert.equal(result.clientId, 'AIzaSyB-test123');
+    assert.equal(result.grantType, 'refresh_token');
+    assert.equal(result.refreshToken, 'firebase_rt_abc');
+    // tokenEndpoint should include the ?key= param
+    assert.ok(result.tokenEndpoint.includes('?key=AIzaSyB-test123'));
+  });
+
+  it('does not use Firebase path for non-securetoken domains', () => {
+    const result = isOAuthTokenRequest({
+      url: 'https://evil.example.com/v1/token?key=AIzaSyB-fake',
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      postData: 'grant_type=refresh_token&refresh_token=rt_fake',
+    });
+    // Should fall through to normal path, which requires client_id → null
+    assert.equal(result, null);
+  });
+
+  it('requires key param (no key → null)', () => {
+    const result = isOAuthTokenRequest({
+      url: 'https://securetoken.googleapis.com/v1/token',
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      postData: 'grant_type=refresh_token&refresh_token=rt_no_key',
+    });
+    // No ?key= and no client_id → null
+    assert.equal(result, null);
+  });
+
+  it('only for refresh_token grant (client_credentials on securetoken → normal path)', () => {
+    const result = isOAuthTokenRequest({
+      url: 'https://securetoken.googleapis.com/v1/token?key=AIzaSyB-test',
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      postData: 'grant_type=client_credentials&client_id=myapp&client_secret=secret',
+    });
+    // Should not use Firebase path (which is refresh_token only)
+    // Falls through to normal path, succeeds with client_id
+    assert.ok(result);
+    assert.equal(result.grantType, 'client_credentials');
+    assert.equal(result.clientId, 'myapp');
+  });
+});
+
 describe('SkillGenerator OAuth refresh token', () => {
   it('stores and exposes refreshToken from captured OAuth request', () => {
     const gen = new SkillGenerator({ scrub: false });

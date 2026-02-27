@@ -6,6 +6,9 @@ dist/
 docs/plans/
 docs/launch-announcements.md
 docs/launch-announcements-final.md
+docs/launch-announcements-v2.md
+docs/hn-post-ready.md
+docs/post-launch-roadmap.md
 docs/netsec-pitch.md
 docs/security-audit-v1.md
 docs/brainstorm-*.md
@@ -13,6 +16,15 @@ docs/demo-picks.md
 docs/test-results-*.md
 docs/website-brainstorm.md
 docs/launch-monitor-spec.md
+docs/testing/
+
+# Traction tracking — internal only
+traction.json
+.traction-baseline.json
+
+# Social / marketing assets
+assets/
+social-preview.png
 
 # Demo recordings — internal only
 demo/

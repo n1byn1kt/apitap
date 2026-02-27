@@ -56,9 +56,11 @@ export async function refreshOAuth(
     'oauth2.googleapis.com', 'accounts.google.com',
     'login.microsoftonline.com', 'github.com',
     'oauth.reddit.com', 'api.twitter.com',
+    'auth0.com', 'okta.com',
+    'securetoken.googleapis.com',
   ];
   const tokenHost = new URL(oauthConfig.tokenEndpoint).hostname;
-  if (tokenHost !== domain && !tokenHost.endsWith('.' + domain) && !KNOWN_OAUTH_HOSTS.includes(tokenHost)) {
+  if (tokenHost !== domain && !tokenHost.endsWith('.' + domain) && !isKnownOAuthHost(tokenHost, KNOWN_OAUTH_HOSTS)) {
     return { success: false, error: `Token endpoint domain mismatch: ${tokenHost} vs ${domain}` };
   }
 
@@ -117,4 +119,14 @@ export async function refreshOAuth(
       error: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+/**
+ * Check if a hostname matches a known OAuth provider.
+ * Supports exact match and subdomain match (e.g., tenant.auth0.com matches auth0.com).
+ */
+function isKnownOAuthHost(tokenHost: string, knownHosts: string[]): boolean {
+  return knownHosts.some(known =>
+    tokenHost === known || tokenHost.endsWith('.' + known)
+  );
 }

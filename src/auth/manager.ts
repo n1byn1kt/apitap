@@ -66,6 +66,25 @@ export class AuthManager {
     return all[domain]?.session ?? null;
   }
 
+  /**
+   * Retrieve session with subdomain fallback.
+   * Tries exact match first, then walks up parent domains.
+   * e.g., dashboard.twitch.tv → twitch.tv
+   */
+  async retrieveSessionWithFallback(domain: string): Promise<StoredSession | null> {
+    // Try exact match first
+    const exact = await this.retrieveSession(domain);
+    if (exact) return exact;
+
+    // Try parent domains
+    for (const parent of getParentDomains(domain)) {
+      const session = await this.retrieveSession(parent);
+      if (session) return session;
+    }
+
+    return null;
+  }
+
   /** Store OAuth credentials for a domain (merges with existing auth). */
   async storeOAuthCredentials(domain: string, creds: { refreshToken?: string; clientSecret?: string }): Promise<void> {
     const all = await this.loadAll();
@@ -120,6 +139,24 @@ export class AuthManager {
     // Ensure permissions even if file existed with different perms
     await chmod(this.authPath, 0o600);
   }
+}
+
+/**
+ * Get parent domains for subdomain fallback.
+ * dashboard.twitch.tv → ["twitch.tv"]
+ * a.b.example.com → ["b.example.com", "example.com"]
+ * twitch.tv → [] (already base, 2 labels)
+ */
+export function getParentDomains(domain: string): string[] {
+  const parts = domain.split('.');
+  const parents: string[] = [];
+
+  // Stop at 2 labels (e.g., "example.com" is the minimum)
+  for (let i = 1; i < parts.length - 1; i++) {
+    parents.push(parts.slice(i).join('.'));
+  }
+
+  return parents;
 }
 
 /**

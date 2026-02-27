@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, readFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AuthManager } from '../../src/auth/manager.js';
+import { AuthManager, getParentDomains } from '../../src/auth/manager.js';
 import { randomBytes } from 'node:crypto';
 import type { StoredAuth, StoredToken, StoredSession } from '../../src/types.js';
 
@@ -170,5 +170,76 @@ describe('AuthManager token storage', () => {
   it('should return null for session on unknown domain', async () => {
     const session = await manager.retrieveSession('unknown.com');
     assert.equal(session, null);
+  });
+});
+
+describe('getParentDomains', () => {
+  it('returns parent for single subdomain', () => {
+    assert.deepEqual(getParentDomains('dashboard.twitch.tv'), ['twitch.tv']);
+  });
+
+  it('returns multiple parents for deep subdomain', () => {
+    assert.deepEqual(getParentDomains('a.b.example.com'), ['b.example.com', 'example.com']);
+  });
+
+  it('returns empty array for base domain (2 labels)', () => {
+    assert.deepEqual(getParentDomains('twitch.tv'), []);
+  });
+
+  it('returns empty array for single label', () => {
+    assert.deepEqual(getParentDomains('localhost'), []);
+  });
+});
+
+describe('AuthManager retrieveSessionWithFallback', () => {
+  let testDir: string;
+  let manager: AuthManager;
+
+  beforeEach(async () => {
+    testDir = await mkdtemp(join(tmpdir(), 'apitap-auth-'));
+    manager = new AuthManager(testDir, 'test-machine-id');
+  });
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true });
+  });
+
+  it('returns exact match first', async () => {
+    await manager.storeSession('dashboard.twitch.tv', {
+      cookies: [{ name: 'exact', value: 'yes', domain: 'dashboard.twitch.tv', path: '/' }],
+      savedAt: new Date().toISOString(),
+    });
+    await manager.storeSession('twitch.tv', {
+      cookies: [{ name: 'parent', value: 'no', domain: 'twitch.tv', path: '/' }],
+      savedAt: new Date().toISOString(),
+    });
+
+    const session = await manager.retrieveSessionWithFallback('dashboard.twitch.tv');
+    assert.equal(session?.cookies[0].value, 'yes');
+  });
+
+  it('falls back to parent domain', async () => {
+    await manager.storeSession('twitch.tv', {
+      cookies: [{ name: 'parent', value: 'found', domain: 'twitch.tv', path: '/' }],
+      savedAt: new Date().toISOString(),
+    });
+
+    const session = await manager.retrieveSessionWithFallback('dashboard.twitch.tv');
+    assert.equal(session?.cookies[0].value, 'found');
+  });
+
+  it('returns null when no parent match', async () => {
+    const session = await manager.retrieveSessionWithFallback('dashboard.twitch.tv');
+    assert.equal(session, null);
+  });
+
+  it('handles deep subdomains', async () => {
+    await manager.storeSession('example.com', {
+      cookies: [{ name: 'deep', value: 'found', domain: 'example.com', path: '/' }],
+      savedAt: new Date().toISOString(),
+    });
+
+    const session = await manager.retrieveSessionWithFallback('a.b.example.com');
+    assert.equal(session?.cookies[0].value, 'found');
   });
 });

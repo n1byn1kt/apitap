@@ -27,17 +27,47 @@ export function isOAuthTokenRequest(req: {
   const urlLower = req.url.toLowerCase();
   if (!urlLower.includes('/token') && !urlLower.includes('/oauth')) return null;
 
+  // Parse URL once — reused for query param fallback and Firebase detection
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(req.url);
+  } catch {
+    return null;
+  }
+
   if (!req.postData) return null;
 
   // Parse body — support URL-encoded and JSON
   const params = parseBody(req.postData, req.headers['content-type'] ?? '');
   if (!params) return null;
 
-  const grantType = params.get('grant_type');
+  // grant_type: body takes precedence, URL query param as fallback (Supabase GoTrue)
+  let grantType = params.get('grant_type');
+  if (!grantType) {
+    grantType = parsedUrl.searchParams.get('grant_type') ?? undefined;
+  }
   if (!grantType) return null;
 
   // Only refreshable flows
   if (grantType !== 'refresh_token' && grantType !== 'client_credentials') return null;
+
+  // Firebase provider-specific detection:
+  // securetoken.googleapis.com uses ?key= instead of client_id
+  if (
+    parsedUrl.hostname === 'securetoken.googleapis.com' &&
+    parsedUrl.searchParams.has('key') &&
+    grantType === 'refresh_token'
+  ) {
+    const firebaseKey = parsedUrl.searchParams.get('key')!;
+    const result: OAuthInfo = {
+      tokenEndpoint: req.url, // Keep full URL with ?key= param
+      clientId: firebaseKey,
+      grantType: 'refresh_token',
+    };
+    const refreshToken = params.get('refresh_token');
+    if (refreshToken) result.refreshToken = refreshToken;
+    return result;
+  }
 
   // Extract client_id — may also be in Basic auth header
   let clientId = params.get('client_id') ?? '';

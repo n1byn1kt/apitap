@@ -5,6 +5,7 @@ import { isDomainMatch } from './domain.js';
 import { SkillGenerator, type GeneratorOptions } from '../skill/generator.js';
 import { IdleTracker } from './idle.js';
 import { detectCaptcha } from '../auth/refresh.js';
+import { launchBrowser } from './browser.js';
 import type { CapturedExchange } from '../types.js';
 
 export interface CaptureOptions {
@@ -31,7 +32,7 @@ export interface CaptureResult {
 
 const DEFAULT_CDP_PORTS = [18792, 18800, 9222];
 
-async function connectToBrowser(options: CaptureOptions): Promise<{ browser: Browser; launched: boolean }> {
+async function connectToBrowser(options: CaptureOptions): Promise<{ browser: Browser; launched: boolean; launchContext?: import('playwright').BrowserContext }> {
   if (!options.launch) {
     const ports = options.port ? [options.port] : DEFAULT_CDP_PORTS;
     for (const port of ports) {
@@ -49,12 +50,12 @@ async function connectToBrowser(options: CaptureOptions): Promise<{ browser: Bro
     throw new Error(`No browser found on CDP ports: ${ports.join(', ')}. Is a Chromium browser running with remote debugging?`);
   }
 
-  const browser = await chromium.launch({ headless: options.headless ?? (process.env.DISPLAY ? false : true) });
-  return { browser, launched: true };
+  const { browser, context } = await launchBrowser({ headless: options.headless ?? (process.env.DISPLAY ? false : true) });
+  return { browser, launched: true, launchContext: context };
 }
 
 export async function capture(options: CaptureOptions): Promise<CaptureResult> {
-  const { browser, launched } = await connectToBrowser(options);
+  const { browser, launched, launchContext } = await connectToBrowser(options);
   const generators = new Map<string, SkillGenerator>();
   let totalRequests = 0;
   let filteredRequests = 0;
@@ -73,7 +74,10 @@ export async function capture(options: CaptureOptions): Promise<CaptureResult> {
   let idleInterval: ReturnType<typeof setInterval> | null = null;
 
   let page: Page;
-  if (launched) {
+  if (launched && launchContext) {
+    page = await launchContext.newPage();
+  } else if (launched) {
+    // Fallback: shouldn't happen, but handle gracefully
     const context = await browser.newContext();
     page = await context.newPage();
   } else {

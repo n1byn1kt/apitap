@@ -1,7 +1,8 @@
 // src/capture/session.ts
-import { chromium, type Browser, type Page } from 'playwright';
+import { type Browser, type Page } from 'playwright';
 import { randomUUID } from 'node:crypto';
 import { shouldCapture } from './filter.js';
+import { launchBrowser } from './browser.js';
 import { isDomainMatch } from './domain.js';
 import { SkillGenerator, type GeneratorOptions } from '../skill/generator.js';
 import { detectCaptcha } from '../auth/refresh.js';
@@ -53,8 +54,8 @@ export class CaptureSession {
     this.targetUrl = url.startsWith('http') ? url : `https://${url}`;
     const headless = this.options.headless ?? true;
 
-    this.browser = await chromium.launch({ headless });
-    const context = await this.browser.newContext();
+    const { browser, context } = await launchBrowser({ headless });
+    this.browser = browser;
 
     // Inject cached session cookies if available
     try {
@@ -62,7 +63,7 @@ export class CaptureSession {
       const machineId = await getMachineId();
       const authManager = new AuthManager(authDir, machineId);
       const domain = new URL(this.targetUrl).hostname;
-      const cachedSession = await authManager.retrieveSession(domain);
+      const cachedSession = await authManager.retrieveSessionWithFallback(domain);
       if (cachedSession?.cookies?.length) {
         await context.addCookies(cachedSession.cookies);
       }

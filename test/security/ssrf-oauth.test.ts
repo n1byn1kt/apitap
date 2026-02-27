@@ -85,6 +85,77 @@ describe('F2: OAuth token endpoint SSRF validation', () => {
     }
   });
 
+  it('allows Auth0 tenant subdomain', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(
+      JSON.stringify({ access_token: 'auth0_token' }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    )) as any;
+
+    try {
+      const result = await refreshOAuth(
+        'myapp.example.com',
+        makeOAuthConfig('https://tenant.auth0.com/oauth/token'),
+        mockAuthManager(),
+        { _skipSsrfCheck: true },
+      );
+      assert.equal(result.success, true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('allows Okta org subdomain', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(
+      JSON.stringify({ access_token: 'okta_token' }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    )) as any;
+
+    try {
+      const result = await refreshOAuth(
+        'myapp.example.com',
+        makeOAuthConfig('https://org.okta.com/oauth2/v1/token'),
+        mockAuthManager(),
+        { _skipSsrfCheck: true },
+      );
+      assert.equal(result.success, true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('allows securetoken.googleapis.com (Firebase)', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(
+      JSON.stringify({ access_token: 'firebase_token' }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    )) as any;
+
+    try {
+      const result = await refreshOAuth(
+        'myapp.example.com',
+        makeOAuthConfig('https://securetoken.googleapis.com/v1/token'),
+        mockAuthManager(),
+        { _skipSsrfCheck: true },
+      );
+      assert.equal(result.success, true);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('blocks evil-auth0.com (not a subdomain of auth0.com)', async () => {
+    const result = await refreshOAuth(
+      'myapp.example.com',
+      makeOAuthConfig('https://evil-auth0.com/oauth/token'),
+      mockAuthManager(),
+      { _skipSsrfCheck: true },
+    );
+    assert.equal(result.success, false);
+    assert.ok(result.error!.includes('domain mismatch'));
+  });
+
   it('allows token endpoint on subdomain of skill domain', async () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async () => new Response(

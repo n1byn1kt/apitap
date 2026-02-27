@@ -287,4 +287,25 @@ describe('refreshOAuth', () => {
     const params = new URLSearchParams(capturedBody);
     assert.equal(params.has('scope'), false);
   });
+
+  it('refreshes via Auth0 tenant endpoint (subdomain of known host)', async () => {
+    const auth0Config: OAuthConfig = {
+      tokenEndpoint: 'https://tenant.auth0.com/oauth/token',
+      clientId: 'auth0-client',
+      grantType: 'refresh_token',
+    };
+
+    await authManager.storeOAuthCredentials('myapp.com', {
+      refreshToken: 'rt_auth0',
+    });
+
+    mockFetch({
+      status: 200,
+      body: { access_token: 'auth0-access-token', token_type: 'bearer' },
+    });
+
+    const result = await refreshOAuth('myapp.com', auth0Config, authManager, { _skipSsrfCheck: true });
+    assert.equal(result.success, true);
+    assert.equal(result.accessToken, 'auth0-access-token');
+  });
 });

@@ -46,6 +46,7 @@ export function shouldPreferSystemChrome(): boolean {
   return process.env.APITAP_PREFER_SYSTEM_CHROME === '1';
 }
 
+
 /**
  * Launch a Chromium browser with anti-detection measures.
  *

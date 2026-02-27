@@ -107,6 +107,7 @@ export class AuthManager {
     return null;
   }
 
+
   /** Store OAuth credentials for a domain (merges with existing auth). */
   async storeOAuthCredentials(domain: string, creds: { refreshToken?: string; clientSecret?: string }): Promise<void> {
     const all = await this.loadAll();

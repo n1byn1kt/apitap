@@ -326,6 +326,7 @@ describe('refreshOAuth', () => {
     assert.equal(stored?.expiresAt, undefined);
   });
 
+
   it('refreshes via Auth0 tenant endpoint (subdomain of known host)', async () => {
     const auth0Config: OAuthConfig = {
       tokenEndpoint: 'https://tenant.auth0.com/oauth/token',

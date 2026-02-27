@@ -2,6 +2,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { isOAuthTokenRequest } from '../../src/capture/oauth-detector.js';
+import { SkillGenerator } from '../../src/skill/generator.js';
 
 describe('isOAuthTokenRequest', () => {
   it('detects refresh_token grant in URL-encoded body', () => {
@@ -208,5 +209,51 @@ describe('isOAuthTokenRequest', () => {
     });
     assert.ok(result);
     assert.equal(result.refreshToken, undefined);
+  });
+});
+
+describe('SkillGenerator OAuth refresh token', () => {
+  it('stores and exposes refreshToken from captured OAuth request', () => {
+    const gen = new SkillGenerator({ scrub: false });
+    gen.addExchange({
+      request: {
+        url: 'https://auth.example.com/oauth/token',
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        postData: 'grant_type=refresh_token&client_id=myapp&refresh_token=rt_captured_123',
+      },
+      response: {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ access_token: 'new_at', token_type: 'Bearer' }),
+        contentType: 'application/json',
+      },
+      timestamp: new Date().toISOString(),
+    });
+
+    assert.equal(gen.getOAuthRefreshToken(), 'rt_captured_123');
+    assert.ok(gen.getOAuthConfig());
+    assert.equal(gen.getOAuthConfig()!.clientId, 'myapp');
+  });
+
+  it('returns undefined refreshToken for client_credentials grant', () => {
+    const gen = new SkillGenerator({ scrub: false });
+    gen.addExchange({
+      request: {
+        url: 'https://auth.example.com/oauth/token',
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        postData: 'grant_type=client_credentials&client_id=myapp&client_secret=secret',
+      },
+      response: {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ access_token: 'at_cc', token_type: 'Bearer' }),
+        contentType: 'application/json',
+      },
+      timestamp: new Date().toISOString(),
+    });
+
+    assert.equal(gen.getOAuthRefreshToken(), undefined);
   });
 });

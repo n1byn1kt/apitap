@@ -180,6 +180,7 @@ export class SkillGenerator {
   private captchaRisk = false;
   private oauthConfig: OAuthConfig | null = null;
   private oauthClientSecret: string | undefined;
+  private oauthRefreshToken: string | undefined;
   private totalNetworkBytes = 0; // v1.0: accumulate all response sizes
 
   /** Number of unique endpoints captured so far */
@@ -255,6 +256,7 @@ export class SkillGenerator {
         ...(oauthInfo.scope ? { scope: oauthInfo.scope } : {}),
       };
       this.oauthClientSecret = oauthInfo.clientSecret;
+      this.oauthRefreshToken = oauthInfo.refreshToken;
     }
 
     // Extract auth before filtering headers (includes entropy-based detection)
@@ -400,6 +402,11 @@ export class SkillGenerator {
   /** Get the client secret captured from OAuth traffic (for encrypted storage). */
   getOAuthClientSecret(): string | undefined {
     return this.oauthClientSecret;
+  }
+
+  /** Get the refresh token captured from OAuth traffic (for encrypted storage). */
+  getOAuthRefreshToken(): string | undefined {
+    return this.oauthRefreshToken;
   }
 
   /** Check if any endpoint has refreshable tokens. */

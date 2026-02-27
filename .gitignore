@@ -30,3 +30,4 @@ Thumbs.db
 
 # Built output (force-added files)
 dist/mcp.js
+demo/

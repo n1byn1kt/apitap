@@ -4,7 +4,7 @@
 
 If you discover a security vulnerability in ApiTap, please report it responsibly.
 
-**Report via:** [GitHub Security Advisories](https://github.com/n1byn1kt/apitap/security/advisories/new)
+**Report via:** [GitHub Security Advisories](https://github.com/n1byn1kt/apitap/security/advisories/new) or email **hello@apitap.io**
 
 **Do NOT** file a public GitHub issue for security vulnerabilities.
 

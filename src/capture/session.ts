@@ -15,7 +15,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { CapturedExchange, PageSnapshot, PageElement, InteractionResult, FinishResult } from '../types.js';
 
-const APITAP_DIR = join(homedir(), '.apitap');
+const APITAP_DIR = process.env.APITAP_DIR || join(homedir(), '.apitap');
 const MAX_ELEMENTS = 100;
 const MAX_TEXT_LENGTH = 200;
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes

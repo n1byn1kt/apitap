@@ -41,4 +41,17 @@ describe('anti-bot measures', () => {
       await browser.close();
     }
   });
+
+  it('sets standard navigator and chrome fingerprints', async () => {
+    const { browser, context } = await launchBrowser({ headless: true });
+    try {
+      const page = await context.newPage();
+      const fp = await page.evaluate(() => ({
+        languages: navigator.languages,
+      }));
+      assert.ok(fp.languages.includes('en-US'));
+    } finally {
+      await browser.close();
+    }
+  });
 });

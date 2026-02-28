@@ -75,13 +75,8 @@ export class CaptureSession {
 
     this.setupResponseListener();
 
-    // Auto-timeout to prevent leaked browsers (unref so it doesn't block process exit)
-    const timeoutMs = this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-    this.timeoutTimer = setTimeout(() => {
-      this.expired = true;
-      this.cleanup().catch(() => {});
-    }, timeoutMs);
-    if (this.timeoutTimer.unref) this.timeoutTimer.unref();
+    // Auto-timeout to prevent leaked browsers (resets on each interaction)
+    this.resetTimeout();
 
     await this.page.goto(this.targetUrl, { waitUntil: 'domcontentloaded' });
     return this.takeSnapshot();
@@ -91,6 +86,9 @@ export class CaptureSession {
     if (this.expired) return { success: false, error: 'Session expired', snapshot: this.emptySnapshot() };
     if (this.closed) return { success: false, error: 'Session closed', snapshot: this.emptySnapshot() };
     if (!this.page) return { success: false, error: 'Session not started', snapshot: this.emptySnapshot() };
+
+    // Reset timeout on each interaction — active sessions aren't leaked browsers
+    this.resetTimeout();
 
     try {
       switch (action.action) {
@@ -466,6 +464,17 @@ export class CaptureSession {
       filteredRequests: this.filteredRequests,
       recentEndpoints: [...this.recentEndpoints],
     };
+  }
+
+  /** Reset the auto-timeout timer (called on each interaction to prevent premature close) */
+  private resetTimeout(): void {
+    if (this.timeoutTimer) clearTimeout(this.timeoutTimer);
+    const timeoutMs = this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.timeoutTimer = setTimeout(() => {
+      this.expired = true;
+      this.cleanup().catch(() => {});
+    }, timeoutMs);
+    if (this.timeoutTimer.unref) this.timeoutTimer.unref();
   }
 
   private async cleanup(): Promise<void> {

@@ -144,21 +144,26 @@ async function doHandoff(
     // Navigate to login page
     await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
 
-    // Poll for login success: check cookies periodically
+    // Baseline: snapshot cookie names present BEFORE login so we can detect new ones
+    const baselineCookies = await context.cookies();
+    const baselineCookieNames = new Set(baselineCookies.map(c => c.name));
+
+    // Poll for login success: check for NEW session-like cookies
     const startTime = Date.now();
     let loginDetected = false;
 
     while (Date.now() - startTime < timeout) {
       await page.waitForTimeout(2000);
 
-      // Check if we've detected session cookies
+      // Only trigger on NEW session-like cookies not present at page load
       const cookies = await context.cookies();
-      const hasSessionCookie = cookies.some(c =>
+      const hasNewSessionCookie = cookies.some(c =>
+        !baselineCookieNames.has(c.name) &&
         SESSION_COOKIE_PATTERNS.some(p => p.test(c.name)) &&
         !TRACKING_COOKIE_PATTERNS.some(p => p.test(c.name))
       );
 
-      if (hasSessionCookie || authDetected) {
+      if (hasNewSessionCookie || authDetected) {
         // Grace period: 4 additional polls at 2s each (~8s total)
         // Allows time for MFA, CAPTCHAs, and post-login redirects
         for (let grace = 0; grace < 4; grace++) {

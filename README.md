@@ -384,6 +384,10 @@ npm run build     # Compile to dist/
 npx tsx src/cli.ts capture <url>  # Run from source
 ```
 
+## Contact
+
+Questions, feedback, or issues? → **[hello@apitap.io](mailto:hello@apitap.io)**
+
 ## License
 
 [Business Source License 1.1](./LICENSE) — **free for all non-competing use** (personal, internal, educational, research, open source). Cannot be rebranded and sold as a competing service. Converts to Apache 2.0 on February 7, 2029.

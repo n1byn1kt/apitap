@@ -1,6 +1,6 @@
 {
   "name": "@apitap/core",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "Intercept web API traffic during browsing. Generate portable skill files so AI agents can call APIs directly instead of scraping.",
   "type": "module",
   "main": "dist/index.js",
@@ -12,7 +12,8 @@
     "build": "tsc",
     "dev": "tsx src/cli.ts",
     "test": "node --import tsx --test 'test/**/*.test.ts'",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
   },
   "license": "BSL-1.1",
   "repository": {

@@ -27,6 +27,11 @@ const TRACKING_COOKIE_PATTERNS = [
   /^_ga/i, /^_gid/i, /^_fb/i, /^_gcl/i, /^__utm/i,
 ];
 
+// Common anonymous/bootstrap cookies that should not end auth flow
+const ANONYMOUS_COOKIE_PATTERNS = [
+  /^anon/i, /^guest/i, /^visitor/i, /^ab[_-]?test/i, /^optanon/i, /^consent/i,
+];
+
 /**
  * Detect whether a response indicates successful login.
  * Checks for session-like Set-Cookie headers on 2xx responses.
@@ -55,6 +60,33 @@ export function detectLoginSuccess(
 
   // Match session-like cookies
   return SESSION_COOKIE_PATTERNS.some(p => p.test(cookieName));
+}
+
+function isSessionLikeCookieName(name: string): boolean {
+  return SESSION_COOKIE_PATTERNS.some(p => p.test(name));
+}
+
+function isTrackingCookieName(name: string): boolean {
+  return TRACKING_COOKIE_PATTERNS.some(p => p.test(name));
+}
+
+function isAnonymousCookieName(name: string): boolean {
+  return ANONYMOUS_COOKIE_PATTERNS.some(p => p.test(name));
+}
+
+export function hasHighConfidenceAuthTransition(
+  baselineCookieValues: Map<string, string>,
+  currentCookies: Array<{ name: string; value: string }>,
+): boolean {
+  return currentCookies.some((cookie) => {
+    const baseline = baselineCookieValues.get(cookie.name);
+    const changedOrNew = baseline === undefined || baseline !== cookie.value;
+    if (!changedOrNew) return false;
+    if (!isSessionLikeCookieName(cookie.name)) return false;
+    if (isTrackingCookieName(cookie.name)) return false;
+    if (isAnonymousCookieName(cookie.name)) return false;
+    return true;
+  });
 }
 
 // Mutex to prevent concurrent handoffs for the same domain
@@ -144,9 +176,11 @@ async function doHandoff(
     // Navigate to login page
     await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
 
-    // Baseline: snapshot cookie names present BEFORE login so we can detect new ones
+    // Baseline: snapshot cookie values present BEFORE login so we can detect real transitions
     const baselineCookies = await context.cookies();
-    const baselineCookieNames = new Set(baselineCookies.map(c => c.name));
+    const baselineCookieValues = new Map(
+      baselineCookies.map(c => [c.name, c.value])
+    );
 
     // Poll for login success: check for NEW session-like cookies
     const startTime = Date.now();
@@ -155,15 +189,10 @@ async function doHandoff(
     while (Date.now() - startTime < timeout) {
       await page.waitForTimeout(2000);
 
-      // Only trigger on NEW session-like cookies not present at page load
       const cookies = await context.cookies();
-      const hasNewSessionCookie = cookies.some(c =>
-        !baselineCookieNames.has(c.name) &&
-        SESSION_COOKIE_PATTERNS.some(p => p.test(c.name)) &&
-        !TRACKING_COOKIE_PATTERNS.some(p => p.test(c.name))
-      );
+      const hasAuthTransition = hasHighConfidenceAuthTransition(baselineCookieValues, cookies);
 
-      if (hasNewSessionCookie || authDetected) {
+      if (hasAuthTransition || authDetected) {
         // Grace period: 4 additional polls at 2s each (~8s total)
         // Allows time for MFA, CAPTCHAs, and post-login redirects
         for (let grace = 0; grace < 4; grace++) {

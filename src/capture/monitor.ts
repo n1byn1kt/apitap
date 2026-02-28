@@ -6,6 +6,9 @@ import { SkillGenerator, type GeneratorOptions } from '../skill/generator.js';
 import { IdleTracker } from './idle.js';
 import { detectCaptcha } from '../auth/refresh.js';
 import { launchBrowser } from './browser.js';
+import { AuthManager, getMachineId } from '../auth/manager.js';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type { CapturedExchange } from '../types.js';
 
 export interface CaptureOptions {
@@ -18,6 +21,7 @@ export interface CaptureOptions {
   allDomains?: boolean;
   enablePreview?: boolean;
   scrub?: boolean;
+  authDir?: string;
   onEndpoint?: (endpoint: { id: string; method: string; path: string }) => void;
   onFiltered?: () => void;
   onIdle?: () => void;
@@ -31,6 +35,7 @@ export interface CaptureResult {
 }
 
 const DEFAULT_CDP_PORTS = [18792, 18800, 9222];
+const APITAP_DIR = process.env.APITAP_DIR || join(homedir(), '.apitap');
 
 async function connectToBrowser(options: CaptureOptions): Promise<{ browser: Browser; launched: boolean; launchContext?: import('playwright').BrowserContext }> {
   if (!options.launch) {
@@ -170,6 +175,20 @@ export async function capture(options: CaptureOptions): Promise<CaptureResult> {
       // Response body may not be available (e.g. redirects); skip silently
     }
   });
+
+  // Inject cached session cookies if available
+  try {
+    const authDir = options.authDir ?? APITAP_DIR;
+    const machineId = await getMachineId();
+    const authManager = new AuthManager(authDir, machineId);
+    const domain = new URL(targetUrl.startsWith('http') ? targetUrl : `https://${targetUrl}`).hostname;
+    const cachedSession = await authManager.retrieveSessionWithFallback(domain);
+    if (cachedSession?.cookies?.length) {
+      await page.context().addCookies(cachedSession.cookies);
+    }
+  } catch {
+    // Auth retrieval failed — proceed without cached session
+  }
 
   await page.goto(options.url, { waitUntil: 'domcontentloaded' });
 

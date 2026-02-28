@@ -1,7 +1,7 @@
 // test/auth/handoff.test.ts
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { detectLoginSuccess } from '../../src/auth/handoff.js';
+import { detectLoginSuccess, hasHighConfidenceAuthTransition } from '../../src/auth/handoff.js';
 
 describe('detectLoginSuccess', () => {
   it('detects Set-Cookie with session-like names', () => {
@@ -41,5 +41,31 @@ describe('detectLoginSuccess', () => {
 
   it('returns false for empty headers', () => {
     assert.equal(detectLoginSuccess(new Map(), 200), false);
+  });
+});
+
+describe('hasHighConfidenceAuthTransition', () => {
+  it('returns false for new anonymous cookie', () => {
+    const baseline = new Map<string, string>();
+    const current = [{ name: 'anon_id', value: 'abc123' }];
+    assert.equal(hasHighConfidenceAuthTransition(baseline, current), false);
+  });
+
+  it('returns true for new session cookie', () => {
+    const baseline = new Map<string, string>();
+    const current = [{ name: 'session_id', value: 'abc123' }];
+    assert.equal(hasHighConfidenceAuthTransition(baseline, current), true);
+  });
+
+  it('returns true when session-like cookie value changes', () => {
+    const baseline = new Map<string, string>([['auth_token', 'old-value']]);
+    const current = [{ name: 'auth_token', value: 'new-value' }];
+    assert.equal(hasHighConfidenceAuthTransition(baseline, current), true);
+  });
+
+  it('returns false when session-like cookie value is unchanged', () => {
+    const baseline = new Map<string, string>([['session_id', 'same-value']]);
+    const current = [{ name: 'session_id', value: 'same-value' }];
+    assert.equal(hasHighConfidenceAuthTransition(baseline, current), false);
   });
 });

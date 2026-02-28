@@ -23,6 +23,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { createMcpServer } from './mcp.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
@@ -73,6 +74,7 @@ function printUsage(): void {
     apitap import <file>       Import a skill file with safety validation
     apitap refresh <domain>    Refresh auth tokens via browser
     apitap auth [domain]       View or manage stored auth
+    apitap mcp                 Run the full ApiTap MCP server over stdio
     apitap serve <domain>      Serve a skill file as an MCP server
     apitap browse <url>        Browse a URL (discover + replay in one step)
     apitap peek <url>          Zero-cost triage (HEAD only)
@@ -673,6 +675,16 @@ async function handleServe(positional: string[], flags: Record<string, string | 
   }
 }
 
+async function handleMcp(): Promise<void> {
+  const server = createMcpServer({
+    skillsDir: SKILLS_DIR,
+    _skipSsrfCheck: process.env.APITAP_SKIP_SSRF_CHECK === '1',
+  });
+  const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+}
+
 function timeAgo(isoDate: string): string {
   const diff = Date.now() - new Date(isoDate).getTime();
   const minutes = Math.floor(diff / 60000);
@@ -1010,6 +1022,9 @@ async function main(): Promise<void> {
       break;
     case 'serve':
       await handleServe(positional, flags);
+      break;
+    case 'mcp':
+      await handleMcp();
       break;
     case 'inspect':
       await handleInspect(positional, flags);

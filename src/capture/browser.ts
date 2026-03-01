@@ -1,7 +1,28 @@
 // src/capture/browser.ts
 import type { Browser, BrowserContext } from 'playwright';
+import type { PlaywrightCookie } from '../types.js';
 
 const CHROME_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+/**
+ * Normalize cookies for Playwright's storageState API.
+ * storageState requires all fields (expires, httpOnly, secure, sameSite)
+ * while addCookies() fills in defaults for missing fields.
+ */
+export function normalizeCookiesForStorageState(
+  cookies: PlaywrightCookie[],
+): Array<{ name: string; value: string; domain: string; path: string; expires: number; httpOnly: boolean; secure: boolean; sameSite: 'Strict' | 'Lax' | 'None' }> {
+  return cookies.map(c => ({
+    name: c.name,
+    value: c.value,
+    domain: c.domain,
+    path: c.path || '/',
+    expires: c.expires ?? -1,
+    httpOnly: c.httpOnly ?? false,
+    secure: c.secure ?? false,
+    sameSite: c.sameSite ?? 'Lax',
+  }));
+}
 
 /**
  * Launch args that reduce Playwright's automation fingerprint.

@@ -5,7 +5,7 @@ import { isDomainMatch } from './domain.js';
 import { SkillGenerator, type GeneratorOptions } from '../skill/generator.js';
 import { IdleTracker } from './idle.js';
 import { detectCaptcha } from '../auth/refresh.js';
-import { launchBrowser } from './browser.js';
+import { launchBrowser, normalizeCookiesForStorageState } from './browser.js';
 import { AuthManager, getMachineId } from '../auth/manager.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -76,7 +76,7 @@ export async function capture(options: CaptureOptions): Promise<CaptureResult> {
     const cachedSession = await authManager.retrieveSessionWithFallback(domain);
     if (cachedSession?.cookies?.length) {
       storageState = {
-        cookies: cachedSession.cookies,
+        cookies: normalizeCookiesForStorageState(cachedSession.cookies),
         origins: [],
       };
     }

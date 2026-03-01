@@ -2,7 +2,7 @@
 import { type Browser, type Page } from 'playwright';
 import { randomUUID } from 'node:crypto';
 import { shouldCapture } from './filter.js';
-import { launchBrowser } from './browser.js';
+import { launchBrowser, normalizeCookiesForStorageState } from './browser.js';
 import { isDomainMatch } from './domain.js';
 import { SkillGenerator, type GeneratorOptions } from '../skill/generator.js';
 import { detectCaptcha } from '../auth/refresh.js';
@@ -64,7 +64,7 @@ export class CaptureSession {
       const cachedSession = await authManager.retrieveSessionWithFallback(domain);
       if (cachedSession?.cookies?.length) {
         storageState = {
-          cookies: cachedSession.cookies,
+          cookies: normalizeCookiesForStorageState(cachedSession.cookies),
           origins: [],
         };
       }

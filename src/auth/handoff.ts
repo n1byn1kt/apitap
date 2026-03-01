@@ -176,7 +176,13 @@ async function doHandoff(
     // Navigate to login page
     await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
 
-    // Baseline: snapshot cookie values present BEFORE login so we can detect real transitions
+    // Let the page settle — many sites set cookies via async JS after domcontentloaded.
+    // Wait for network to go idle (or timeout after 5s), then pause 3s more for late cookies.
+    // Without this, pre-login cookies trigger false positive auth transitions.
+    await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
+    await page.waitForTimeout(3_000);
+
+    // Baseline: snapshot cookie values AFTER the page has fully settled
     const baselineCookies = await context.cookies();
     const baselineCookieValues = new Map(
       baselineCookies.map(c => [c.name, c.value])

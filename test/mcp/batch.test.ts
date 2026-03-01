@@ -110,6 +110,7 @@ describe('apitap_replay_batch via MCP', () => {
     assert.equal(data.length, 2);
     assert.equal(data[0].status, 200);
     assert.deepEqual(data[0].data, [{ id: 1 }]);
+    assert.equal(data[0].skillSource, 'disk', `batch result keys: ${Object.keys(data[0]).join(', ')}`);
     assert.equal(data[1].status, 200);
     assert.deepEqual(data[1].data, { value: 99 });
   });

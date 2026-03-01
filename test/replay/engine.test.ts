@@ -746,6 +746,33 @@ describe('replayEndpoint with retry-on-401', () => {
     assert.equal(data.domain, 'localhost');
   });
 
+  it('uses parent domain auth when subdomain has no auth', async () => {
+    // Store auth on parent domain (e.g. spotify.com)
+    // Use example.com so getParentDomains('api.example.com') → ['example.com']
+    await authManager.store('example.com', {
+      type: 'bearer', header: 'authorization', value: 'Bearer valid-token',
+    });
+
+    const skill: SkillFile = {
+      version: '1.2', domain: 'api.example.com', capturedAt: new Date().toISOString(),
+      baseUrl: retryBaseUrl, endpoints: [{
+        id: 'get-api-data', method: 'GET', path: '/api/data',
+        queryParams: {}, headers: {},
+        responseShape: { type: 'object', fields: ['data'] },
+        examples: { request: { url: `${retryBaseUrl}/api/data`, headers: {} }, responsePreview: { data: 'success' } },
+      }],
+      metadata: { captureCount: 1, filteredCount: 0, toolVersion: '1.0.0' },
+      provenance: 'self',
+    };
+
+    const result = await replayEndpoint(skill, 'get-api-data', {
+      authManager, domain: 'api.example.com', _skipSsrfCheck: true,
+    });
+
+    assert.equal(result.status, 200);
+    assert.equal(lastAuthHeader, 'Bearer valid-token');
+  });
+
   it('does not proactively refresh JWT with future expiry', async () => {
     // Store a JWT that expires far in the future
     const futureExp = Math.floor(Date.now() / 1000) + 3600;

@@ -560,6 +560,9 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     {
       description:
         'Open a visible browser for human login (handles 2FA, CAPTCHAs). ' +
+        'The user must CLOSE THE BROWSER WINDOW when they are done logging in — ' +
+        'this is the signal that authentication is complete. ' +
+        'Tell the user to close the browser after login. ' +
         'Stores session tokens encrypted — auto-injected on future replay/capture calls.',
       inputSchema: z.object({
         domain: z.string().describe('Domain to authenticate (e.g. "github.com")'),

@@ -272,7 +272,7 @@ describe('apitap_replay via MCP', () => {
     assert.equal(data.endpointId, 'get-events');
     assert.equal(data.tier, 'green');
     assert.ok(data.capturedAt);
-    assert.equal(typeof data.fromCache, 'boolean');
+    assert.ok(['disk', 'discovered', 'captured'].includes(data.skillSource));
   });
 
   it('marks replay response as untrusted external content', async () => {

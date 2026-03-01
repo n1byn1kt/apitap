@@ -94,7 +94,7 @@ describe('apitap_browse via MCP', () => {
     assert.equal(data.success, true);
     assert.equal(data.domain, 'browse-test.example.com');
     assert.ok(data.data);
-    assert.equal(data.fromCache, true);
+    assert.equal(data.skillSource, 'disk');
   });
 
   it('returns guidance for unknown domain', async () => {

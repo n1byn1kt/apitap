@@ -175,6 +175,17 @@ async function doHandoff(
     // Navigate to login page
     await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
 
+    // Inject a banner so the user knows what to do
+    await page.evaluate(() => {
+      const banner = document.createElement('div');
+      banner.textContent = '\u{1F511} ApiTap — Log in, then close this browser window to save your session';
+      banner.style.cssText =
+        'position:fixed;top:0;left:0;right:0;z-index:2147483647;' +
+        'background:#1a1a2e;color:#e0e0e0;padding:8px 16px;font:14px/1.4 system-ui,sans-serif;' +
+        'text-align:center;box-shadow:0 2px 8px rgba(0,0,0,0.3);';
+      document.body.prepend(banner);
+    }).catch(() => {}); // Non-critical — page may block script execution
+
     // Continuously snapshot cookies so we have the latest when browser closes.
     // We can't read cookies after the browser disconnects.
     const cookieInterval = setInterval(async () => {

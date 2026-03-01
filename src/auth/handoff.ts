@@ -98,10 +98,14 @@ const handoffLocks = new Map<string, Promise<HandoffResult>>();
  * Flow:
  * 1. Launch visible Chromium browser
  * 2. Navigate to login URL
- * 3. Wait for human to log in (watches for session cookies / auth headers)
- * 4. Capture all cookies + detected auth
+ * 3. Wait for human to log in and close the browser
+ * 4. Capture all cookies + detected auth from last snapshot
  * 5. Store encrypted via AuthManager
- * 6. Close browser, return result
+ * 6. Return result
+ *
+ * The user closing the browser is the primary signal that login is complete.
+ * This avoids false positives from cookie-based heuristics that fire on
+ * anonymous session cookies set during normal page load.
  */
 export async function requestAuth(
   authManager: AuthManager,
@@ -144,15 +148,10 @@ async function doHandoff(
     const page = await context.newPage();
     let authDetected: 'bearer' | 'cookie' | 'api-key' | undefined;
     let detectedAuth: StoredAuth | undefined;
+    let latestCookies: Array<{ name: string; value: string; domain: string; path: string; expires: number; httpOnly: boolean; secure: boolean; sameSite: 'Strict' | 'Lax' | 'None' }> = [];
 
-    // Watch network responses for auth signals
+    // Watch network responses for auth signals (bearer tokens, API keys)
     page.on('response', (response) => {
-      const headers = new Map<string, string>();
-      for (const [key, value] of Object.entries(response.headers())) {
-        headers.set(key, value);
-      }
-
-      // Detect auth from request headers
       const authHeader = response.request().headers()['authorization'];
       if (authHeader) {
         if (authHeader.startsWith('Bearer ')) {
@@ -176,52 +175,42 @@ async function doHandoff(
     // Navigate to login page
     await page.goto(loginUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
 
-    // Let the page settle — many sites set cookies via async JS after domcontentloaded.
-    // Wait for network to go idle (or timeout after 5s), then pause 3s more for late cookies.
-    // Without this, pre-login cookies trigger false positive auth transitions.
-    await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
-    await page.waitForTimeout(3_000);
-
-    // Baseline: snapshot cookie values AFTER the page has fully settled
-    const baselineCookies = await context.cookies();
-    const baselineCookieValues = new Map(
-      baselineCookies.map(c => [c.name, c.value])
-    );
-
-    // Poll for login success: check for NEW session-like cookies
-    const startTime = Date.now();
-    let loginDetected = false;
-
-    while (Date.now() - startTime < timeout) {
-      await page.waitForTimeout(2000);
-
-      const cookies = await context.cookies();
-      const hasAuthTransition = hasHighConfidenceAuthTransition(baselineCookieValues, cookies);
-
-      if (hasAuthTransition || authDetected) {
-        // Grace period: 4 additional polls at 2s each (~8s total)
-        // Allows time for MFA, CAPTCHAs, and post-login redirects
-        for (let grace = 0; grace < 4; grace++) {
-          if (page.isClosed()) break;
-          await page.waitForLoadState('networkidle', { timeout: 3000 }).catch(() => {});
-          await page.waitForTimeout(2000);
-        }
-        loginDetected = true;
-        break;
+    // Continuously snapshot cookies so we have the latest when browser closes.
+    // We can't read cookies after the browser disconnects.
+    const cookieInterval = setInterval(async () => {
+      try {
+        latestCookies = await context.cookies();
+      } catch {
+        // Browser may be closing — keep last snapshot
       }
+    }, 2000);
 
-      // Check if browser was closed by user
-      if (page.isClosed()) break;
+    // Wait for user to close browser (primary signal) or timeout.
+    // The user logs in at their own pace, then closes the browser when done.
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, timeout);
+      browser.on('disconnected', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+
+    clearInterval(cookieInterval);
+
+    // Try to get final cookies (may fail if browser already disconnected)
+    try {
+      latestCookies = await context.cookies();
+    } catch {
+      // Browser disconnected — use last snapshot from interval
     }
 
-    // Capture final cookies
-    const cookies = await context.cookies();
+    const cookies = latestCookies;
 
     if (cookies.length === 0 && !authDetected) {
       return {
         success: false,
         cookieCount: 0,
-        error: loginDetected ? undefined : 'Timeout: no login detected within the allowed time',
+        error: 'No cookies captured. Browser may have been closed before page loaded.',
       };
     }
 
@@ -267,6 +256,10 @@ async function doHandoff(
       error: error instanceof Error ? error.message : String(error),
     };
   } finally {
-    await browser.close();
+    try {
+      await browser.close();
+    } catch {
+      // Browser already disconnected by user
+    }
   }
 }

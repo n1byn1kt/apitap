@@ -891,3 +891,113 @@ describe('replayEndpoint expiresAt pre-flight refresh', () => {
     assert.equal(receivedAuth, 'Bearer valid-token');
   });
 });
+
+describe('replayEndpoint contract validation', () => {
+  let driftServer: Server;
+  let driftBaseUrl: string;
+
+  before(async () => {
+    driftServer = createServer((req, res) => {
+      // Return a response that differs from the captured schema
+      // Missing 'name' field, added 'email' field, 'id' changed type
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ id: 'string-now', email: 'new@example.com' }));
+    });
+    await new Promise<void>(resolve => driftServer.listen(0, resolve));
+    const port = (driftServer.address() as AddressInfo).port;
+    driftBaseUrl = `http://localhost:${port}`;
+  });
+
+  after(async () => {
+    await new Promise<void>(resolve => driftServer.close(() => resolve()));
+  });
+
+  it('reports contract warnings when schema drifts', async () => {
+    const skill: SkillFile = {
+      version: '1.2', domain: 'localhost', capturedAt: new Date().toISOString(),
+      baseUrl: driftBaseUrl, endpoints: [{
+        id: 'get-user', method: 'GET', path: '/user',
+        queryParams: {}, headers: {},
+        responseShape: { type: 'object', fields: ['id', 'name'] },
+        responseSchema: {
+          type: 'object',
+          fields: {
+            id: { type: 'number' },
+            name: { type: 'string' },
+          },
+        },
+        examples: { request: { url: `${driftBaseUrl}/user`, headers: {} }, responsePreview: { id: 1, name: 'Alice' } },
+      }],
+      metadata: { captureCount: 1, filteredCount: 0, toolVersion: '1.0.0' },
+      provenance: 'self',
+    };
+
+    const result = await replayEndpoint(skill, 'get-user', { _skipSsrfCheck: true });
+
+    assert.equal(result.status, 200);
+    assert.ok(result.contractWarnings, 'should have contract warnings');
+    assert.ok(result.contractWarnings!.length > 0, 'should have at least one warning');
+
+    // Check for specific warnings
+    const errors = result.contractWarnings!.filter(w => w.severity === 'error');
+    const warns = result.contractWarnings!.filter(w => w.severity === 'warn');
+    const infos = result.contractWarnings!.filter(w => w.severity === 'info');
+
+    assert.ok(errors.some(w => w.path === 'name'), 'should report missing name field');
+    assert.ok(warns.some(w => w.path === 'id'), 'should report id type change');
+    assert.ok(infos.some(w => w.path === 'email'), 'should report new email field');
+  });
+
+  it('returns no warnings when schema matches', async () => {
+    const matchServer = createServer((req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ id: 42, name: 'Bob' }));
+    });
+    await new Promise<void>(resolve => matchServer.listen(0, resolve));
+    const matchPort = (matchServer.address() as AddressInfo).port;
+    const matchBaseUrl = `http://localhost:${matchPort}`;
+
+    const skill: SkillFile = {
+      version: '1.2', domain: 'localhost', capturedAt: new Date().toISOString(),
+      baseUrl: matchBaseUrl, endpoints: [{
+        id: 'get-user', method: 'GET', path: '/user',
+        queryParams: {}, headers: {},
+        responseShape: { type: 'object', fields: ['id', 'name'] },
+        responseSchema: {
+          type: 'object',
+          fields: { id: { type: 'number' }, name: { type: 'string' } },
+        },
+        examples: { request: { url: `${matchBaseUrl}/user`, headers: {} }, responsePreview: { id: 1, name: 'Alice' } },
+      }],
+      metadata: { captureCount: 1, filteredCount: 0, toolVersion: '1.0.0' },
+      provenance: 'self',
+    };
+
+    const result = await replayEndpoint(skill, 'get-user', { _skipSsrfCheck: true });
+
+    assert.equal(result.status, 200);
+    assert.equal(result.contractWarnings, undefined);
+
+    await new Promise<void>(resolve => matchServer.close(() => resolve()));
+  });
+
+  it('skips contract validation when no responseSchema', async () => {
+    const skill: SkillFile = {
+      version: '1.2', domain: 'localhost', capturedAt: new Date().toISOString(),
+      baseUrl: driftBaseUrl, endpoints: [{
+        id: 'get-user', method: 'GET', path: '/user',
+        queryParams: {}, headers: {},
+        responseShape: { type: 'object', fields: ['id'] },
+        // no responseSchema
+        examples: { request: { url: `${driftBaseUrl}/user`, headers: {} }, responsePreview: { id: 1 } },
+      }],
+      metadata: { captureCount: 1, filteredCount: 0, toolVersion: '1.0.0' },
+      provenance: 'self',
+    };
+
+    const result = await replayEndpoint(skill, 'get-user', { _skipSsrfCheck: true });
+
+    assert.equal(result.status, 200);
+    assert.equal(result.contractWarnings, undefined);
+  });
+});

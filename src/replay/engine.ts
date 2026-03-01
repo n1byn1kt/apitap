@@ -6,6 +6,8 @@ import { parseJwtClaims } from '../capture/entropy.js';
 import { refreshTokens } from '../auth/refresh.js';
 import { truncateResponse } from './truncate.js';
 import { resolveAndValidateUrl } from '../skill/ssrf.js';
+import { snapshotSchema } from '../contract/schema.js';
+import { diffSchema, type ContractWarning } from '../contract/diff.js';
 
 // Header security: block dangerous headers from skill files (blocklist approach).
 // All other headers — including custom API headers like Client-ID — pass through.
@@ -66,6 +68,8 @@ export interface ReplayResult {
   refreshed?: boolean;
   /** Whether the response was truncated to fit maxBytes */
   truncated?: boolean;
+  /** Contract warnings from schema drift detection */
+  contractWarnings?: ContractWarning[];
 }
 
 /**
@@ -468,6 +472,16 @@ export async function replayEndpoint(
     ? wrapAuthError(response.status, data, skill.domain)
     : data;
 
+  // Contract validation: diff response schema against captured baseline
+  let contractWarnings: ContractWarning[] | undefined;
+  if (endpoint.responseSchema && typeof data === 'object' && data !== null) {
+    const actualSchema = snapshotSchema(data);
+    const warnings = diffSchema(endpoint.responseSchema, actualSchema);
+    if (warnings.length > 0) {
+      contractWarnings = warnings;
+    }
+  }
+
   // Apply truncation if maxBytes is set
   if (options.maxBytes) {
     const truncated = truncateResponse(finalData, { maxBytes: options.maxBytes });
@@ -477,10 +491,11 @@ export async function replayEndpoint(
       data: truncated.data,
       ...(refreshed ? { refreshed } : {}),
       ...(truncated.truncated ? { truncated: true } : {}),
+      ...(contractWarnings ? { contractWarnings } : {}),
     };
   }
 
-  return { status: response.status, headers: responseHeaders, data: finalData, ...(refreshed ? { refreshed } : {}) };
+  return { status: response.status, headers: responseHeaders, data: finalData, ...(refreshed ? { refreshed } : {}), ...(contractWarnings ? { contractWarnings } : {}) };
 }
 
 // --- Batch replay ---

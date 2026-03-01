@@ -240,6 +240,29 @@ export async function replayEndpoint(
     }
   }
 
+  // Resolve [stored] placeholders in headers
+  const storedHeaders = Object.entries(headers).filter(([_, v]) => v === '[stored]');
+  if (storedHeaders.length > 0) {
+    if (authManager && domain) {
+      const auth = endpoint.isolatedAuth
+        ? await authManager.retrieve(domain)
+        : await authManager.retrieveWithFallback(domain);
+      if (auth) {
+        for (const [key] of storedHeaders) {
+          if (key.toLowerCase() === auth.header.toLowerCase()) {
+            headers[key] = auth.value;
+          }
+        }
+      }
+    }
+    // Delete any remaining unresolved [stored] — literal "[stored]" causes server errors
+    for (const [key] of Object.entries(headers)) {
+      if (headers[key] === '[stored]') {
+        delete headers[key];
+      }
+    }
+  }
+
   if (endpoint.requestBody) {
     let processedBody = endpoint.requestBody.template;
 
@@ -515,6 +538,7 @@ export interface BatchReplayResult {
   tier?: string;
   capturedAt?: string;
   truncated?: boolean;
+  contractWarnings?: ContractWarning[];
 }
 
 export async function replayMultiple(
@@ -574,6 +598,7 @@ export async function replayMultiple(
           tier,
           capturedAt: skill.capturedAt,
           ...(result.truncated ? { truncated: true } : {}),
+          ...(result.contractWarnings?.length ? { contractWarnings: result.contractWarnings } : {}),
         };
       } catch (err: any) {
         return {

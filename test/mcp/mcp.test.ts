@@ -117,6 +117,8 @@ describe('MCP server tool registration', () => {
     assert.ok(cap.inputSchema.properties.url);
     assert.ok(cap.inputSchema.required.includes('url'));
     assert.ok(cap.inputSchema.properties.duration);
+    // port parameter was removed — CaptureSession always launches its own browser
+    assert.equal(cap.inputSchema.properties.port, undefined, 'port parameter should not exist');
   });
 
   it('apitap_search description explains tier system', async () => {

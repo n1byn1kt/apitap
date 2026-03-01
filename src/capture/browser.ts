@@ -34,7 +34,10 @@ export function shouldPreferSystemChrome(): boolean {
  * 3. navigator.webdriver = false via addInitScript
  * 4. Viewport 1920x1080
  */
-export async function launchBrowser(options: { headless: boolean }): Promise<{ browser: Browser; context: BrowserContext }> {
+export async function launchBrowser(options: {
+  headless: boolean;
+  storageState?: { cookies: any[]; origins: any[] };
+}): Promise<{ browser: Browser; context: BrowserContext }> {
   const { chromium } = await import('playwright');
 
   const launchOptions = {
@@ -61,6 +64,7 @@ export async function launchBrowser(options: { headless: boolean }): Promise<{ b
     viewport: { width: 1920, height: 1080 },
     locale: 'en-US',
     extraHTTPHeaders: { 'accept-language': 'en-US,en;q=0.9' },
+    ...(options.storageState ? { storageState: options.storageState } : {}),
   });
 
   await context.addInitScript(() => {

@@ -54,10 +54,8 @@ export class CaptureSession {
     this.targetUrl = url.startsWith('http') ? url : `https://${url}`;
     const headless = this.options.headless ?? true;
 
-    const { browser, context } = await launchBrowser({ headless });
-    this.browser = browser;
-
-    // Inject cached session cookies if available
+    // Load cached session cookies before launching browser
+    let storageState: { cookies: any[]; origins: any[] } | undefined;
     try {
       const authDir = this.options.authDir ?? APITAP_DIR;
       const machineId = await getMachineId();
@@ -65,11 +63,17 @@ export class CaptureSession {
       const domain = new URL(this.targetUrl).hostname;
       const cachedSession = await authManager.retrieveSessionWithFallback(domain);
       if (cachedSession?.cookies?.length) {
-        await context.addCookies(cachedSession.cookies);
+        storageState = {
+          cookies: cachedSession.cookies,
+          origins: [],
+        };
       }
     } catch {
       // Auth retrieval failed — proceed without cached session
     }
+
+    const { browser, context } = await launchBrowser({ headless, storageState });
+    this.browser = browser;
 
     this.page = await context.newPage();
 

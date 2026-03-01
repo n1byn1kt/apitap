@@ -136,8 +136,9 @@ describe('SkillGenerator', () => {
     const h = skill.endpoints[0].headers;
     assert.equal(h['authorization'], '[stored]');
     assert.equal(h['x-api-key'], '[stored]');
-    assert.equal(h['user-agent'], undefined);
-    assert.equal(h['accept-encoding'], undefined);
+    assert.equal(h['user-agent'], 'Mozilla/5.0 ...'); // user-agent preserved (useful for API compat)
+    assert.equal(h['accept-encoding'], undefined);     // stripped (handled by fetch)
+    assert.equal(h['cookie'], undefined);               // stripped (stored separately)
   });
 
   it('tracks filtered count', () => {
@@ -335,6 +336,73 @@ describe('SkillGenerator', () => {
 
     const skill = gen.toSkillFile('example.com');
     assert.equal(skill.endpoints[0].pagination, undefined);
+  });
+
+  it('preserves custom headers like Client-ID', () => {
+    const gen = new SkillGenerator();
+    gen.addExchange({
+      request: {
+        url: 'https://api.twitch.tv/helix/streams',
+        method: 'GET',
+        headers: {
+          'client-id': 'abc123',
+          'content-type': 'application/json',
+          'accept': 'application/json',
+        },
+      },
+      response: {
+        status: 200,
+        headers: {},
+        body: '{"data":[]}',
+        contentType: 'application/json',
+      },
+      timestamp: new Date().toISOString(),
+    });
+
+    const skill = gen.toSkillFile('api.twitch.tv');
+    const ep = skill.endpoints[0];
+    assert.ok('client-id' in ep.headers, 'client-id header should be preserved');
+    assert.equal(ep.headers['content-type'], 'application/json');
+    assert.equal(ep.headers['accept'], 'application/json');
+  });
+
+  it('strips connection control and browser-internal headers', () => {
+    const gen = new SkillGenerator();
+    gen.addExchange({
+      request: {
+        url: 'https://api.example.com/data',
+        method: 'GET',
+        headers: {
+          'accept': 'application/json',
+          'host': 'api.example.com',
+          'connection': 'keep-alive',
+          'sec-fetch-dest': 'empty',
+          'sec-fetch-mode': 'cors',
+          'sec-ch-ua': '"Chromium";v="120"',
+          'accept-encoding': 'gzip, deflate',
+          'cookie': 'session=abc123',
+          'x-forwarded-for': '1.2.3.4',
+        },
+      },
+      response: {
+        status: 200,
+        headers: {},
+        body: '{"ok":true}',
+        contentType: 'application/json',
+      },
+      timestamp: new Date().toISOString(),
+    });
+
+    const skill = gen.toSkillFile('api.example.com');
+    const ep = skill.endpoints[0];
+    assert.ok('accept' in ep.headers, 'accept should be preserved');
+    assert.ok(!('host' in ep.headers), 'host should be stripped');
+    assert.ok(!('connection' in ep.headers), 'connection should be stripped');
+    assert.ok(!('sec-fetch-dest' in ep.headers), 'sec-fetch-dest should be stripped');
+    assert.ok(!('sec-ch-ua' in ep.headers), 'sec-ch-ua should be stripped');
+    assert.ok(!('accept-encoding' in ep.headers), 'accept-encoding should be stripped');
+    assert.ok(!('cookie' in ep.headers), 'cookie should be stripped');
+    assert.ok(!('x-forwarded-for' in ep.headers), 'x-forwarded-for should be stripped');
   });
 });
 

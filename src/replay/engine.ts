@@ -7,24 +7,40 @@ import { refreshTokens } from '../auth/refresh.js';
 import { truncateResponse } from './truncate.js';
 import { resolveAndValidateUrl } from '../skill/ssrf.js';
 
-// Header security: prevent header injection from skill files
-const ALLOWED_SKILL_HEADERS = new Set([
-  'accept', 'accept-language', 'accept-encoding',
-  'content-type', 'content-length',
-  'x-requested-with', 'x-api-key',
-  'origin', 'referer',
-  'user-agent',
-  // Auth headers are injected separately from encrypted storage, not from skill file
-]);
-
-const BLOCKED_HEADERS = new Set([
-  'host', 'x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto',
-  'x-real-ip', 'forwarded', 'via',
-  'cookie', 'set-cookie',
-  'authorization',  // Must come from auth manager, not skill file
+// Header security: block dangerous headers from skill files (blocklist approach).
+// All other headers — including custom API headers like Client-ID — pass through.
+const BLOCKED_REPLAY_HEADERS = new Set([
+  // Connection control
+  'host',
+  'connection',
+  'keep-alive',
+  'transfer-encoding',
+  'upgrade',
+  'te',
+  'trailer',
+  // Proxy/forwarding
+  'x-forwarded-for',
+  'x-forwarded-host',
+  'x-forwarded-proto',
+  'x-forwarded-port',
+  'x-real-ip',
+  'forwarded',
+  'via',
   'proxy-authorization',
-  'transfer-encoding', 'te', 'trailer',
-  'connection', 'upgrade',
+  'proxy-connection',
+  // Cookie/auth (managed separately)
+  'cookie',
+  'set-cookie',
+  'authorization',  // Must come from auth manager, not skill file
+  // Browser-internal (Sec-* headers)
+  'sec-ch-ua',
+  'sec-ch-ua-mobile',
+  'sec-ch-ua-platform',
+  'sec-ch-ua-full-version-list',
+  'sec-fetch-dest',
+  'sec-fetch-mode',
+  'sec-fetch-site',
+  'sec-fetch-user',
 ]);
 
 export interface ReplayOptions {
@@ -205,7 +221,7 @@ export async function replayEndpoint(
   // Filter headers from skill file — block dangerous headers
   for (const key of Object.keys(headers)) {
     const lower = key.toLowerCase();
-    if (BLOCKED_HEADERS.has(lower) || (!ALLOWED_SKILL_HEADERS.has(lower) && !lower.startsWith('x-'))) {
+    if (BLOCKED_REPLAY_HEADERS.has(lower) || lower.startsWith('sec-')) {
       delete headers[key];
     }
   }

@@ -10,13 +10,39 @@ import { isLikelyToken } from '../capture/entropy.js';
 import { isOAuthTokenRequest, type OAuthInfo } from '../capture/oauth-detector.js';
 import { diffBodies } from '../capture/body-diff.js';
 
-const KEEP_HEADERS = new Set([
-  'authorization',
-  'content-type',
-  'accept',
-  'x-api-key',
-  'x-csrf-token',
-  'x-requested-with',
+/** Headers to strip (connection control, forwarding, browser-internal, encoding) */
+const STRIP_HEADERS = new Set([
+  // Connection control
+  'host',
+  'connection',
+  'keep-alive',
+  'transfer-encoding',
+  'upgrade',
+  'te',
+  'trailer',
+  // Proxy/forwarding
+  'x-forwarded-for',
+  'x-forwarded-host',
+  'x-forwarded-proto',
+  'x-forwarded-port',
+  'x-real-ip',
+  'forwarded',
+  'via',
+  'proxy-authorization',
+  'proxy-connection',
+  // Browser-internal (Sec-* headers)
+  'sec-ch-ua',
+  'sec-ch-ua-mobile',
+  'sec-ch-ua-platform',
+  'sec-ch-ua-full-version-list',
+  'sec-fetch-dest',
+  'sec-fetch-mode',
+  'sec-fetch-site',
+  'sec-fetch-user',
+  // Encoding (handled automatically by fetch)
+  'accept-encoding',
+  // Cookie (stored separately via AuthManager)
+  'cookie',
 ]);
 
 const AUTH_HEADERS = new Set([
@@ -33,7 +59,7 @@ function filterHeaders(headers: Record<string, string>): Record<string, string> 
   const filtered: Record<string, string> = {};
   for (const [key, value] of Object.entries(headers)) {
     const lower = key.toLowerCase();
-    if (KEEP_HEADERS.has(lower) || (lower.startsWith('x-') && !lower.startsWith('x-forwarded'))) {
+    if (!STRIP_HEADERS.has(lower) && !lower.startsWith('sec-')) {
       filtered[key] = value;
     }
   }

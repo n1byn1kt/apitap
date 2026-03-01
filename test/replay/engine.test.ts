@@ -892,6 +892,158 @@ describe('replayEndpoint expiresAt pre-flight refresh', () => {
   });
 });
 
+describe('replayEndpoint [stored] header resolution', () => {
+  let storedServer: Server;
+  let storedBaseUrl: string;
+  let receivedHeaders: Record<string, string | undefined> = {};
+  let testDir: string;
+  let authManager: AuthManager;
+
+  before(async () => {
+    storedServer = createServer((req, res) => {
+      receivedHeaders = {
+        'x-client-id': req.headers['x-client-id'] as string | undefined,
+        'authorization': req.headers['authorization'] as string | undefined,
+        'x-api-key': req.headers['x-api-key'] as string | undefined,
+      };
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    await new Promise<void>(resolve => storedServer.listen(0, resolve));
+    const port = (storedServer.address() as AddressInfo).port;
+    storedBaseUrl = `http://localhost:${port}`;
+  });
+
+  after(async () => {
+    await new Promise<void>(resolve => storedServer.close(() => resolve()));
+  });
+
+  beforeEach(async () => {
+    testDir = await mkdtemp(join(tmpdir(), 'apitap-stored-'));
+    authManager = new AuthManager(testDir, 'test-machine-id');
+    receivedHeaders = {};
+  });
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true });
+  });
+
+  it('resolves [stored] header when auth exists', async () => {
+    await authManager.store('localhost', {
+      type: 'custom', header: 'x-client-id', value: 'my-client-123',
+    });
+
+    const skill: SkillFile = {
+      version: '1.2', domain: 'localhost', capturedAt: new Date().toISOString(),
+      baseUrl: storedBaseUrl, endpoints: [{
+        id: 'get-data', method: 'GET', path: '/data',
+        queryParams: {}, headers: { 'x-client-id': '[stored]' },
+        responseShape: { type: 'object' },
+        examples: { request: { url: `${storedBaseUrl}/data`, headers: {} }, responsePreview: null },
+      }],
+      metadata: { captureCount: 1, filteredCount: 0, toolVersion: '1.0.0' },
+      provenance: 'self',
+    };
+
+    await replayEndpoint(skill, 'get-data', {
+      authManager, domain: 'localhost', _skipSsrfCheck: true,
+    });
+
+    assert.equal(receivedHeaders['x-client-id'], 'my-client-123');
+  });
+
+  it('deletes unresolved [stored] headers instead of sending literal', async () => {
+    // No auth stored — [stored] should be deleted, not sent
+    const skill: SkillFile = {
+      version: '1.2', domain: 'localhost', capturedAt: new Date().toISOString(),
+      baseUrl: storedBaseUrl, endpoints: [{
+        id: 'get-data', method: 'GET', path: '/data',
+        queryParams: {}, headers: { 'x-client-id': '[stored]' },
+        responseShape: { type: 'object' },
+        examples: { request: { url: `${storedBaseUrl}/data`, headers: {} }, responsePreview: null },
+      }],
+      metadata: { captureCount: 1, filteredCount: 0, toolVersion: '1.0.0' },
+      provenance: 'self',
+    };
+
+    await replayEndpoint(skill, 'get-data', {
+      authManager, domain: 'localhost', _skipSsrfCheck: true,
+    });
+
+    assert.equal(receivedHeaders['x-client-id'], undefined, 'should not send literal [stored]');
+  });
+
+  it('deletes unresolved [stored] headers when no authManager', async () => {
+    const skill: SkillFile = {
+      version: '1.2', domain: 'localhost', capturedAt: new Date().toISOString(),
+      baseUrl: storedBaseUrl, endpoints: [{
+        id: 'get-data', method: 'GET', path: '/data',
+        queryParams: {}, headers: { 'x-client-id': '[stored]' },
+        responseShape: { type: 'object' },
+        examples: { request: { url: `${storedBaseUrl}/data`, headers: {} }, responsePreview: null },
+      }],
+      metadata: { captureCount: 1, filteredCount: 0, toolVersion: '1.0.0' },
+      provenance: 'self',
+    };
+
+    // No authManager provided at all
+    await replayEndpoint(skill, 'get-data', { _skipSsrfCheck: true });
+
+    assert.equal(receivedHeaders['x-client-id'], undefined, 'should not send literal [stored]');
+  });
+
+  it('uses cross-subdomain fallback for [stored] headers', async () => {
+    // Store auth on parent domain
+    await authManager.store('example.com', {
+      type: 'custom', header: 'x-client-id', value: 'parent-domain-client',
+    });
+
+    const skill: SkillFile = {
+      version: '1.2', domain: 'api.example.com', capturedAt: new Date().toISOString(),
+      baseUrl: storedBaseUrl, endpoints: [{
+        id: 'get-data', method: 'GET', path: '/data',
+        queryParams: {}, headers: { 'x-client-id': '[stored]' },
+        responseShape: { type: 'object' },
+        examples: { request: { url: `${storedBaseUrl}/data`, headers: {} }, responsePreview: null },
+      }],
+      metadata: { captureCount: 1, filteredCount: 0, toolVersion: '1.0.0' },
+      provenance: 'self',
+    };
+
+    await replayEndpoint(skill, 'get-data', {
+      authManager, domain: 'api.example.com', _skipSsrfCheck: true,
+    });
+
+    assert.equal(receivedHeaders['x-client-id'], 'parent-domain-client');
+  });
+
+  it('respects isolatedAuth flag — no fallback', async () => {
+    await authManager.store('example.com', {
+      type: 'custom', header: 'x-client-id', value: 'parent-value',
+    });
+
+    const skill: SkillFile = {
+      version: '1.2', domain: 'api.example.com', capturedAt: new Date().toISOString(),
+      baseUrl: storedBaseUrl, endpoints: [{
+        id: 'get-data', method: 'GET', path: '/data',
+        queryParams: {}, headers: { 'x-client-id': '[stored]' },
+        responseShape: { type: 'object' },
+        examples: { request: { url: `${storedBaseUrl}/data`, headers: {} }, responsePreview: null },
+        isolatedAuth: true,
+      }],
+      metadata: { captureCount: 1, filteredCount: 0, toolVersion: '1.0.0' },
+      provenance: 'self',
+    };
+
+    await replayEndpoint(skill, 'get-data', {
+      authManager, domain: 'api.example.com', _skipSsrfCheck: true,
+    });
+
+    // Parent auth should NOT be found because isolatedAuth prevents fallback
+    assert.equal(receivedHeaders['x-client-id'], undefined, 'should not fallback with isolatedAuth');
+  });
+});
+
 describe('replayEndpoint contract validation', () => {
   let driftServer: Server;
   let driftBaseUrl: string;

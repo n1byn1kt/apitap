@@ -132,24 +132,7 @@ export async function createServeServer(
         },
       },
       async (args: Record<string, unknown>) => {
-        const endpoint = skill.endpoints.find(e => e.id === endpointId)!;
-        const savedHeaders = endpoint.headers;
         try {
-          // Inject stored auth without mutating the shared skill object
-          if (authManager) {
-            const hasStoredPlaceholder = Object.values(savedHeaders).some(v => v === '[stored]');
-            if (hasStoredPlaceholder) {
-              try {
-                const storedAuth = await authManager.retrieve(domain);
-                if (storedAuth) {
-                  endpoint.headers = { ...savedHeaders, [storedAuth.header]: storedAuth.value };
-                }
-              } catch {
-                // Auth retrieval failed — proceed without
-              }
-            }
-          }
-
           // Convert args to string params
           const params: Record<string, string> = {};
           for (const [k, v] of Object.entries(args)) {
@@ -178,9 +161,6 @@ export async function createServeServer(
             }],
             isError: true,
           };
-        } finally {
-          // Restore original headers so [stored] placeholders remain for next call
-          endpoint.headers = savedHeaders;
         }
       },
     );

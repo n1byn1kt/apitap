@@ -292,9 +292,28 @@ export async function replayEndpoint(
         }
       }
     } else {
-      // Proactive: check if JWT is expired (30s buffer for clock skew)
-      const currentAuth = await authManager.retrieve(domain);
-      if (currentAuth?.value) {
+      // Proactive expiry check (30s buffer for clock skew)
+      const currentAuth = endpoint.isolatedAuth
+        ? await authManager.retrieve(domain)
+        : await authManager.retrieveWithFallback(domain);
+
+      if (currentAuth?.expiresAt) {
+        // Check 1: expiresAt from OAuth/stored TTL (handles opaque tokens)
+        const expiresAtMs = new Date(currentAuth.expiresAt).getTime();
+        if (expiresAtMs < Date.now() + 30_000) {
+          const refreshResult = await refreshTokens(skill, authManager, { domain, _skipSsrfCheck: options._skipSsrfCheck });
+          if (refreshResult.success) {
+            refreshed = true;
+            const freshAuth = endpoint.isolatedAuth
+              ? await authManager.retrieve(domain)
+              : await authManager.retrieveWithFallback(domain);
+            if (freshAuth) {
+              headers[freshAuth.header] = freshAuth.value;
+            }
+          }
+        }
+      } else if (currentAuth?.value) {
+        // Check 2: JWT exp claim (existing logic)
         const raw = currentAuth.value.startsWith('Bearer ')
           ? currentAuth.value.slice(7)
           : currentAuth.value;
@@ -303,7 +322,9 @@ export async function replayEndpoint(
           const refreshResult = await refreshTokens(skill, authManager, { domain, _skipSsrfCheck: options._skipSsrfCheck });
           if (refreshResult.success) {
             refreshed = true;
-            const freshAuth = await authManager.retrieve(domain);
+            const freshAuth = endpoint.isolatedAuth
+              ? await authManager.retrieve(domain)
+              : await authManager.retrieveWithFallback(domain);
             if (freshAuth) {
               headers[freshAuth.header] = freshAuth.value;
             }

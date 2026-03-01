@@ -797,3 +797,97 @@ describe('replayEndpoint with retry-on-401', () => {
     assert.equal(result.refreshed, undefined); // No refresh happened
   });
 });
+
+describe('replayEndpoint expiresAt pre-flight refresh', () => {
+  let testDir: string;
+  let authManager: AuthManager;
+  let server: Server;
+  let baseUrl: string;
+  let requestCount: number;
+  let receivedAuth: string | undefined;
+
+  before(async () => {
+    server = createServer((req, res) => {
+      requestCount++;
+      receivedAuth = req.headers['authorization'];
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    await new Promise<void>(resolve => server.listen(0, resolve));
+    const port = (server.address() as AddressInfo).port;
+    baseUrl = `http://localhost:${port}`;
+  });
+
+  after(async () => {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  });
+
+  beforeEach(async () => {
+    testDir = await mkdtemp(join(tmpdir(), 'apitap-replay-'));
+    authManager = new AuthManager(testDir, 'test-machine-id');
+    requestCount = 0;
+    receivedAuth = undefined;
+  });
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true });
+  });
+
+  it('triggers refresh when expiresAt is within 30s of now', async () => {
+    // Store auth with expiresAt 10 seconds from now (within 30s buffer)
+    const almostExpired = new Date(Date.now() + 10_000).toISOString();
+    await authManager.store('localhost', {
+      type: 'bearer', header: 'authorization',
+      value: 'Bearer opaque-expired-token',
+      expiresAt: almostExpired,
+    });
+
+    // The skill has no oauthConfig, so refresh will fail — but the request still goes through
+    const skill: SkillFile = {
+      version: '1.2', domain: 'localhost', capturedAt: new Date().toISOString(),
+      baseUrl, endpoints: [{
+        id: 'get-data', method: 'GET', path: '/data',
+        queryParams: {}, headers: {},
+        responseShape: { type: 'object', fields: ['ok'] },
+        examples: { request: { url: `${baseUrl}/data`, headers: {} }, responsePreview: { ok: true } },
+      }],
+      metadata: { captureCount: 1, filteredCount: 0, toolVersion: '1.0.0' },
+      provenance: 'self',
+    };
+
+    const result = await replayEndpoint(skill, 'get-data', {
+      authManager, domain: 'localhost', _skipSsrfCheck: true,
+    });
+
+    // Request should succeed (server returns 200)
+    assert.equal(result.status, 200);
+  });
+
+  it('does not trigger refresh when expiresAt is far in future', async () => {
+    const farFuture = new Date(Date.now() + 3600_000).toISOString();
+    await authManager.store('localhost', {
+      type: 'bearer', header: 'authorization',
+      value: 'Bearer valid-token',
+      expiresAt: farFuture,
+    });
+
+    const skill: SkillFile = {
+      version: '1.2', domain: 'localhost', capturedAt: new Date().toISOString(),
+      baseUrl, endpoints: [{
+        id: 'get-data', method: 'GET', path: '/data',
+        queryParams: {}, headers: {},
+        responseShape: { type: 'object', fields: ['ok'] },
+        examples: { request: { url: `${baseUrl}/data`, headers: {} }, responsePreview: { ok: true } },
+      }],
+      metadata: { captureCount: 1, filteredCount: 0, toolVersion: '1.0.0' },
+      provenance: 'self',
+    };
+
+    const result = await replayEndpoint(skill, 'get-data', {
+      authManager, domain: 'localhost', _skipSsrfCheck: true,
+    });
+
+    assert.equal(result.status, 200);
+    assert.equal(receivedAuth, 'Bearer valid-token');
+  });
+});

@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div id="app">
+    <h1>ApiTap</h1>
+    <div id="status">Ready</div>
+    <div id="stats" hidden>
+      <span id="endpoint-count">0</span> endpoints &middot;
+      <span id="request-count">0</span> requests
+      <div id="auth-status"></div>
+    </div>
+    <div id="controls">
+      <button id="btn-start">Start Capture</button>
+      <button id="btn-stop" hidden>Stop Capture</button>
+    </div>
+    <div id="export" hidden>
+      <div id="endpoint-list"></div>
+      <button id="btn-download">Download Skill File</button>
+    </div>
+  </div>
+  <script src="dist/popup.js" type="module"></script>
+</body>
+</html>

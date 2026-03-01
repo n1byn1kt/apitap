@@ -9,6 +9,7 @@ import { detectRefreshableTokens } from '../capture/token-detector.js';
 import { isLikelyToken } from '../capture/entropy.js';
 import { isOAuthTokenRequest, type OAuthInfo } from '../capture/oauth-detector.js';
 import { diffBodies } from '../capture/body-diff.js';
+import { snapshotSchema } from '../contract/schema.js';
 
 /** Headers to strip (connection control, forwarding, browser-internal, encoding) */
 const STRIP_HEADERS = new Set([
@@ -394,6 +395,12 @@ export class SkillGenerator {
 
     // Store response bytes on endpoint
     endpoint.responseBytes = exchange.response.body.length;
+
+    // Snapshot response schema for contract validation
+    try {
+      const parsed = JSON.parse(exchange.response.body);
+      endpoint.responseSchema = snapshotSchema(parsed);
+    } catch { /* non-JSON response, skip schema */ }
 
     this.endpoints.set(key, endpoint);
 

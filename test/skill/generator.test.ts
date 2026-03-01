@@ -722,3 +722,41 @@ describe('GraphQL endpoint handling', () => {
     assert.equal(skill.metadata.captureCount, 2);
   });
 });
+
+describe('SkillGenerator responseSchema', () => {
+  it('includes responseSchema in generated endpoint', () => {
+    const gen = new SkillGenerator();
+    gen.addExchange(mockExchange({
+      url: 'https://api.example.com/api/users',
+      body: JSON.stringify([{ id: 1, name: 'Alice', active: true }]),
+    }));
+
+    const skill = gen.toSkillFile('api.example.com');
+    const endpoint = skill.endpoints[0];
+
+    assert.ok(endpoint.responseSchema, 'should have responseSchema');
+    assert.equal(endpoint.responseSchema!.type, 'array');
+    assert.ok(endpoint.responseSchema!.items, 'array should have items');
+    assert.equal(endpoint.responseSchema!.items!.type, 'object');
+    assert.ok(endpoint.responseSchema!.items!.fields?.id);
+    assert.equal(endpoint.responseSchema!.items!.fields!.id.type, 'number');
+    assert.equal(endpoint.responseSchema!.items!.fields!.name.type, 'string');
+    assert.equal(endpoint.responseSchema!.items!.fields!.active.type, 'boolean');
+  });
+
+  it('handles non-JSON responses gracefully', () => {
+    const gen = new SkillGenerator();
+    gen.addExchange({
+      request: { url: 'https://api.example.com/api/text', method: 'GET', headers: { accept: 'text/plain' } },
+      response: { status: 200, headers: {}, body: 'plain text response', contentType: 'text/plain' },
+      timestamp: '2026-02-28T12:00:00.000Z',
+    });
+
+    const skill = gen.toSkillFile('api.example.com');
+    // text/plain might not get captured by shouldCapture, but if it does:
+    if (skill.endpoints.length > 0) {
+      // responseSchema should either be absent or handle gracefully
+      assert.equal(skill.endpoints[0].responseSchema, undefined);
+    }
+  });
+});

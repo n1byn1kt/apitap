@@ -243,3 +243,52 @@ describe('AuthManager retrieveSessionWithFallback', () => {
     assert.equal(session?.cookies[0].value, 'found');
   });
 });
+
+describe('AuthManager retrieveWithFallback', () => {
+  let testDir: string;
+  let manager: AuthManager;
+
+  beforeEach(async () => {
+    testDir = await mkdtemp(join(tmpdir(), 'apitap-auth-'));
+    manager = new AuthManager(testDir, 'test-machine-id');
+  });
+
+  afterEach(async () => {
+    await rm(testDir, { recursive: true, force: true });
+  });
+
+  it('returns exact match first', async () => {
+    await manager.store('api.spotify.com', {
+      type: 'bearer', header: 'authorization', value: 'Bearer exact-token',
+    });
+    await manager.store('spotify.com', {
+      type: 'bearer', header: 'authorization', value: 'Bearer parent-token',
+    });
+
+    const auth = await manager.retrieveWithFallback('api.spotify.com');
+    assert.equal(auth?.value, 'Bearer exact-token');
+  });
+
+  it('falls back to parent domain', async () => {
+    await manager.store('spotify.com', {
+      type: 'bearer', header: 'authorization', value: 'Bearer parent-token',
+    });
+
+    const auth = await manager.retrieveWithFallback('spclient.wg.spotify.com');
+    assert.equal(auth?.value, 'Bearer parent-token');
+  });
+
+  it('returns null when no parent match', async () => {
+    const auth = await manager.retrieveWithFallback('unknown.example.com');
+    assert.equal(auth, null);
+  });
+
+  it('handles deep subdomains', async () => {
+    await manager.store('example.com', {
+      type: 'bearer', header: 'authorization', value: 'Bearer deep-token',
+    });
+
+    const auth = await manager.retrieveWithFallback('a.b.c.example.com');
+    assert.equal(auth?.value, 'Bearer deep-token');
+  });
+});

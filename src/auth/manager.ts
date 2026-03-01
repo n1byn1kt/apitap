@@ -85,6 +85,23 @@ export class AuthManager {
     return null;
   }
 
+  /**
+   * Retrieve auth with subdomain fallback.
+   * Tries exact match first, then walks up parent domains.
+   * e.g., spclient.wg.spotify.com → spotify.com
+   */
+  async retrieveWithFallback(domain: string): Promise<StoredAuth | null> {
+    const exact = await this.retrieve(domain);
+    if (exact) return exact;
+
+    for (const parent of getParentDomains(domain)) {
+      const auth = await this.retrieve(parent);
+      if (auth) return auth;
+    }
+
+    return null;
+  }
+
   /** Store OAuth credentials for a domain (merges with existing auth). */
   async storeOAuthCredentials(domain: string, creds: { refreshToken?: string; clientSecret?: string }): Promise<void> {
     const all = await this.loadAll();

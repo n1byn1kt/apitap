@@ -16,6 +16,53 @@ export interface HandoffResult {
   error?: string;
 }
 
+export interface OAuthTokenDetection {
+  accessToken: string;
+  refreshToken?: string;
+  expiresIn?: number;
+  tokenType?: string;
+  scope?: string;
+}
+
+/** URL patterns for OAuth token endpoints */
+const TOKEN_URL_PATTERNS = [
+  /\/token\b/i,
+  /\/oauth\/token/i,
+  /\/oauth2\/token/i,
+  /\/o\/oauth2\/token/i,
+  /securetoken\.googleapis\.com/i,
+];
+
+/**
+ * Detect OAuth token endpoint response from URL, status, and body.
+ * Returns extracted token info or null if not an OAuth token response.
+ */
+export function detectOAuthTokenResponse(
+  url: string,
+  status: number,
+  body: string,
+): OAuthTokenDetection | null {
+  if (status < 200 || status >= 300) return null;
+  if (!TOKEN_URL_PATTERNS.some(p => p.test(url))) return null;
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return null;
+  }
+
+  if (typeof parsed.access_token !== 'string') return null;
+
+  return {
+    accessToken: parsed.access_token,
+    refreshToken: typeof parsed.refresh_token === 'string' ? parsed.refresh_token : undefined,
+    expiresIn: typeof parsed.expires_in === 'number' ? parsed.expires_in : undefined,
+    tokenType: typeof parsed.token_type === 'string' ? parsed.token_type : undefined,
+    scope: typeof parsed.scope === 'string' ? parsed.scope : undefined,
+  };
+}
+
 // Session-like cookie name patterns
 const SESSION_COOKIE_PATTERNS = [
   /sess/i, /auth/i, /token/i, /jwt/i, /login/i,
@@ -148,11 +195,15 @@ async function doHandoff(
     const page = await context.newPage();
     let authDetected: 'bearer' | 'cookie' | 'api-key' | undefined;
     let detectedAuth: StoredAuth | undefined;
+    let detectedOAuth: OAuthTokenDetection | undefined;
     let latestCookies: Array<{ name: string; value: string; domain: string; path: string; expires: number; httpOnly: boolean; secure: boolean; sameSite: 'Strict' | 'Lax' | 'None' }> = [];
 
-    // Watch network responses for auth signals (bearer tokens, API keys)
-    page.on('response', (response) => {
-      const authHeader = response.request().headers()['authorization'];
+    // Watch network responses for auth signals (bearer tokens, API keys, OAuth tokens)
+    page.on('response', async (response) => {
+      const reqHeaders = response.request().headers();
+
+      // Detect auth from request headers
+      const authHeader = reqHeaders['authorization'];
       if (authHeader) {
         if (authHeader.startsWith('Bearer ')) {
           authDetected = 'bearer';
@@ -170,6 +221,19 @@ async function doHandoff(
           };
         }
       }
+
+      // Detect OAuth token endpoint responses
+      try {
+        const status = response.status();
+        const url = response.url();
+        if (TOKEN_URL_PATTERNS.some(p => p.test(url)) && status >= 200 && status < 300) {
+          const body = await response.text();
+          const oauth = detectOAuthTokenResponse(url, status, body);
+          if (oauth) {
+            detectedOAuth = oauth;
+          }
+        }
+      } catch { /* response body may not be available */ }
     });
 
     // Navigate to login page
@@ -232,6 +296,25 @@ async function doHandoff(
       maxAgeMs: 24 * 60 * 60 * 1000, // 24 hours
     };
     await authManager.storeSession(domain, session);
+
+    // Store OAuth credentials if detected during auth flow
+    if (detectedOAuth) {
+      detectedAuth = {
+        type: 'bearer',
+        header: 'authorization',
+        value: `Bearer ${detectedOAuth.accessToken}`,
+        ...(detectedOAuth.expiresIn ? {
+          expiresAt: new Date(Date.now() + detectedOAuth.expiresIn * 1000).toISOString(),
+        } : {}),
+      };
+      authDetected = 'bearer';
+
+      if (detectedOAuth.refreshToken) {
+        await authManager.storeOAuthCredentials(domain, {
+          refreshToken: detectedOAuth.refreshToken,
+        });
+      }
+    }
 
     // Store detected auth header if found
     if (detectedAuth) {

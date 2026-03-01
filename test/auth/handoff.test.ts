@@ -1,7 +1,7 @@
 // test/auth/handoff.test.ts
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { detectLoginSuccess, hasHighConfidenceAuthTransition } from '../../src/auth/handoff.js';
+import { detectLoginSuccess, hasHighConfidenceAuthTransition, detectOAuthTokenResponse } from '../../src/auth/handoff.js';
 
 describe('detectLoginSuccess', () => {
   it('detects Set-Cookie with session-like names', () => {
@@ -67,5 +67,63 @@ describe('hasHighConfidenceAuthTransition', () => {
     const baseline = new Map<string, string>([['session_id', 'same-value']]);
     const current = [{ name: 'session_id', value: 'same-value' }];
     assert.equal(hasHighConfidenceAuthTransition(baseline, current), false);
+  });
+});
+
+describe('detectOAuthTokenResponse', () => {
+  it('detects standard OAuth token endpoint response', () => {
+    const result = detectOAuthTokenResponse(
+      'https://accounts.spotify.com/api/token',
+      200,
+      JSON.stringify({
+        access_token: 'BQD...xyz',
+        token_type: 'Bearer',
+        expires_in: 3600,
+        refresh_token: 'AQA...abc',
+        scope: 'user-read-private',
+      }),
+    );
+
+    assert.ok(result, 'should detect OAuth response');
+    assert.equal(result!.accessToken, 'BQD...xyz');
+    assert.equal(result!.refreshToken, 'AQA...abc');
+    assert.equal(result!.expiresIn, 3600);
+  });
+
+  it('detects /oauth/token path', () => {
+    const result = detectOAuthTokenResponse(
+      'https://example.com/oauth/token',
+      200,
+      JSON.stringify({ access_token: 'tok123', token_type: 'bearer' }),
+    );
+    assert.ok(result);
+    assert.equal(result!.accessToken, 'tok123');
+  });
+
+  it('ignores non-token URLs', () => {
+    const result = detectOAuthTokenResponse(
+      'https://example.com/api/users',
+      200,
+      JSON.stringify({ access_token: 'tok123' }),
+    );
+    assert.equal(result, null);
+  });
+
+  it('ignores non-200 responses', () => {
+    const result = detectOAuthTokenResponse(
+      'https://example.com/oauth/token',
+      401,
+      JSON.stringify({ error: 'invalid_grant' }),
+    );
+    assert.equal(result, null);
+  });
+
+  it('ignores responses without access_token', () => {
+    const result = detectOAuthTokenResponse(
+      'https://example.com/oauth/token',
+      200,
+      JSON.stringify({ token: 'not-oauth-format' }),
+    );
+    assert.equal(result, null);
   });
 });

@@ -87,6 +87,12 @@ export async function refreshOAuth(
       return { success: false, error: 'No access_token in response' };
     }
 
+    // Compute expiresAt from expires_in
+    const expiresIn = typeof data.expires_in === 'number' ? data.expires_in : undefined;
+    const expiresAt = expiresIn
+      ? new Date(Date.now() + expiresIn * 1000).toISOString()
+      : undefined;
+
     // Store new access token
     const existingAuth = await authManager.retrieve(domain);
     await authManager.store(domain, {
@@ -97,6 +103,7 @@ export async function refreshOAuth(
       session: existingAuth?.session,
       refreshToken: existingAuth?.refreshToken,
       clientSecret: existingAuth?.clientSecret,
+      ...(expiresAt ? { expiresAt } : {}),
     });
 
     // Handle refresh token rotation

@@ -358,7 +358,6 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
       inputSchema: z.object({
         url: z.string().describe('URL to capture (e.g. "https://polymarket.com")'),
         duration: z.number().optional().describe('Capture duration in seconds (default: 30)'),
-        port: z.number().optional().describe('Connect to specific CDP port instead of scanning'),
       }),
       annotations: {
         readOnlyHint: false,
@@ -366,28 +365,32 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
         openWorldHint: true,
       },
     },
-    async ({ url, duration, port }) => {
+    async ({ url, duration }) => {
       const dur = duration ?? 30;
+      const timeoutMs = (dur + 60) * 1000; // generous timeout: capture duration + 60s for start/finish
 
-      const { execFile } = await import('node:child_process');
-      const { promisify } = await import('node:util');
-      const execFileAsync = promisify(execFile);
-
-      // Use compiled dist/cli.js, not src/cli.ts (tsx is dev-only)
-      // Both mcp.js and cli.js compile to dist/ so path is ./cli.js not ../cli.js
-      const cliPath = new URL('./cli.js', import.meta.url).pathname;
-      const cliArgs = [cliPath, 'capture', url, '--duration', String(dur), '--json', '--no-verify'];
-      if (port) cliArgs.push('--port', String(port));
+      const session = new CaptureSession({
+        headless: true,
+        allDomains: false,
+        skillsDir,
+      });
 
       try {
-        const { stdout } = await execFileAsync('node', cliArgs, {
-          timeout: (dur + 30) * 1000,
-          env: { ...process.env, ...(skillsDir ? { APITAP_SKILLS_DIR: skillsDir } : {}) },
-        });
+        const result = await Promise.race([
+          (async () => {
+            await session.start(url);
+            await new Promise(resolve => setTimeout(resolve, dur * 1000));
+            return session.finish();
+          })(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Capture timed out')), timeoutMs),
+          ),
+        ]);
         return {
-          content: [{ type: 'text' as const, text: stdout }],
+          content: [{ type: 'text' as const, text: JSON.stringify(result) }],
         };
       } catch (err: any) {
+        try { await session.abort(); } catch { /* already closed */ }
         return {
           content: [{ type: 'text' as const, text: `Capture failed: ${err.message}` }],
           isError: true,

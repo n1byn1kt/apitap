@@ -37,7 +37,7 @@ export interface CaptureResult {
 const DEFAULT_CDP_PORTS = [18792, 18800, 9222];
 const APITAP_DIR = process.env.APITAP_DIR || join(homedir(), '.apitap');
 
-async function connectToBrowser(options: CaptureOptions): Promise<{ browser: Browser; launched: boolean; launchContext?: import('playwright').BrowserContext }> {
+async function connectToBrowser(options: CaptureOptions, storageState?: { cookies: any[]; origins: any[] }): Promise<{ browser: Browser; launched: boolean; launchContext?: import('playwright').BrowserContext }> {
   if (!options.launch) {
     const ports = options.port ? [options.port] : DEFAULT_CDP_PORTS;
     for (const port of ports) {
@@ -55,19 +55,40 @@ async function connectToBrowser(options: CaptureOptions): Promise<{ browser: Bro
     throw new Error(`No browser found on CDP ports: ${ports.join(', ')}. Is a Chromium browser running with remote debugging?`);
   }
 
-  const { browser, context } = await launchBrowser({ headless: options.headless ?? (process.env.DISPLAY ? false : true) });
+  const { browser, context } = await launchBrowser({
+    headless: options.headless ?? (process.env.DISPLAY ? false : true),
+    storageState,
+  });
   return { browser, launched: true, launchContext: context };
 }
 
 export async function capture(options: CaptureOptions): Promise<CaptureResult> {
-  const { browser, launched, launchContext } = await connectToBrowser(options);
+  // Extract target domain for cookie loading
+  const targetUrl = options.url;
+
+  // Load cached session cookies before browser launch
+  let storageState: { cookies: any[]; origins: any[] } | undefined;
+  try {
+    const authDir = options.authDir ?? APITAP_DIR;
+    const machineId = await getMachineId();
+    const authManager = new AuthManager(authDir, machineId);
+    const domain = new URL(targetUrl.startsWith('http') ? targetUrl : `https://${targetUrl}`).hostname;
+    const cachedSession = await authManager.retrieveSessionWithFallback(domain);
+    if (cachedSession?.cookies?.length) {
+      storageState = {
+        cookies: cachedSession.cookies,
+        origins: [],
+      };
+    }
+  } catch {
+    // Auth retrieval failed — proceed without cached session
+  }
+
+  const { browser, launched, launchContext } = await connectToBrowser(options, storageState);
   const generators = new Map<string, SkillGenerator>();
   let totalRequests = 0;
   let filteredRequests = 0;
   const captchaDetectedDomains = new Set<string>();
-
-  // Extract target domain for domain-only filtering
-  const targetUrl = options.url;
 
   const generatorOptions: GeneratorOptions = {
     enablePreview: options.enablePreview ?? false,
@@ -176,18 +197,13 @@ export async function capture(options: CaptureOptions): Promise<CaptureResult> {
     }
   });
 
-  // Inject cached session cookies if available
-  try {
-    const authDir = options.authDir ?? APITAP_DIR;
-    const machineId = await getMachineId();
-    const authManager = new AuthManager(authDir, machineId);
-    const domain = new URL(targetUrl.startsWith('http') ? targetUrl : `https://${targetUrl}`).hostname;
-    const cachedSession = await authManager.retrieveSessionWithFallback(domain);
-    if (cachedSession?.cookies?.length) {
-      await page.context().addCookies(cachedSession.cookies);
+  // For attached browsers, inject cookies manually (storageState only works at context creation)
+  if (!launched && storageState?.cookies?.length) {
+    try {
+      await page.context().addCookies(storageState.cookies);
+    } catch {
+      // Cookie injection failed — proceed without
     }
-  } catch {
-    // Auth retrieval failed — proceed without cached session
   }
 
   await page.goto(options.url, { waitUntil: 'domcontentloaded' });

@@ -288,6 +288,45 @@ describe('refreshOAuth', () => {
     assert.equal(params.has('scope'), false);
   });
 
+  it('stores expiresAt from expires_in in response', async () => {
+    await authManager.store('example.com', {
+      type: 'bearer', header: 'authorization', value: 'Bearer old',
+    });
+    await authManager.storeOAuthCredentials('example.com', { refreshToken: 'rt_test' });
+
+    const now = Date.now();
+    mockFetch({
+      status: 200,
+      body: { access_token: 'new-token', token_type: 'bearer', expires_in: 3600 },
+    });
+
+    await refreshOAuth('example.com', baseConfig, authManager, { _skipSsrfCheck: true });
+
+    const stored = await authManager.retrieve('example.com');
+    assert.ok(stored?.expiresAt, 'should have expiresAt');
+    const expiresAtMs = new Date(stored!.expiresAt!).getTime();
+    // expiresAt should be ~1 hour from now (within 5s tolerance)
+    assert.ok(expiresAtMs > now + 3595_000, 'expiresAt too early');
+    assert.ok(expiresAtMs < now + 3605_000, 'expiresAt too late');
+  });
+
+  it('does not set expiresAt when expires_in is absent', async () => {
+    await authManager.store('example.com', {
+      type: 'bearer', header: 'authorization', value: 'Bearer old',
+    });
+    await authManager.storeOAuthCredentials('example.com', { refreshToken: 'rt_test' });
+
+    mockFetch({
+      status: 200,
+      body: { access_token: 'new-token', token_type: 'bearer' },
+    });
+
+    await refreshOAuth('example.com', baseConfig, authManager, { _skipSsrfCheck: true });
+
+    const stored = await authManager.retrieve('example.com');
+    assert.equal(stored?.expiresAt, undefined);
+  });
+
   it('refreshes via Auth0 tenant endpoint (subdomain of known host)', async () => {
     const auth0Config: OAuthConfig = {
       tokenEndpoint: 'https://tenant.auth0.com/oauth/token',

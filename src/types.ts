@@ -103,6 +103,14 @@ export interface RequestBody {
   refreshableTokens?: string[];  // v0.8: system-refreshed tokens
 }
 
+/** Schema node for contract validation (recursive type tree) */
+export interface SchemaNode {
+  type: 'object' | 'array' | 'string' | 'number' | 'boolean' | 'null';
+  fields?: Record<string, SchemaNode>;
+  items?: SchemaNode;
+  nullable?: boolean;
+}
+
 /** A single API endpoint in a skill file */
 export interface SkillEndpoint {
   id: string;
@@ -120,6 +128,7 @@ export interface SkillEndpoint {
   requestBody?: RequestBody;
   responseBytes?: number; // v1.0: response body size in bytes
   isolatedAuth?: boolean; // v1.1: opt out of cross-subdomain auth fallback
+  responseSchema?: SchemaNode; // v1.1: schema snapshot for contract validation
 }
 
 /** The full skill file written to disk */

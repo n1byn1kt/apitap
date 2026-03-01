@@ -167,19 +167,6 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
       const machineId = await getMachineId();
       const authManager = new AuthManager(APITAP_DIR, machineId);
 
-      // Inject stored header auth if needed
-      const hasStoredPlaceholder = Object.values(endpoint.headers).some(v => v === '[stored]');
-      if (hasStoredPlaceholder) {
-        try {
-          const storedAuth = await authManager.retrieveWithFallback(domain);
-          if (storedAuth) {
-            endpoint.headers[storedAuth.header] = storedAuth.value;
-          }
-        } catch {
-          // Auth retrieval failed — proceed without it
-        }
-      }
-
       try {
         const result = await replayEndpoint(skill, endpointId, {
           params: params as Record<string, string> | undefined,
@@ -190,7 +177,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
           _skipSsrfCheck: options._skipSsrfCheck,
         });
         const cached = sessionCache.get(domain);
-        const fromCache = !cached || cached.source === 'disk';
+        const skillSource = cached?.source ?? 'disk';
 
         return wrapExternalContent({
             status: result.status,
@@ -198,7 +185,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
             domain,
             endpointId,
             tier: endpoint.replayability?.tier ?? 'unknown',
-            fromCache,
+            skillSource,
             capturedAt: skill.capturedAt,
             ...(result.refreshed ? { refreshed: result.refreshed } : {}),
             ...(result.truncated ? { truncated: true } : {}),

@@ -95,31 +95,13 @@ export function createPlugin(options: PluginOptions = {}): Plugin {
         };
       }
 
-      // Inject stored auth if available
-      const endpoint = skill.endpoints.find(e => e.id === endpointId);
-      if (!endpoint) {
-        return {
-          error: `Endpoint "${endpointId}" not found. Available: ${skill.endpoints.map(e => e.id).join(', ')}`,
-        };
-      }
-
-      const hasStoredPlaceholder = Object.values(endpoint.headers).some(v => v === '[stored]');
-      if (hasStoredPlaceholder) {
-        try {
-          const machineId = await getMachineId();
-          const authManager = new AuthManager(APITAP_DIR, machineId);
-          const storedAuth = await authManager.retrieve(domain);
-          if (storedAuth) {
-            endpoint.headers[storedAuth.header] = storedAuth.value;
-          }
-        } catch {
-          // Auth retrieval failed — proceed without it
-        }
-      }
-
       try {
+        const machineId = await getMachineId();
+        const authManager = new AuthManager(APITAP_DIR, machineId);
         const result = await replayEndpoint(skill, endpointId, {
           params,
+          authManager,
+          domain,
           _skipSsrfCheck: options._skipSsrfCheck,
         });
         return { status: result.status, data: result.data };

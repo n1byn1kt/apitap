@@ -97,6 +97,7 @@ describe('replayMultiple', () => {
     assert.deepEqual(results[0].data, [{ id: 1 }, { id: 2 }]);
     assert.equal(results[0].tier, 'green');
     assert.equal(results[0].capturedAt, '2026-02-07T12:00:00.000Z');
+    assert.equal(results[0].skillSource, 'disk');
 
     assert.equal(results[1].domain, 'site-b.example.com');
     assert.equal(results[1].status, 200);

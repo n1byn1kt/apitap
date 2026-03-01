@@ -539,6 +539,7 @@ export interface BatchReplayResult {
   capturedAt?: string;
   truncated?: boolean;
   contractWarnings?: ContractWarning[];
+  skillSource?: 'disk' | 'discovered' | 'captured';
 }
 
 export async function replayMultiple(
@@ -597,6 +598,7 @@ export async function replayMultiple(
           data: result.data,
           tier,
           capturedAt: skill.capturedAt,
+          skillSource: 'disk',
           ...(result.truncated ? { truncated: true } : {}),
           ...(result.contractWarnings?.length ? { contractWarnings: result.contractWarnings } : {}),
         };

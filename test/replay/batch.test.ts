@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { replayMultiple, type BatchReplayRequest } from '../../src/replay/engine.js';
 import { writeSkillFile } from '../../src/skill/store.js';
 import type { SkillFile } from '../../src/types.js';
+import type { ContractWarning } from '../../src/contract/diff.js';
 
 function makeSkill(domain: string, baseUrl: string, endpoints: Array<{ id: string; method: string; path: string }>): SkillFile {
   return {
@@ -132,6 +133,45 @@ describe('replayMultiple', () => {
   it('handles empty request array', async () => {
     const results = await replayMultiple([], { skillsDir: testDir });
     assert.deepEqual(results, []);
+  });
+
+  it('includes contractWarnings when schema drifts', async () => {
+    // Create a server that returns drifted data (extra field, missing field)
+    const driftServer = createServer((req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      // Missing 'name' field, added 'email', id changed type
+      res.end(JSON.stringify({ id: 'string-now', email: 'test@example.com' }));
+    });
+    await new Promise<void>(r => driftServer.listen(0, r));
+    const driftUrl = `http://localhost:${(driftServer.address() as AddressInfo).port}`;
+
+    // Write skill file with responseSchema
+    const driftSkill: SkillFile = {
+      ...makeSkill('drift.example.com', driftUrl, [{ id: 'get-user', method: 'GET', path: '/user' }]),
+    };
+    driftSkill.endpoints[0].responseSchema = {
+      type: 'object',
+      fields: {
+        id: { type: 'number' },
+        name: { type: 'string' },
+      },
+    };
+    await writeSkillFile(driftSkill, testDir);
+
+    const requests: BatchReplayRequest[] = [
+      { domain: 'drift.example.com', endpointId: 'get-user' },
+    ];
+    const results = await replayMultiple(requests, { skillsDir: testDir, _skipSsrfCheck: true });
+
+    assert.equal(results.length, 1);
+    assert.equal(results[0].status, 200);
+    assert.ok(results[0].contractWarnings, 'batch result should include contractWarnings');
+    assert.ok(results[0].contractWarnings!.length > 0);
+
+    const errors = results[0].contractWarnings!.filter((w: ContractWarning) => w.severity === 'error');
+    assert.ok(errors.some((w: ContractWarning) => w.path === 'name'), 'should detect missing name field');
+
+    await new Promise<void>(r => driftServer.close(() => r()));
   });
 
   it('deduplicates skill file reads for same domain', async () => {

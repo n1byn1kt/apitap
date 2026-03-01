@@ -228,7 +228,9 @@ export async function replayEndpoint(
 
   // Inject auth header from auth manager (if available)
   if (authManager && domain) {
-    const auth = await authManager.retrieve(domain);
+    const auth = endpoint.isolatedAuth
+      ? await authManager.retrieve(domain)
+      : await authManager.retrieveWithFallback(domain);
     if (auth && auth.header && auth.value) {
       headers[auth.header] = auth.value;
     }
@@ -282,7 +284,9 @@ export async function replayEndpoint(
       if (refreshResult.success) {
         refreshed = true;
         // Re-inject fresh auth header
-        const freshAuth = await authManager.retrieve(domain);
+        const freshAuth = endpoint.isolatedAuth
+          ? await authManager.retrieve(domain)
+          : await authManager.retrieveWithFallback(domain);
         if (freshAuth) {
           headers[freshAuth.header] = freshAuth.value;
         }
@@ -350,7 +354,9 @@ export async function replayEndpoint(
     if (refreshResult.success) {
       refreshed = true;
       // Re-inject fresh auth
-      const freshAuth = await authManager.retrieve(domain);
+      const freshAuth = endpoint.isolatedAuth
+        ? await authManager.retrieve(domain)
+        : await authManager.retrieveWithFallback(domain);
       if (freshAuth) {
         headers[freshAuth.header] = freshAuth.value;
       }

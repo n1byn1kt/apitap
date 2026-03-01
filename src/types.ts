@@ -29,6 +29,8 @@ export interface StoredAuth {
   // v0.9: OAuth credentials (stored encrypted, never in skill file)
   refreshToken?: string;
   clientSecret?: string;
+  // v1.1: computed expiry timestamp
+  expiresAt?: string;
 }
 
 /**
@@ -117,6 +119,7 @@ export interface SkillEndpoint {
   pagination?: PaginationInfo;
   requestBody?: RequestBody;
   responseBytes?: number; // v1.0: response body size in bytes
+  isolatedAuth?: boolean; // v1.1: opt out of cross-subdomain auth fallback
 }
 
 /** The full skill file written to disk */

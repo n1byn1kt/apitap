@@ -22,7 +22,7 @@ export interface BrowseSuccess {
   domain: string;
   endpointId: string;
   tier: string;
-  fromCache: boolean;
+  skillSource: 'disk' | 'discovered' | 'captured';
   capturedAt: string;
   task?: string;
   truncated?: boolean;
@@ -113,7 +113,7 @@ export async function browse(
               domain,
               endpointId: 'read',
               tier: 'green',
-              fromCache: false,
+              skillSource: 'discovered',
               capturedAt: new Date().toISOString(),
               task,
             };
@@ -149,7 +149,7 @@ export async function browse(
             domain,
             endpointId: 'read',
             tier: 'green',
-            fromCache: false,
+            skillSource: 'discovered',
             capturedAt: new Date().toISOString(),
             task,
           };
@@ -184,7 +184,7 @@ export async function browse(
   // Step 5: Replay
   try {
     const result = await replayEndpoint(skill, endpoint.id, { maxBytes, _skipSsrfCheck: options._skipSsrfCheck });
-    const fromCache = source === 'disk';
+    const skillSource = source;
 
     // Check content-type: HTML responses are not usable API data
     const contentType = result.headers['content-type'] ?? '';
@@ -207,7 +207,7 @@ export async function browse(
       domain,
       endpointId: endpoint.id,
       tier: endpoint.replayability?.tier ?? 'unknown',
-      fromCache,
+      skillSource,
       capturedAt: skill.capturedAt,
       task,
       ...(result.truncated ? { truncated: true } : {}),

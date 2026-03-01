@@ -81,7 +81,7 @@ describe('browse orchestration', () => {
     assert.equal(result.success, true);
     assert.equal(result.domain, 'test.example.com');
     assert.ok(result.success && result.data);
-    assert.equal(result.success && result.fromCache, true);
+    assert.equal(result.success && result.skillSource, 'disk');
   });
 
   it('uses session cache on second call', async () => {

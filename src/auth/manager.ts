@@ -92,12 +92,15 @@ export class AuthManager {
    */
   async retrieveWithFallback(domain: string): Promise<StoredAuth | null> {
     const exact = await this.retrieve(domain);
-    if (exact) return exact;
+    if (exact && !isExpired(exact)) return exact;
 
     for (const parent of getParentDomains(domain)) {
       const auth = await this.retrieve(parent);
-      if (auth) return auth;
+      if (auth && !isExpired(auth)) return auth;
     }
+
+    // If everything is expired, return the exact match (caller may attempt refresh)
+    if (exact) return exact;
 
     return null;
   }
@@ -156,6 +159,15 @@ export class AuthManager {
     // Ensure permissions even if file existed with different perms
     await chmod(this.authPath, 0o600);
   }
+}
+
+/**
+ * Check if stored auth has expired based on expiresAt timestamp.
+ * Returns false if no expiresAt is set (unknown expiry = not expired).
+ */
+function isExpired(auth: StoredAuth): boolean {
+  if (!auth.expiresAt) return false;
+  return new Date(auth.expiresAt).getTime() < Date.now();
 }
 
 /**

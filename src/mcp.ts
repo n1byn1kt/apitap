@@ -171,7 +171,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
       const hasStoredPlaceholder = Object.values(endpoint.headers).some(v => v === '[stored]');
       if (hasStoredPlaceholder) {
         try {
-          const storedAuth = await authManager.retrieve(domain);
+          const storedAuth = await authManager.retrieveWithFallback(domain);
           if (storedAuth) {
             endpoint.headers[storedAuth.header] = storedAuth.value;
           }
@@ -202,6 +202,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
             capturedAt: skill.capturedAt,
             ...(result.refreshed ? { refreshed: result.refreshed } : {}),
             ...(result.truncated ? { truncated: true } : {}),
+            ...(result.contractWarnings?.length ? { contractWarnings: result.contractWarnings } : {}),
           }, 'apitap_replay');
       } catch (err: any) {
         return {

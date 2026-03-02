@@ -996,8 +996,8 @@ async function handleExtension(positional: string[], flags: Record<string, strin
       process.exit(1);
     }
 
-    // Resolve the native host script path
-    const hostPath = resolve(dirname(fileURLToPath(import.meta.url)), 'native-host.js');
+    // Resolve the native host script path (always use dist/ — compiled output)
+    const hostPath = resolve(dirname(fileURLToPath(import.meta.url)), '../dist/native-host.js').replace(/\/src\/\.\.\/dist\//, '/dist/');
 
     const { installNativeHost } = await import('./extension/install.js');
     const { installed, errors } = await installNativeHost(hostPath, extensionId);

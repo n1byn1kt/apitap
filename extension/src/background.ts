@@ -23,6 +23,10 @@ let generators = new DomainGeneratorMap();
 let lastSkillJson: string | null = null;
 let allSkillFiles: string[] = [];
 let capturedDomains: string[] = [];
+let captureTimeout: ReturnType<typeof setTimeout> | null = null;
+
+const MAX_CAPTURE_MS = 10 * 60 * 1000; // 10 minutes
+const MAX_BODY_SIZE = 512 * 1024; // 512KB
 
 // Pending requests: requestId → partial data
 interface PendingRequest {
@@ -144,9 +148,14 @@ function onCdpEvent(
 
         if (chrome.runtime.lastError || !result) return;
 
-        const body = (result as any).base64Encoded
+        let body = (result as any).base64Encoded
           ? atob((result as any).body)
           : (result as any).body;
+
+        // Cap response body size to prevent memory bloat
+        if (body.length > MAX_BODY_SIZE) {
+          body = body.slice(0, MAX_BODY_SIZE);
+        }
 
         const exchange: CapturedExchange = {
           request: {
@@ -223,10 +232,16 @@ function startCapture(tabId: number) {
   pendingRequests.clear();
   pendingResponses.clear();
 
+  // Safety timeout — auto-stop capture after 10 minutes
+  captureTimeout = setTimeout(() => {
+    stopCapture();
+  }, MAX_CAPTURE_MS);
+
   chrome.debugger.attach({ tabId }, '1.3', () => {
     if (chrome.runtime.lastError) {
       state.active = false;
       state.tabId = null;
+      if (captureTimeout) { clearTimeout(captureTimeout); captureTimeout = null; }
       broadcastState();
       return;
     }
@@ -240,6 +255,12 @@ function startCapture(tabId: number) {
 
 function stopCapture() {
   if (!state.active || state.tabId === null) return;
+
+  // Clear capture timeout
+  if (captureTimeout) {
+    clearTimeout(captureTimeout);
+    captureTimeout = null;
+  }
 
   chrome.debugger.onEvent.removeListener(onCdpEvent);
   chrome.debugger.detach({ tabId: state.tabId }, () => {
@@ -263,8 +284,12 @@ function stopCapture() {
 
   state.active = false;
   state.tabId = null;
+
+  // Clear sensitive data (auth headers, POST bodies)
   pendingRequests.clear();
   pendingResponses.clear();
+  generators.clear();
+  capturedDomains = [];
 
   broadcastState();
 }

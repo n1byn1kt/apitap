@@ -12,6 +12,7 @@
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'none'; style-src 'self'; base-uri 'none'; form-action 'none'"
   },
+  "incognito": "not_allowed",
   "action": {
     "default_popup": "popup.html"
   }

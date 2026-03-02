@@ -12,6 +12,7 @@ const btnStop = document.getElementById('btn-stop') as HTMLButtonElement;
 const exportEl = document.getElementById('export')!;
 const endpointListEl = document.getElementById('endpoint-list')!;
 const btnDownload = document.getElementById('btn-download') as HTMLButtonElement;
+const saveStatusEl = document.getElementById('save-status')!;
 
 let lastSkillJson: string | null = null;
 
@@ -42,6 +43,20 @@ function updateUI(state: CaptureState) {
     authStatusEl.textContent = `Auth: ${state.authDetected.type} (${state.authDetected.header})`;
   } else {
     authStatusEl.textContent = '';
+  }
+
+  // Save status
+  if (state.autoSaved) {
+    saveStatusEl.hidden = false;
+    saveStatusEl.className = 'success';
+    saveStatusEl.textContent = `Auto-saved to ~/.apitap/skills/ (${state.autoSaved.length} file${state.autoSaved.length > 1 ? 's' : ''})`;
+    btnDownload.textContent = 'Download copy';
+  } else if (!state.active && lastSkillJson && !state.bridgeConnected) {
+    saveStatusEl.hidden = false;
+    saveStatusEl.className = 'fallback';
+    saveStatusEl.textContent = 'CLI not connected. Run: apitap extension install';
+  } else {
+    saveStatusEl.hidden = true;
   }
 }
 

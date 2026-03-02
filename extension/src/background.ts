@@ -181,7 +181,21 @@ function broadcastState() {
   chrome.runtime.sendMessage(response).catch(() => {
     // Popup not open — that's fine
   });
+  persistState();
 }
+
+function persistState() {
+  chrome.storage.session.set({
+    captureState: state,
+    lastSkillJson,
+  });
+}
+
+// Restore state on service worker startup
+chrome.storage.session.get(['captureState', 'lastSkillJson'], (result) => {
+  if (result.captureState) state = result.captureState;
+  if (result.lastSkillJson) lastSkillJson = result.lastSkillJson;
+});
 
 // --- Start / Stop ---
 

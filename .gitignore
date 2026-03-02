@@ -43,3 +43,10 @@ Thumbs.db
 # Built output (force-added files)
 dist/mcp.js
 demo/
+*.traction-state.json
+traction-state.json
+traction-baseline.json
+traction-log.md
+blog.typicode.com.json
+jsonplaceholder.typicode.com.json
+reddit.json

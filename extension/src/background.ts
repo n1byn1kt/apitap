@@ -1,11 +1,11 @@
 // Import Buffer shim first — provides globalThis.Buffer for entropy.ts / oauth-detector.ts
 import './shim.js';
 
-import { SkillGenerator } from '../../src/skill/generator.js';
 import { shouldCapture } from '../../src/capture/filter.js';
 import type { CapturedExchange } from '../../src/types.js';
 import type { CaptureState, CaptureMessage, CaptureResponse } from './types.js';
 import { extractDomain, pickPrimaryDomain } from './domain-utils.js';
+import { DomainGeneratorMap } from './multi-domain.js';
 
 // --- State ---
 
@@ -18,8 +18,9 @@ let state: CaptureState = {
   authDetected: null,
 };
 
-let generator: SkillGenerator | null = null;
+let generators = new DomainGeneratorMap();
 let lastSkillJson: string | null = null;
+let allSkillFiles: string[] = [];
 let capturedDomains: string[] = [];
 
 // Pending requests: requestId → partial data
@@ -118,7 +119,6 @@ function onCdpEvent(
 
     // Filter: only capture JSON API responses
     if (!shouldCapture({ url: req.url, status: resp.status, contentType: resp.contentType })) {
-      generator?.recordFiltered();
       pendingRequests.delete(requestId);
       pendingResponses.delete(requestId);
       broadcastState();
@@ -160,11 +160,12 @@ function onCdpEvent(
         if (reqDomain) {
           capturedDomains.push(reqDomain);
           state.domain = pickPrimaryDomain(capturedDomains);
-        }
 
-        const endpoint = generator?.addExchange(exchange);
-        if (endpoint) {
-          state.endpointCount = generator!.endpointCount;
+          const gen = generators.getOrCreate(reqDomain);
+          const endpoint = gen.addExchange(exchange);
+          if (endpoint) {
+            state.endpointCount = generators.totalEndpoints;
+          }
         }
 
         broadcastState();
@@ -185,8 +186,9 @@ function broadcastState() {
 // --- Start / Stop ---
 
 function startCapture(tabId: number) {
-  generator = new SkillGenerator();
+  generators = new DomainGeneratorMap();
   lastSkillJson = null;
+  allSkillFiles = [];
   capturedDomains = [];
   state = {
     active: true,
@@ -224,14 +226,17 @@ function stopCapture() {
     }
   });
 
-  // Generate skill file — derive domain from captured API traffic
+  // Generate skill files — one per domain, primary domain is the most frequent
   const primaryDomain = pickPrimaryDomain(capturedDomains);
-  if (generator && primaryDomain) {
+  if (primaryDomain && generators.domains.length > 0) {
     state.domain = primaryDomain;
-    const skillFile = generator.toSkillFile(primaryDomain, {
-      totalRequests: state.requestCount,
-    });
-    lastSkillJson = JSON.stringify(skillFile, null, 2);
+    const skills = generators.toSkillFiles(state.requestCount);
+    allSkillFiles = skills.map(s => JSON.stringify(s, null, 2));
+    // Primary domain's skill file is the default for download
+    const primarySkill = skills.find(s => s.domain === primaryDomain);
+    lastSkillJson = primarySkill
+      ? JSON.stringify(primarySkill, null, 2)
+      : allSkillFiles[0] ?? null;
   }
 
   state.active = false;

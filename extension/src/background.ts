@@ -5,6 +5,7 @@ import { SkillGenerator } from '../../src/skill/generator.js';
 import { shouldCapture } from '../../src/capture/filter.js';
 import type { CapturedExchange } from '../../src/types.js';
 import type { CaptureState, CaptureMessage, CaptureResponse } from './types.js';
+import { extractDomain, pickPrimaryDomain } from './domain-utils.js';
 
 // --- State ---
 
@@ -19,6 +20,7 @@ let state: CaptureState = {
 
 let generator: SkillGenerator | null = null;
 let lastSkillJson: string | null = null;
+let capturedDomains: string[] = [];
 
 // Pending requests: requestId → partial data
 interface PendingRequest {
@@ -38,14 +40,6 @@ const pendingRequests = new Map<string, PendingRequest>();
 const pendingResponses = new Map<string, PendingResponse>();
 
 // --- CDP Event Handling ---
-
-function extractDomain(url: string): string | null {
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return null;
-  }
-}
 
 function headersToRecord(headers: Array<{ name: string; value: string }> | undefined): Record<string, string> {
   const result: Record<string, string> = {};
@@ -162,6 +156,12 @@ function onCdpEvent(
           timestamp: new Date().toISOString(),
         };
 
+        const reqDomain = extractDomain(req.url);
+        if (reqDomain) {
+          capturedDomains.push(reqDomain);
+          state.domain = pickPrimaryDomain(capturedDomains);
+        }
+
         const endpoint = generator?.addExchange(exchange);
         if (endpoint) {
           state.endpointCount = generator!.endpointCount;
@@ -184,16 +184,14 @@ function broadcastState() {
 
 // --- Start / Stop ---
 
-function startCapture(tabId: number, url: string) {
-  const domain = extractDomain(url);
-  if (!domain) throw new Error(`Invalid URL: ${url}`);
-
+function startCapture(tabId: number) {
   generator = new SkillGenerator();
   lastSkillJson = null;
+  capturedDomains = [];
   state = {
     active: true,
     tabId,
-    domain,
+    domain: null,
     requestCount: 0,
     endpointCount: 0,
     authDetected: null,
@@ -226,9 +224,11 @@ function stopCapture() {
     }
   });
 
-  // Generate skill file
-  if (generator && state.domain) {
-    const skillFile = generator.toSkillFile(state.domain, {
+  // Generate skill file — derive domain from captured API traffic
+  const primaryDomain = pickPrimaryDomain(capturedDomains);
+  if (generator && primaryDomain) {
+    state.domain = primaryDomain;
+    const skillFile = generator.toSkillFile(primaryDomain, {
       totalRequests: state.requestCount,
     });
     lastSkillJson = JSON.stringify(skillFile, null, 2);
@@ -267,7 +267,7 @@ chrome.runtime.onMessage.addListener(
             return;
           }
           try {
-            startCapture(tab.id, tab.url);
+            startCapture(tab.id);
             sendResponse({ type: 'STATE_UPDATE', state: { ...state } } as CaptureResponse);
           } catch (err) {
             sendResponse({ type: 'ERROR', error: String(err) } as CaptureResponse);

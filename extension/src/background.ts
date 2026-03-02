@@ -293,10 +293,14 @@ chrome.runtime.onMessage.addListener(
 
       case 'DOWNLOAD_SKILL': {
         if (lastSkillJson) {
-          sendResponse({
-            type: 'CAPTURE_COMPLETE',
-            skillJson: lastSkillJson,
-          } as CaptureResponse);
+          // Download from background — popup blob URLs die when popup closes
+          const skill = JSON.parse(lastSkillJson);
+          const filename = `${skill.domain || 'skill'}.json`;
+          const dataUrl = 'data:application/json;base64,' + btoa(unescape(encodeURIComponent(lastSkillJson)));
+          chrome.downloads.download({ url: dataUrl, filename, saveAs: true }, () => {
+            sendResponse({ type: 'CAPTURE_COMPLETE', skillJson: lastSkillJson! } as CaptureResponse);
+          });
+          return true; // async sendResponse
         } else {
           sendResponse({ type: 'ERROR', error: 'No skill file available' } as CaptureResponse);
         }

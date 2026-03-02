@@ -1,7 +1,7 @@
 # ApiTap
 
 [![npm version](https://img.shields.io/npm/v/@apitap/core)](https://www.npmjs.com/package/@apitap/core)
-[![tests](https://img.shields.io/badge/tests-789%20passing-brightgreen)](https://github.com/n1byn1kt/apitap)
+[![tests](https://img.shields.io/badge/tests-925%20passing-brightgreen)](https://github.com/n1byn1kt/apitap)
 [![license](https://img.shields.io/badge/license-BSL--1.1-blue)](./LICENSE)
 
 **The MCP server that turns any website into an API — no docs, no SDK, no browser.**
@@ -237,6 +237,42 @@ apitap-mcp
 | `apitap_auth_request` | Request human authentication for a site |
 
 You can also serve a single skill file as a dedicated MCP server with `apitap serve <domain>` — each endpoint becomes its own tool.
+
+## Chrome Extension
+
+ApiTap includes a Chrome extension that captures API traffic directly from your already-logged-in browser — no Playwright, no auth dance, no browser popups.
+
+**Why use the extension?**
+- You're already logged into Spotify, Discord, Reddit — the extension captures from your live session
+- No `apitap auth request` needed — real tokens are captured automatically
+- Browse naturally while it records in the background
+
+### Setup
+
+1. Build the extension:
+```bash
+cd extension && npm install && npm run build
+```
+
+2. Load in Chrome: `chrome://extensions` → Enable Developer mode → Load unpacked → select the `extension/` folder
+
+3. Wire up auto-save (one-time):
+```bash
+apitap extension install --extension-id <your-extension-id>
+```
+Find your extension ID at `chrome://extensions` (enable Developer mode).
+
+### Usage
+
+1. Click the ApiTap icon in Chrome → **Start Capture**
+2. Browse normally — extension records all API traffic
+3. Click **Stop** → skill files auto-save to `~/.apitap/skills/`
+
+The popup shows CLI connection status and live capture stats. Auth tokens are automatically stored to `~/.apitap/auth.enc` with `[stored]` placeholders in the exported skill files.
+
+> **Note:** Chrome Web Store submission coming soon. For now, load as an unpacked extension in Developer mode.
+
+---
 
 ## Auth Management
 

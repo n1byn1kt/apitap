@@ -104,9 +104,17 @@ chrome.runtime.onMessage.addListener((message: CaptureResponse) => {
   }
 });
 
-// --- Init: get current state on popup open ---
+// --- Init: restore state from session storage, then sync with background ---
 
 (async () => {
+  // Restore skill JSON from session storage (survives popup close/reopen)
+  const stored = await chrome.storage.session.get(['lastSkillJson']);
+  if (stored.lastSkillJson) {
+    lastSkillJson = stored.lastSkillJson;
+    renderEndpoints(stored.lastSkillJson);
+  }
+
+  // Get live state from background service worker
   const response = await sendMessage({ type: 'GET_STATE' });
   if (response.state) updateUI(response.state);
 })();

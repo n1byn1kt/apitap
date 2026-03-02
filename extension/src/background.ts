@@ -8,6 +8,62 @@ import { extractDomain, pickPrimaryDomain } from './domain-utils.js';
 import { DomainGeneratorMap } from './multi-domain.js';
 import { isAllowedUrl, scrubAuthFromSkillJson } from './security.js';
 
+// --- Native messaging bridge ---
+
+const NATIVE_HOST = 'com.apitap.native';
+
+let bridgeAvailable = false;
+
+async function checkBridge(): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendNativeMessage(NATIVE_HOST, { action: 'ping' }, (response) => {
+        if (chrome.runtime.lastError || !response?.success) {
+          bridgeAvailable = false;
+          resolve(false);
+          return;
+        }
+        bridgeAvailable = true;
+        resolve(true);
+      });
+    } catch {
+      bridgeAvailable = false;
+      resolve(false);
+    }
+  });
+}
+
+async function saveViaBridge(skills: Array<{ domain: string; skillJson: string }>): Promise<{ success: boolean; paths?: string[]; error?: string }> {
+  if (skills.length === 1) {
+    return new Promise((resolve) => {
+      chrome.runtime.sendNativeMessage(NATIVE_HOST, {
+        action: 'save_skill',
+        domain: skills[0].domain,
+        skillJson: skills[0].skillJson,
+      }, (response) => {
+        if (chrome.runtime.lastError) {
+          resolve({ success: false, error: chrome.runtime.lastError.message });
+          return;
+        }
+        resolve(response);
+      });
+    });
+  }
+
+  return new Promise((resolve) => {
+    chrome.runtime.sendNativeMessage(NATIVE_HOST, {
+      action: 'save_batch',
+      skills,
+    }, (response) => {
+      if (chrome.runtime.lastError) {
+        resolve({ success: false, error: chrome.runtime.lastError.message });
+        return;
+      }
+      resolve(response);
+    });
+  });
+}
+
 // --- State ---
 
 let state: CaptureState = {
@@ -17,6 +73,8 @@ let state: CaptureState = {
   requestCount: 0,
   endpointCount: 0,
   authDetected: null,
+  bridgeConnected: false,
+  autoSaved: null,
 };
 
 let generators = new DomainGeneratorMap();
@@ -131,6 +189,8 @@ function onCdpEvent(
 
     // Filter: only capture JSON API responses
     if (!shouldCapture({ url: req.url, status: resp.status, contentType: resp.contentType })) {
+      const filteredDomain = extractDomain(req.url);
+      if (filteredDomain) generators.getOrCreate(filteredDomain).recordFiltered();
       pendingRequests.delete(requestId);
       pendingResponses.delete(requestId);
       broadcastState();
@@ -234,13 +294,15 @@ function startCapture(tabId: number) {
     requestCount: 0,
     endpointCount: 0,
     authDetected: null,
+    bridgeConnected: bridgeAvailable,
+    autoSaved: null,
   };
   pendingRequests.clear();
   pendingResponses.clear();
 
   // Safety timeout — auto-stop capture after 10 minutes
   captureTimeout = setTimeout(() => {
-    stopCapture();
+    void stopCapture();
   }, MAX_CAPTURE_MS);
 
   chrome.debugger.attach({ tabId }, '1.3', () => {
@@ -259,7 +321,7 @@ function startCapture(tabId: number) {
   });
 }
 
-function stopCapture() {
+async function stopCapture() {
   if (!state.active || state.tabId === null) return;
 
   // Clear capture timeout
@@ -286,6 +348,20 @@ function stopCapture() {
     lastSkillJson = primarySkill
       ? scrubAuthFromSkillJson(JSON.stringify(primarySkill))
       : allSkillFiles[0] ?? null;
+  }
+
+  // Auto-save via native messaging if bridge is available
+  state.autoSaved = null;
+  if (bridgeAvailable && allSkillFiles.length > 0) {
+    const skills = allSkillFiles.map(json => {
+      const parsed = JSON.parse(json);
+      return { domain: parsed.domain, skillJson: json };
+    });
+
+    const result = await saveViaBridge(skills);
+    if (result.success) {
+      state.autoSaved = result.paths ?? skills.map(s => s.domain);
+    }
   }
 
   state.active = false;
@@ -335,13 +411,14 @@ chrome.runtime.onMessage.addListener(
       }
 
       case 'STOP_CAPTURE': {
-        stopCapture();
-        sendResponse({
-          type: 'CAPTURE_COMPLETE',
-          state: { ...state },
-          skillJson: lastSkillJson ?? undefined,
-        } as CaptureResponse);
-        break;
+        stopCapture().then(() => {
+          sendResponse({
+            type: 'CAPTURE_COMPLETE',
+            state: { ...state },
+            skillJson: lastSkillJson ?? undefined,
+          } as CaptureResponse);
+        });
+        return true; // async sendResponse
       }
 
       case 'GET_STATE': {
@@ -367,3 +444,9 @@ chrome.runtime.onMessage.addListener(
     }
   },
 );
+
+// Check if native messaging bridge is available on startup
+checkBridge().then(() => {
+  state.bridgeConnected = bridgeAvailable;
+  persistState();
+});

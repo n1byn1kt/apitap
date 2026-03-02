@@ -5,6 +5,8 @@ export interface CaptureState {
   requestCount: number;
   endpointCount: number;
   authDetected: { type: string; header: string } | null;
+  bridgeConnected: boolean;
+  autoSaved: string[] | null;
 }
 
 export interface CaptureMessage {

@@ -92,24 +92,8 @@ btnStop.addEventListener('click', async () => {
 
 btnDownload.addEventListener('click', async () => {
   if (!lastSkillJson) return;
-
-  const skill = JSON.parse(lastSkillJson);
-  const filename = `${skill.domain || 'skill'}.json`;
-  const blob = new Blob([lastSkillJson], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-
-  try {
-    await chrome.downloads.download({ url, filename, saveAs: true });
-  } catch {
-    // Fallback: open blob URL in new tab
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
-  } finally {
-    // Revoke after a short delay to allow download to start
-    setTimeout(() => URL.revokeObjectURL(url), 5000);
-  }
+  // Download happens in background service worker (popup blob URLs die when popup closes)
+  await sendMessage({ type: 'DOWNLOAD_SKILL' });
 });
 
 // --- Listen for state broadcasts from background ---

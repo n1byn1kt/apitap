@@ -45,18 +45,26 @@ function updateUI(state: CaptureState) {
   }
 }
 
+const VALID_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']);
+
 function renderEndpoints(skillJson: string) {
-  const skill = JSON.parse(skillJson);
   endpointListEl.textContent = '';
-  for (const ep of skill.endpoints) {
-    const div = document.createElement('div');
-    div.className = 'endpoint';
-    const method = document.createElement('span');
-    method.className = `method ${ep.method}`;
-    method.textContent = ep.method;
-    div.appendChild(method);
-    div.appendChild(document.createTextNode(` ${ep.path}`));
-    endpointListEl.appendChild(div);
+  try {
+    const skill = JSON.parse(skillJson);
+    if (!Array.isArray(skill.endpoints)) return;
+    for (const ep of skill.endpoints) {
+      if (typeof ep.method !== 'string' || typeof ep.path !== 'string') continue;
+      const div = document.createElement('div');
+      div.className = 'endpoint';
+      const method = document.createElement('span');
+      method.className = VALID_METHODS.has(ep.method) ? `method ${ep.method}` : 'method';
+      method.textContent = ep.method;
+      div.appendChild(method);
+      div.appendChild(document.createTextNode(` ${ep.path}`));
+      endpointListEl.appendChild(div);
+    }
+  } catch {
+    endpointListEl.textContent = 'Error parsing skill data';
   }
 }
 

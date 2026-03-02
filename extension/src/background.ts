@@ -148,9 +148,15 @@ function onCdpEvent(
 
         if (chrome.runtime.lastError || !result) return;
 
-        let body = (result as any).base64Encoded
-          ? atob((result as any).body)
-          : (result as any).body;
+        let body: string;
+        try {
+          body = (result as any).base64Encoded
+            ? atob((result as any).body)
+            : (result as any).body;
+        } catch {
+          // Invalid base64 — skip this response
+          return;
+        }
 
         // Cap response body size to prevent memory bloat
         if (body.length > MAX_BODY_SIZE) {

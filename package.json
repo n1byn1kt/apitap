@@ -10,6 +10,7 @@
   },
   "scripts": {
     "build": "tsc",
+    "postbuild": "chmod +x dist/native-host.js 2>/dev/null || true",
     "dev": "tsx src/cli.ts",
     "test": "node --import tsx --test 'test/**/*.test.ts'",
     "typecheck": "tsc --noEmit",

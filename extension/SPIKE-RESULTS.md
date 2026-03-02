@@ -71,7 +71,7 @@ Tested against `https://www.reddit.com` (logged in). Browsed subreddits, scrolle
 
 1. **Download popup close** (fixed): Blob URLs created in popup died when popup closed on download. Fixed by moving download to background service worker using data URLs.
 
-2. **Domain mismatch** (known limitation): `domain` field in skill file showed `github.com` instead of `reddit.com` — the domain is set from the tab URL at capture start. If the user navigates after starting capture, the domain doesn't update. Multi-domain traffic (redditstatic, matrix.redditspace) also means a single-domain skill file doesn't fully represent the capture.
+2. **Domain mismatch** (known limitation): `domain` field in skill file showed `github.com` instead of `reddit.com` — capture was started on a GitHub tab, then user navigated to Reddit. The domain is set from the tab URL at capture start and doesn't update on navigation. Multi-domain traffic (redditstatic, matrix.redditspace) also means a single-domain skill file doesn't fully represent the capture.
 
 ### Quality Assessment
 

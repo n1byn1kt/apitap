@@ -20,7 +20,7 @@ import { discover } from './discovery/index.js';
 import { peek } from './read/peek.js';
 import { read } from './read/index.js';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve, dirname } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createMcpServer } from './mcp.js';
@@ -80,6 +80,7 @@ function printUsage(): void {
     apitap peek <url>          Zero-cost triage (HEAD only)
     apitap read <url>          Extract content without a browser
     apitap stats               Show token savings report
+    apitap extension install   Register native messaging host for Chrome
 
   Discover options:
     --json                     Output machine-readable JSON
@@ -983,6 +984,48 @@ async function handleRead(positional: string[], flags: Record<string, string | b
   console.log();
 }
 
+async function handleExtension(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const subcommand = positional[0];
+
+  if (subcommand === 'install') {
+    const extensionId = flags['extension-id'];
+    if (!extensionId || typeof extensionId !== 'string') {
+      console.error('Usage: apitap extension install --extension-id <id>');
+      console.error('');
+      console.error('Find your extension ID at chrome://extensions (enable Developer mode)');
+      process.exit(1);
+    }
+
+    // Resolve the native host script path
+    const hostPath = resolve(dirname(fileURLToPath(import.meta.url)), 'native-host.js');
+
+    const { installNativeHost } = await import('./extension/install.js');
+    const { installed, errors } = await installNativeHost(hostPath, extensionId);
+
+    if (installed.length > 0) {
+      console.log('Native messaging host installed:');
+      for (const p of installed) {
+        console.log(`  ✓ ${p}`);
+      }
+    }
+    if (errors.length > 0) {
+      console.error('Errors:');
+      for (const e of errors) {
+        console.error(`  ✗ ${e}`);
+      }
+    }
+    if (installed.length === 0) {
+      console.error('No browsers found. Are you on Linux or macOS?');
+      process.exit(1);
+    }
+    return;
+  }
+
+  console.error(`Unknown extension subcommand: ${subcommand}`);
+  console.error('Usage: apitap extension install --extension-id <id>');
+  process.exit(1);
+}
+
 async function main(): Promise<void> {
   const { command, positional, flags } = parseArgs(process.argv.slice(2));
 
@@ -1040,6 +1083,9 @@ async function main(): Promise<void> {
       break;
     case 'read':
       await handleRead(positional, flags);
+      break;
+    case 'extension':
+      await handleExtension(positional, flags);
       break;
     default:
       printUsage();

@@ -414,7 +414,7 @@ All commands support `--json` for machine-readable output.
 git clone https://github.com/n1byn1kt/apitap.git
 cd apitap
 npm install
-npm test          # 789 tests, Node built-in test runner
+npm test          # 925 tests, Node built-in test runner
 npm run typecheck # Type checking
 npm run build     # Compile to dist/
 npx tsx src/cli.ts capture <url>  # Run from source

@@ -6,6 +6,7 @@ import type { CapturedExchange } from '../../src/types.js';
 import type { CaptureState, CaptureMessage, CaptureResponse } from './types.js';
 import { extractDomain, pickPrimaryDomain } from './domain-utils.js';
 import { DomainGeneratorMap } from './multi-domain.js';
+import { isAllowedUrl, scrubAuthFromSkillJson } from './security.js';
 
 // --- State ---
 
@@ -116,6 +117,13 @@ function onCdpEvent(
     }
 
     state.requestCount++;
+
+    // Block non-http(s) schemes, internal URLs, and dev tooling noise
+    if (!isAllowedUrl(req.url)) {
+      pendingRequests.delete(requestId);
+      pendingResponses.delete(requestId);
+      return;
+    }
 
     // Filter: only capture JSON API responses
     if (!shouldCapture({ url: req.url, status: resp.status, contentType: resp.contentType })) {
@@ -245,11 +253,11 @@ function stopCapture() {
   if (primaryDomain && generators.domains.length > 0) {
     state.domain = primaryDomain;
     const skills = generators.toSkillFiles(state.requestCount);
-    allSkillFiles = skills.map(s => JSON.stringify(s, null, 2));
+    allSkillFiles = skills.map(s => scrubAuthFromSkillJson(JSON.stringify(s)));
     // Primary domain's skill file is the default for download
     const primarySkill = skills.find(s => s.domain === primaryDomain);
     lastSkillJson = primarySkill
-      ? JSON.stringify(primarySkill, null, 2)
+      ? scrubAuthFromSkillJson(JSON.stringify(primarySkill))
       : allSkillFiles[0] ?? null;
   }
 

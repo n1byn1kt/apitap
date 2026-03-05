@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { handleNativeMessage, type NativeRequest, type NativeResponse } from '../src/native-host.js';
+import net from 'node:net';
+import { handleNativeMessage, startSocketServer, stopSocketServer, type NativeRequest, type NativeResponse } from '../src/native-host.js';
 
 describe('native messaging host', () => {
   let tmpDir: string;
@@ -117,5 +118,94 @@ describe('native messaging host', () => {
     const files = await fs.readdir(tmpDir);
     assert.ok(files.includes('a.com.json'));
     assert.ok(files.includes('b.com.json'));
+  });
+});
+
+// Helper for socket tests
+function sendSocketMessage(socketPath: string, message: any): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const client = net.createConnection(socketPath, () => {
+      client.write(JSON.stringify(message) + '\n');
+    });
+    let data = '';
+    client.on('data', (chunk) => { data += chunk; });
+    client.on('end', () => {
+      try { resolve(JSON.parse(data)); }
+      catch { reject(new Error('Invalid response')); }
+    });
+    client.on('error', reject);
+  });
+}
+
+describe('unix socket relay', () => {
+  let tmpDir: string;
+  let socketPath: string;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), 'apitap-socket-test-'));
+    socketPath = path.join(tmpDir, 'bridge.sock');
+  });
+
+  afterEach(async () => {
+    await stopSocketServer();
+    await fs.rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it('accepts CLI connections and relays messages', async () => {
+    const mockHandler = async (msg: any) => {
+      if (msg.action === 'ping') return { success: true, action: 'pong' };
+      return { success: false, error: 'unknown' };
+    };
+
+    await startSocketServer(socketPath, mockHandler);
+
+    const response = await sendSocketMessage(socketPath, { action: 'ping' });
+    assert.equal(response.success, true);
+    assert.equal(response.action, 'pong');
+  });
+
+  it('handles concurrent CLI connections', async () => {
+    const mockHandler = async (msg: any) => {
+      await new Promise(r => setTimeout(r, 50));
+      return { success: true, domain: msg.domain };
+    };
+
+    await startSocketServer(socketPath, mockHandler);
+
+    const [r1, r2] = await Promise.all([
+      sendSocketMessage(socketPath, { action: 'capture_request', domain: 'a.com' }),
+      sendSocketMessage(socketPath, { action: 'capture_request', domain: 'b.com' }),
+    ]);
+
+    assert.equal(r1.domain, 'a.com');
+    assert.equal(r2.domain, 'b.com');
+  });
+
+  it('cleans up stale socket on startup', async () => {
+    await fs.writeFile(socketPath, 'stale');
+
+    const mockHandler = async () => ({ success: true });
+    await startSocketServer(socketPath, mockHandler);
+
+    const response = await sendSocketMessage(socketPath, { action: 'ping' });
+    assert.equal(response.success, true);
+  });
+
+  it('returns error for invalid JSON', async () => {
+    const mockHandler = async () => ({ success: true });
+    await startSocketServer(socketPath, mockHandler);
+
+    const response = await new Promise<any>((resolve) => {
+      const client = net.createConnection(socketPath, () => {
+        const msg = Buffer.from('not-json\n');
+        client.write(msg);
+      });
+      let data = '';
+      client.on('data', (chunk) => { data += chunk; });
+      client.on('end', () => { resolve(JSON.parse(data)); });
+    });
+
+    assert.equal(response.success, false);
+    assert.ok(response.error?.includes('Invalid'));
   });
 });

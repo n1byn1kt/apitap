@@ -5,6 +5,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import net from 'node:net';
 import { signSkillFile } from './skill/signing.js';
 import { deriveKey } from './auth/crypto.js';
 import { getMachineId } from './auth/manager.js';
@@ -118,6 +119,61 @@ export async function handleNativeMessage(
   } catch (err) {
     return { success: false, error: String(err) };
   }
+}
+
+// --- Unix socket server for CLI relay ---
+
+export type MessageHandler = (message: any) => Promise<any>;
+
+let socketServer: net.Server | null = null;
+
+export async function startSocketServer(
+  socketPath: string,
+  handler: MessageHandler,
+): Promise<void> {
+  // Clean up stale socket
+  try { await fs.unlink(socketPath); } catch { /* doesn't exist — fine */ }
+
+  return new Promise((resolve, reject) => {
+    socketServer = net.createServer((conn) => {
+      let buffer = '';
+
+      conn.on('data', (chunk) => {
+        buffer += chunk.toString();
+        const newlineIdx = buffer.indexOf('\n');
+        if (newlineIdx === -1) return;
+
+        const line = buffer.slice(0, newlineIdx);
+        buffer = buffer.slice(newlineIdx + 1);
+
+        let request: any;
+        try {
+          request = JSON.parse(line);
+        } catch {
+          conn.end(JSON.stringify({ success: false, error: 'Invalid JSON' }) + '\n');
+          return;
+        }
+
+        handler(request).then(
+          (response) => conn.end(JSON.stringify(response) + '\n'),
+          (err) => conn.end(JSON.stringify({ success: false, error: String(err) }) + '\n'),
+        );
+      });
+
+      conn.on('error', () => { /* client disconnect — ignore */ });
+    });
+
+    socketServer.on('error', reject);
+    socketServer.listen(socketPath, () => resolve());
+  });
+}
+
+export async function stopSocketServer(): Promise<void> {
+  if (!socketServer) return;
+  return new Promise((resolve) => {
+    socketServer!.close(() => resolve());
+    socketServer = null;
+  });
 }
 
 // --- stdio framing (only runs when executed directly, not when imported for tests) ---

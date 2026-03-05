@@ -36,15 +36,19 @@ npm test
 echo "🔖 Bumping $BUMP version..."
 npm version "$BUMP"
 
-# Publish (triggers postpublish → GitHub release)
+# Publish to npm
 echo "🚀 Publishing to npm..."
-npm publish
+npm publish --ignore-scripts
 
 # Push commits + tag
 echo "⬆️  Pushing to GitHub..."
 git push origin main --tags
 
+# Create GitHub release (after tag is pushed)
 VERSION=$(node -p "require('./package.json').version")
+echo "🏷️  Creating GitHub release..."
+gh release create "v$VERSION" --title "v$VERSION" --generate-notes
+
 echo ""
 echo "✅ v$VERSION shipped!"
 echo "   npm: https://www.npmjs.com/package/@apitap/core"

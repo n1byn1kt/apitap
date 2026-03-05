@@ -307,10 +307,10 @@ describe('credential leak prevention: query parameters', () => {
     // A param named "key" with a value that looks like a token
     const gen = new SkillGenerator();
     gen.addExchange(mockGet({
-      url: 'https://api.example.com/data?key=AIzaSyB4f8jK_mN2pQ7rT9uV3wX5yZ1aC2bD4eF',
+      url: 'https://api.example.com/data?key=AIzaSy-FAKE-KEY-FOR-TESTING-ONLY-NOT-REAL',
     }));
     const skill = gen.toSkillFile('example.com');
-    assertNotLeaked(skill, 'AIzaSyB4f8jK_mN2pQ7rT9uV3wX5yZ1aC2bD4eF', 'High-entropy key param');
+    assertNotLeaked(skill, 'AIzaSy-FAKE-KEY-FOR-TESTING-ONLY-NOT-REAL', 'High-entropy key param');
   });
 
   it('preserves non-sensitive query params', () => {

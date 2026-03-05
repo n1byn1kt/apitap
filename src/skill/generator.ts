@@ -195,6 +195,29 @@ function scrubQueryParams(
   return scrubbed;
 }
 
+/** Scrub sensitive query params from a full URL string */
+function scrubUrlQueryParams(urlString: string): string {
+  try {
+    const url = new URL(urlString);
+    let changed = false;
+    for (const [key, value] of url.searchParams.entries()) {
+      if (SENSITIVE_QUERY_KEYS.test(key)) {
+        url.searchParams.set(key, '[scrubbed]');
+        changed = true;
+      } else {
+        const classification = isLikelyToken(key, value);
+        if (classification.isToken) {
+          url.searchParams.set(key, '[scrubbed]');
+          changed = true;
+        }
+      }
+    }
+    return changed ? url.toString() : urlString;
+  } catch {
+    return urlString;
+  }
+}
+
 /** Body field names that must always be scrubbed (credentials in POST bodies) */
 const SENSITIVE_BODY_KEYS = /^(password|passwd|pass|secret|client_secret|refresh_token|access_token|api_key|apikey|token|csrf_token|_csrf|xsrf_token|private_key|credential)$/i;
 
@@ -328,10 +351,10 @@ export class SkillGenerator {
       queryParams = scrubQueryParams(queryParams);
     }
 
-    // Build example URL, optionally scrub PII
+    // Build example URL, optionally scrub PII and sensitive query params
     let exampleUrl = exchange.request.url;
     if (this.options.scrub) {
-      exampleUrl = scrubPII(exampleUrl);
+      exampleUrl = scrubUrlQueryParams(scrubPII(exampleUrl));
     }
 
     // Response preview: null by default, populated with --preview

@@ -61,11 +61,12 @@ async function tryBridgeCapture(
     timeout: options._bridgeTimeout,
   });
 
-  if (result.success && result.skillFiles?.length > 0) {
+  if (result.success && result.skillFiles && result.skillFiles.length > 0) {
+    const skillFiles = result.skillFiles;
     // Save each skill file to disk
     try {
       const { writeSkillFile: writeSF } = await import('../skill/store.js');
-      for (const skill of result.skillFiles) {
+      for (const skill of skillFiles) {
         await writeSF(skill, options.skillsDir);
       }
     } catch {
@@ -73,8 +74,8 @@ async function tryBridgeCapture(
     }
 
     // Find the skill file matching the requested domain
-    const primarySkill = result.skillFiles.find((s: any) => s.domain === domain)
-      ?? result.skillFiles[0];
+    const primarySkill = skillFiles.find((s: any) => s.domain === domain)
+      ?? skillFiles[0];
 
     if (primarySkill?.endpoints?.length > 0) {
       // Pick the best endpoint and replay it
@@ -112,7 +113,7 @@ async function tryBridgeCapture(
     return {
       success: false,
       reason: 'bridge_capture_saved',
-      suggestion: `Captured ${result.skillFiles.length} skill file(s) from browser. Replay failed — try 'apitap replay ${domain}'.`,
+      suggestion: `Captured ${skillFiles.length} skill file(s) from browser. Replay failed — try 'apitap replay ${domain}'.`,
       domain,
       url: fullUrl,
       task: options.task,

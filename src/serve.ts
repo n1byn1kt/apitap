@@ -153,7 +153,7 @@ export async function createServeServer(
             }],
           };
         } catch (err: any) {
-          console.error('Replay failed:', err);
+          console.error('Replay failed:', err instanceof Error ? err.message : String(err));
           return {
             content: [{
               type: 'text' as const,

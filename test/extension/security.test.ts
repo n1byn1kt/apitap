@@ -7,8 +7,16 @@ describe('extension URL security', () => {
     assert.ok(isAllowedUrl('https://api.example.com/users'));
   });
 
-  it('allows http URLs', () => {
-    assert.ok(isAllowedUrl('http://localhost:3000/api'));
+  it('blocks localhost/private IPs', () => {
+    assert.ok(!isAllowedUrl('http://localhost:3000/api'));
+    assert.ok(!isAllowedUrl('http://127.0.0.1:8080/api'));
+    assert.ok(!isAllowedUrl('http://192.168.1.1/admin'));
+    assert.ok(!isAllowedUrl('http://10.0.0.1/internal'));
+    assert.ok(!isAllowedUrl('http://169.254.169.254/latest/meta-data'));
+  });
+
+  it('allows public http URLs', () => {
+    assert.ok(isAllowedUrl('http://api.example.com/data'));
   });
 
   it('blocks chrome-extension:// URLs', () => {
@@ -79,6 +87,28 @@ describe('auth scrubbing from exported skill JSON', () => {
     });
     const scrubbed = JSON.parse(scrubAuthFromSkillJson(input));
     assert.equal(scrubbed.endpoints[0].headers.cookie, '[stored]');
+  });
+
+  it('scrubs sensitive fields from request body templates', () => {
+    const input = JSON.stringify({
+      endpoints: [{
+        headers: { 'content-type': 'application/json' },
+        requestBody: {
+          template: {
+            login: 'user@test.com',
+            password: 'secret123',
+            csrf_token: 'abc',
+            nested: { client_secret: 'xyz' },
+          },
+        },
+      }],
+    });
+    const scrubbed = JSON.parse(scrubAuthFromSkillJson(input));
+    const tpl = scrubbed.endpoints[0].requestBody.template;
+    assert.equal(tpl.login, 'user@test.com'); // not sensitive
+    assert.equal(tpl.password, '[scrubbed]');
+    assert.equal(tpl.csrf_token, '[scrubbed]');
+    assert.equal(tpl.nested.client_secret, '[scrubbed]');
   });
 
   it('preserves non-sensitive headers', () => {

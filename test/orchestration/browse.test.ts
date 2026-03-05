@@ -116,6 +116,7 @@ describe('browse orchestration', () => {
       cache,
       skipDiscovery: true,
       _skipSsrfCheck: true,
+      _bridgeSocketPath: join(testDir, 'nonexistent.sock'),
     });
 
     assert.equal(result.success, false);

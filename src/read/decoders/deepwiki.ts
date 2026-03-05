@@ -1,5 +1,6 @@
 // src/read/decoders/deepwiki.ts
 import type { Decoder, ReadResult } from '../types.js';
+import { validateUrl } from '../../skill/ssrf.js';
 
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
@@ -35,8 +36,15 @@ export const deepwikiDecoder: Decoder = {
     const repo = match[3];
     const pagePath = match[4] || '';
 
+    // SSRF check
+    const ssrfResult = validateUrl(url);
+    if (!ssrfResult.safe) return null;
+
+    // Sanitize extracted values for header injection
+    const sanitize = (s: string) => s.replace(/[\r\n]/g, '');
+
     // Construct the path for the RSC request
-    const fullPath = `/${org}/${repo}${pagePath}`;
+    const fullPath = sanitize(`/${org}/${repo}${pagePath}`);
 
     try {
       const response = await fetch(url, {

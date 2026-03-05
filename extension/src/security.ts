@@ -19,6 +19,8 @@ const NOISE_URL_PATTERNS = [
   /\/_next\/webpack-hmr/,
 ];
 
+const PRIVATE_HOST_RE = /^(localhost|127\.\d+\.\d+\.\d+|::1|0\.0\.0\.0|169\.254\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+)$/;
+
 export function isAllowedUrl(url: string): boolean {
   if (!url) return false;
 
@@ -29,12 +31,16 @@ export function isAllowedUrl(url: string): boolean {
   }
 
   // Must be valid http(s)
+  let parsed: URL;
   try {
-    const parsed = new URL(url);
+    parsed = new URL(url);
     if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
   } catch {
     return false;
   }
+
+  // Block private/internal addresses (SSRF prevention + privacy)
+  if (PRIVATE_HOST_RE.test(parsed.hostname)) return false;
 
   // Block dev tooling noise
   for (const pattern of NOISE_URL_PATTERNS) {
@@ -58,8 +64,26 @@ const SENSITIVE_HEADERS = new Set([
  * Scrub auth/session credentials from skill file JSON before export.
  * Replaces sensitive header values with '[stored]' placeholder.
  */
+/** Body field names that carry credentials */
+const SENSITIVE_BODY_KEYS = /^(password|passwd|pass|secret|client_secret|refresh_token|access_token|api_key|apikey|token|csrf_token|_csrf|xsrf_token|private_key|credential)$/i;
+
+function scrubObjectFields(obj: Record<string, unknown>): void {
+  for (const key of Object.keys(obj)) {
+    if (SENSITIVE_BODY_KEYS.test(key) && typeof obj[key] === 'string') {
+      obj[key] = '[scrubbed]';
+    } else if (obj[key] && typeof obj[key] === 'object' && !Array.isArray(obj[key])) {
+      scrubObjectFields(obj[key] as Record<string, unknown>);
+    }
+  }
+}
+
 export function scrubAuthFromSkillJson(json: string): string {
-  const skill = JSON.parse(json);
+  let skill: any;
+  try {
+    skill = JSON.parse(json);
+  } catch {
+    return json; // Return original if parse fails
+  }
   if (Array.isArray(skill.endpoints)) {
     for (const ep of skill.endpoints) {
       if (ep.headers && typeof ep.headers === 'object') {
@@ -76,6 +100,10 @@ export function scrubAuthFromSkillJson(json: string): string {
             ep.exampleRequestHeaders[key] = '[stored]';
           }
         }
+      }
+      // Scrub sensitive fields from request body templates
+      if (ep.requestBody?.template && typeof ep.requestBody.template === 'object') {
+        scrubObjectFields(ep.requestBody.template);
       }
     }
   }

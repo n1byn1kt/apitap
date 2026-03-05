@@ -11,7 +11,7 @@ export interface ValidationResult {
 }
 
 const INTERNAL_HOSTNAMES = ['localhost'];
-const INTERNAL_SUFFIXES = ['.local', '.internal'];
+const INTERNAL_SUFFIXES = ['.local', '.internal', '.localhost', '.corp', '.intranet', '.lan', '.test', '.invalid', '.example'];
 
 /**
  * Check if a URL is safe to replay (not targeting internal infrastructure).
@@ -126,8 +126,17 @@ function isPrivateIp(ip: string): string | null {
   const v4mapped = ip.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/i);
   const ipv4 = v4mapped ? v4mapped[1] : ip;
 
+  // IPv4-mapped IPv6 hex form (e.g. ::ffff:7f00:1)
+  const v4mappedHex = ip.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
+  if (v4mappedHex) {
+    const hi = parseInt(v4mappedHex[1], 16);
+    const lo = parseInt(v4mappedHex[2], 16);
+    const reconstructed = `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+    return isPrivateIp(reconstructed);
+  }
+
   const parts = ipv4.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (!parts) return null; // Not an IPv4 — let it pass (non-private IPv6)
+  if (!parts) return 'unrecognized IP format'; // Fail closed for unrecognized formats
 
   const [, a, b] = parts;
   const first = Number(a);

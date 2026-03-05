@@ -118,7 +118,7 @@ describe('MCP capture start → interact → finish flow', () => {
     testDir = await mkdtemp(join(tmpdir(), 'apitap-capture-mcp-'));
     baseUrl = await startServer();
 
-    const server = createMcpServer({ skillsDir: testDir });
+    const server = createMcpServer({ skillsDir: testDir, _skipSsrfCheck: true });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     client = new Client({ name: 'test-client', version: '1.0.0' });
     await server.connect(serverTransport);

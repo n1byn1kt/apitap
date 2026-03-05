@@ -136,8 +136,11 @@ export function substituteBodyVariables(
   return result;
 }
 
+const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 function setNestedValue(obj: Record<string, unknown>, path: string, value: string): void {
   const parts = path.split('.');
+  if (parts.some(p => FORBIDDEN_KEYS.has(p))) return; // block prototype pollution
   let current = obj;
 
   for (let i = 0; i < parts.length - 1; i++) {

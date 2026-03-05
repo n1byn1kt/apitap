@@ -103,6 +103,12 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     },
     async ({ url }) => {
       try {
+        if (!options._skipSsrfCheck) {
+          const validation = await resolveAndValidateUrl(url);
+          if (!validation.safe) {
+            return { content: [{ type: 'text' as const, text: `Blocked: ${validation.reason}` }], isError: true };
+          }
+        }
         const result = await discover(url);
 
         // If we got a skill file, save it automatically
@@ -250,6 +256,12 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
       },
     },
     async ({ url, task, maxBytes }) => {
+      if (!options._skipSsrfCheck) {
+        const validation = await resolveAndValidateUrl(url);
+        if (!validation.safe) {
+          return { content: [{ type: 'text' as const, text: `Blocked: ${validation.reason}` }], isError: true };
+        }
+      }
       const { browse: doBrowse } = await import('./orchestration/browse.js');
       const result = await doBrowse(url, {
         skillsDir,
@@ -257,6 +269,8 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
         task,
         maxBytes: maxBytes ?? 50_000,
         _skipSsrfCheck: options._skipSsrfCheck,
+        // In test mode, disable bridge to avoid connecting to real socket
+        ...(options._skipSsrfCheck ? { _bridgeSocketPath: '/nonexistent' } : {}),
       });
       // Only mark as untrusted if it contains external data
       if (result.success && result.data) {
@@ -285,6 +299,12 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     },
     async ({ url }) => {
       try {
+        if (!options._skipSsrfCheck) {
+          const validation = await resolveAndValidateUrl(url);
+          if (!validation.safe) {
+            return { content: [{ type: 'text' as const, text: `Blocked: ${validation.reason}` }], isError: true };
+          }
+        }
         const result = await peek(url);
         // Peek returns metadata, not content — but still from external source
         return wrapExternalContent(result, 'apitap_peek');
@@ -315,9 +335,11 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     },
     async ({ url, maxBytes }) => {
       try {
-        const validation = await resolveAndValidateUrl(url);
-        if (!validation.safe) {
-          throw new Error(validation.reason ?? 'URL validation failed');
+        if (!options._skipSsrfCheck) {
+          const validation = await resolveAndValidateUrl(url);
+          if (!validation.safe) {
+            throw new Error(validation.reason ?? 'URL validation failed');
+          }
         }
         const result = await read(url, { maxBytes: maxBytes ?? undefined });
         if (!result) {
@@ -354,6 +376,12 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
       },
     },
     async ({ url, duration }) => {
+      if (!options._skipSsrfCheck) {
+        const validation = await resolveAndValidateUrl(url);
+        if (!validation.safe) {
+          return { content: [{ type: 'text' as const, text: `Blocked: ${validation.reason}` }], isError: true };
+        }
+      }
       const dur = duration ?? 30;
       const timeoutMs = (dur + 60) * 1000; // generous timeout: capture duration + 60s for start/finish
 
@@ -406,6 +434,12 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
       },
     },
     async ({ url, headless, allDomains }) => {
+      if (!options._skipSsrfCheck) {
+        const validation = await resolveAndValidateUrl(url);
+        if (!validation.safe) {
+          return { content: [{ type: 'text' as const, text: `Blocked: ${validation.reason}` }], isError: true };
+        }
+      }
       if (sessions.size >= MAX_SESSIONS) {
         return {
           content: [{ type: 'text' as const, text: `Maximum ${MAX_SESSIONS} concurrent sessions. Finish or abort an existing session first.` }],

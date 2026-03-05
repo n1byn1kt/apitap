@@ -193,7 +193,11 @@ export async function startSocketServer(
     });
 
     socketServer.on('error', reject);
-    socketServer.listen(socketPath, () => resolve());
+    socketServer.listen(socketPath, () => {
+      // Restrict socket permissions to owner only
+      fs.chmod(socketPath, 0o600).catch(() => {});
+      resolve();
+    });
   });
 }
 

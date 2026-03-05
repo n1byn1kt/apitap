@@ -222,11 +222,18 @@ export async function replayEndpoint(
   let body: string | undefined;
   const headers = { ...endpoint.headers };
 
-  // Filter headers from skill file — block dangerous headers
+  // Filter headers from skill file — block dangerous headers and sanitize values
+  const allowedMethods = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']);
+  if (!allowedMethods.has(endpoint.method)) {
+    throw new Error(`Blocked: unsupported HTTP method "${endpoint.method}"`);
+  }
   for (const key of Object.keys(headers)) {
     const lower = key.toLowerCase();
     if (BLOCKED_REPLAY_HEADERS.has(lower) || lower.startsWith('sec-')) {
       delete headers[key];
+    } else {
+      // Sanitize CRLF from header values to prevent header injection
+      headers[key] = headers[key].replace(/[\r\n]/g, '');
     }
   }
 
@@ -381,10 +388,22 @@ export async function replayEndpoint(
           throw new Error(`Redirect blocked (SSRF): ${redirectCheck.reason}`);
         }
       }
+      // Strip auth headers before cross-domain redirect
+      const redirectHeaders = { ...headers };
+      const originalHost = url.hostname;
+      const redirectHost = redirectUrl.hostname;
+      if (redirectHost !== originalHost && !redirectHost.endsWith('.' + originalHost)) {
+        delete redirectHeaders['authorization'];
+        for (const key of Object.keys(redirectHeaders)) {
+          if (key.toLowerCase() === 'authorization' || redirectHeaders[key] === '[stored]') {
+            delete redirectHeaders[key];
+          }
+        }
+      }
       // Follow the redirect manually (single hop to prevent chains)
       response = await fetch(redirectFetchUrl, {
         method: 'GET',  // Redirects typically become GET
-        headers,  // Forward headers (already filtered)
+        headers: redirectHeaders,
         signal: AbortSignal.timeout(30_000),
         redirect: 'manual',  // Prevent chaining
       });

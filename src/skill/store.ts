@@ -39,7 +39,7 @@ export async function writeSkillFile(
   await mkdir(skillsDir, { recursive: true });
   await ensureGitignore(skillsDir);
   const filePath = skillPath(skill.domain, skillsDir);
-  await writeFile(filePath, JSON.stringify(skill, null, 2) + '\n');
+  await writeFile(filePath, JSON.stringify(skill, null, 2) + '\n', { mode: 0o600 });
   return filePath;
 }
 
@@ -88,9 +88,11 @@ export async function listSkillFiles(
   }
 
   const summaries: SkillSummary[] = [];
+  const DOMAIN_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
   for (const file of files) {
     if (!file.endsWith('.json')) continue;
     const domain = file.replace(/\.json$/, '');
+    if (!DOMAIN_RE.test(domain)) continue; // skip non-conforming filenames
     const skill = await readSkillFile(domain, skillsDir);
     if (skill) {
       summaries.push({

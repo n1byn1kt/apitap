@@ -512,7 +512,12 @@ async function handleRefresh(positional: string[], flags: Record<string, string 
   });
 
   if (json) {
-    console.log(JSON.stringify(result, null, 2));
+    // Redact token values from JSON output to prevent credential leaks in logs
+    const safeResult = {
+      ...result,
+      tokens: Object.fromEntries(Object.keys(result.tokens).map(k => [k, '[redacted]'])),
+    };
+    console.log(JSON.stringify(safeResult, null, 2));
   } else if (result.success) {
     if (result.oauthRefreshed) {
       console.log(`  ✓ OAuth token refreshed via token endpoint`);

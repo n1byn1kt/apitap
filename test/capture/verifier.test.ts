@@ -112,7 +112,7 @@ describe('verifyEndpoints', () => {
       provenance: 'unsigned',
     };
 
-    const verified = await verifyEndpoints(skill);
+    const verified = await verifyEndpoints(skill, { _skipSsrfCheck: true });
     assert.equal(verified.endpoints[0].replayability?.tier, 'green');
     assert.equal(verified.endpoints[0].replayability?.verified, true);
     assert.ok(verified.endpoints[0].replayability?.signals.includes('status-match'));
@@ -140,7 +140,7 @@ describe('verifyEndpoints', () => {
       provenance: 'unsigned',
     };
 
-    const verified = await verifyEndpoints(skill);
+    const verified = await verifyEndpoints(skill, { _skipSsrfCheck: true });
     assert.equal(verified.endpoints[0].replayability?.tier, 'yellow');
     assert.equal(verified.endpoints[0].replayability?.verified, true);
   });
@@ -165,7 +165,7 @@ describe('verifyEndpoints', () => {
       provenance: 'unsigned',
     };
 
-    const verified = await verifyEndpoints(skill);
+    const verified = await verifyEndpoints(skill, { _skipSsrfCheck: true });
     assert.equal(verified.endpoints[0].replayability?.tier, 'orange');
     assert.equal(verified.endpoints[0].replayability?.verified, true);
   });
@@ -197,7 +197,7 @@ describe('verifyEndpoints', () => {
       provenance: 'unsigned',
     };
 
-    const verified = await verifyEndpoints(skill, { verifyPosts: true });
+    const verified = await verifyEndpoints(skill, { verifyPosts: true, _skipSsrfCheck: true });
     assert.equal(verified.endpoints[0].replayability?.tier, 'green');
     assert.equal(verified.endpoints[0].replayability?.verified, true);
     assert.ok(verified.endpoints[0].replayability?.signals.includes('status-match'));
@@ -229,7 +229,7 @@ describe('verifyEndpoints', () => {
       provenance: 'unsigned',
     };
 
-    const verified = await verifyEndpoints(skill, { verifyPosts: true });
+    const verified = await verifyEndpoints(skill, { verifyPosts: true, _skipSsrfCheck: true });
     assert.equal(verified.endpoints[0].replayability?.tier, 'orange');
     assert.equal(verified.endpoints[0].replayability?.verified, true);
   });
@@ -255,7 +255,7 @@ describe('verifyEndpoints', () => {
       provenance: 'unsigned',
     };
 
-    const verified = await verifyEndpoints(skill, { verifyPosts: true });
+    const verified = await verifyEndpoints(skill, { verifyPosts: true, _skipSsrfCheck: true });
     // No requestBody → falls back to heuristic (unverified)
     assert.equal(verified.endpoints[0].replayability?.verified, false);
   });
@@ -281,7 +281,7 @@ describe('verifyEndpoints', () => {
       provenance: 'unsigned',
     };
 
-    const verified = await verifyEndpoints(skill);
+    const verified = await verifyEndpoints(skill, { _skipSsrfCheck: true });
     assert.equal(verified.endpoints[0].replayability?.verified, false);
   });
 
@@ -296,7 +296,7 @@ describe('verifyEndpoints', () => {
       provenance: 'unsigned',
     };
 
-    const verified = await verifyEndpoints(skill);
+    const verified = await verifyEndpoints(skill, { _skipSsrfCheck: true });
     assert.deepEqual(verified.endpoints, []);
   });
 });

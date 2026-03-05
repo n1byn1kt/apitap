@@ -10,7 +10,7 @@ import {
 
 const ALGORITHM = 'aes-256-gcm';
 const KEY_LENGTH = 32; // 256 bits
-const IV_LENGTH = 16;
+const IV_LENGTH = 12; // NIST SP 800-38D recommended for GCM
 const PBKDF2_ITERATIONS = 100_000;
 // const PBKDF2_SALT = 'apitap-v0.2-key-derivation'; // fallback for migration
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
@@ -66,7 +66,7 @@ export function encrypt(plaintext: string, key: Buffer): EncryptedData {
   const tag = cipher.getAuthTag();
 
   return {
-    salt: 'apitap-v0.2-key-derivation', // Legacy: stored for reference, not used in decrypt
+    salt: 'v2', // Format version marker — actual salt is per-install
     iv: iv.toString('hex'),
     ciphertext,
     tag: tag.toString('hex'),

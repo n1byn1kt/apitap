@@ -5,7 +5,6 @@ import { resolveAndValidateUrl } from '../skill/ssrf.js';
 
 export interface OAuthRefreshResult {
   success: boolean;
-  accessToken?: string;
   tokenRotated?: boolean;
   error?: string;
 }
@@ -74,9 +73,14 @@ export async function refreshOAuth(
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => '');
+      let errorSummary = `${response.status}`;
+      try {
+        const errJson = JSON.parse(errorText);
+        if (typeof errJson.error === 'string') errorSummary += `: ${errJson.error}`;
+      } catch { /* non-JSON, omit body */ }
       return {
         success: false,
-        error: `Token endpoint returned ${response.status}: ${errorText}`.trim(),
+        error: `Token endpoint returned ${errorSummary}`,
       };
     }
 
@@ -119,7 +123,7 @@ export async function refreshOAuth(
       tokenRotated = true;
     }
 
-    return { success: true, accessToken, tokenRotated };
+    return { success: true, tokenRotated };
   } catch (error) {
     return {
       success: false,

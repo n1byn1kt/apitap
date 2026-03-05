@@ -90,7 +90,7 @@ describe('end-to-end: capture → skill file → replay', () => {
     assert.equal(skill.provenance, 'unsigned');
 
     // 4. Auto-verify endpoints
-    skill = await verifyEndpoints(skill);
+    skill = await verifyEndpoints(skill, { _skipSsrfCheck: true });
     for (const ep of skill.endpoints) {
       if (ep.method === 'GET') {
         assert.ok(ep.replayability, `Endpoint ${ep.id} should have replayability`);

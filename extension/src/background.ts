@@ -277,11 +277,22 @@ function captureWithPlateau(
   });
 }
 
+function isValidDomain(domain: string): boolean {
+  try {
+    const u = new URL(`https://${domain}`);
+    return u.hostname === domain && !domain.includes('/') && !domain.includes('\\');
+  } catch { return false; }
+}
+
 async function handleAgentCapture(request: AgentRequest): Promise<AgentResponse> {
   const { domain } = request;
 
   if (!domain) {
     return { success: false, error: 'missing_domain' };
+  }
+
+  if (!isValidDomain(domain)) {
+    return { success: false, error: 'invalid_domain' };
   }
 
   // Don't start a capture if one is already active
@@ -652,6 +663,8 @@ chrome.debugger.onDetach.addListener((source, reason) => {
 
 chrome.runtime.onMessage.addListener(
   (message: CaptureMessage, sender, sendResponse) => {
+    // Only accept messages from this extension's own pages
+    if (sender.id !== chrome.runtime.id) return;
     switch (message.type) {
       case 'START_CAPTURE': {
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -691,7 +704,7 @@ chrome.runtime.onMessage.addListener(
           // Download from background — popup blob URLs die when popup closes
           const skill = JSON.parse(lastSkillJson);
           const filename = `${skill.domain || 'skill'}.json`;
-          const dataUrl = 'data:application/json;base64,' + btoa(unescape(encodeURIComponent(lastSkillJson)));
+          const dataUrl = 'data:application/json;base64,' + btoa(String.fromCharCode(...new TextEncoder().encode(lastSkillJson)));
           chrome.downloads.download({ url: dataUrl, filename, saveAs: true }, () => {
             sendResponse({ type: 'CAPTURE_COMPLETE', skillJson: lastSkillJson! } as CaptureResponse);
           });

@@ -47,6 +47,14 @@ demo/
 traction-state.json
 traction-baseline.json
 traction-log.md
-blog.typicode.com.json
-jsonplaceholder.typicode.com.json
+# Skill files — may contain captured credentials/tokens
+*.com.json
+*.io.json
+*.net.json
+*.org.json
+*.dev.json
+*.app.json
+*.ai.json
+*.co.json
+*.xyz.json
 reddit.json

@@ -49,6 +49,12 @@ const STRIP_HEADERS = new Set([
 const AUTH_HEADERS = new Set([
   'authorization',
   'x-api-key',
+  'x-guest-token',
+  'x-csrf-token',
+  'x-xsrf-token',
+  'x-auth-token',
+  'x-access-token',
+  'x-session-token',
 ]);
 
 export interface GeneratorOptions {
@@ -165,25 +171,47 @@ function extractQueryParams(url: URL): Record<string, { type: string; example: s
   return params;
 }
 
+/** Query param names that carry API keys or tokens */
+const SENSITIVE_QUERY_KEYS = /api.?key|token|secret|credential|key|access.?key/i;
+
 function scrubQueryParams(
   params: Record<string, { type: string; example: string }>,
 ): Record<string, { type: string; example: string }> {
   const scrubbed: Record<string, { type: string; example: string }> = {};
   for (const [key, val] of Object.entries(params)) {
-    scrubbed[key] = { type: val.type, example: scrubPII(val.example) };
+    // Scrub known sensitive query param names
+    if (SENSITIVE_QUERY_KEYS.test(key)) {
+      scrubbed[key] = { type: val.type, example: '[scrubbed]' };
+    } else {
+      // Also apply entropy-based detection for unknown high-entropy values
+      const classification = isLikelyToken(key, val.example);
+      if (classification.isToken) {
+        scrubbed[key] = { type: val.type, example: '[scrubbed]' };
+      } else {
+        scrubbed[key] = { type: val.type, example: scrubPII(val.example) };
+      }
+    }
   }
   return scrubbed;
 }
+
+/** Body field names that must always be scrubbed (credentials in POST bodies) */
+const SENSITIVE_BODY_KEYS = /^(password|passwd|pass|secret|client_secret|refresh_token|access_token|api_key|apikey|token|csrf_token|_csrf|xsrf_token|private_key|credential)$/i;
 
 function scrubBody(body: unknown, doScrub: boolean): unknown {
   if (!doScrub) return body;
   if (typeof body === 'string') {
     return scrubPII(body);
   }
+  if (Array.isArray(body)) {
+    return body.map(item => scrubBody(item, doScrub));
+  }
   if (body && typeof body === 'object') {
     const scrubbed: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
-      if (typeof value === 'string') {
+      if (SENSITIVE_BODY_KEYS.test(key) && typeof value === 'string') {
+        scrubbed[key] = '[scrubbed]';
+      } else if (typeof value === 'string') {
         scrubbed[key] = scrubPII(value);
       } else if (value && typeof value === 'object') {
         scrubbed[key] = scrubBody(value, doScrub);
@@ -310,8 +338,8 @@ export class SkillGenerator {
     let responsePreview: unknown = null;
     if (this.options.enablePreview) {
       const preview = truncatePreview(exchange.response.body);
-      responsePreview = this.options.scrub && typeof preview === 'string'
-        ? scrubPII(preview)
+      responsePreview = this.options.scrub
+        ? scrubBody(preview, true)
         : preview;
     }
 

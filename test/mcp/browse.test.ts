@@ -100,13 +100,13 @@ describe('apitap_browse via MCP', () => {
   it('returns guidance for unknown domain', async () => {
     const result = await client.callTool({
       name: 'apitap_browse',
-      arguments: { url: 'http://unknown-domain.test/stuff' },
+      arguments: { url: 'http://unknown-domain-xyz.example.com/stuff' },
     });
     // Not isError — guidance is a successful tool response
     const data = JSON.parse((result.content as any)[0].text);
     assert.equal(data.success, false);
     assert.ok(data.suggestion);
-    assert.equal(data.domain, 'unknown-domain.test');
+    assert.equal(data.domain, 'unknown-domain-xyz.example.com');
   });
 
   it('passes task through', async () => {

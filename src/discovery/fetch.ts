@@ -1,5 +1,5 @@
 // src/discovery/fetch.ts
-import { validateUrl } from '../skill/ssrf.js';
+import { validateUrl, resolveAndValidateUrl } from '../skill/ssrf.js';
 
 export interface FetchResult {
   status: number;
@@ -53,12 +53,12 @@ export async function safeFetch(
 
     clearTimeout(timer);
 
-    // SSRF-safe manual redirect (one hop max)
+    // SSRF-safe manual redirect (one hop max, with DNS resolution check)
     if (response.status >= 300 && response.status < 400 && response.headers.has('location')) {
       const location = response.headers.get('location');
       if (!location) return null;
       const redirectUrl = new URL(location, url).toString();
-      const ssrfResult = validateUrl(redirectUrl);
+      const ssrfResult = await resolveAndValidateUrl(redirectUrl);
       if (!ssrfResult.safe) return null;
       // Follow one redirect hop only
       return await safeFetch(redirectUrl, { ...options, skipSsrf: true });

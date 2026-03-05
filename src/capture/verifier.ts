@@ -1,5 +1,6 @@
 // src/capture/verifier.ts
 import type { SkillFile, SkillEndpoint, Replayability } from '../types.js';
+import { validateUrl } from '../skill/ssrf.js';
 
 /**
  * Heuristic tier classification for non-GET endpoints (or when verification is skipped).
@@ -35,9 +36,16 @@ export function classifyHeuristic(endpoint: SkillEndpoint): Replayability {
  */
 async function verifySingle(
   endpoint: SkillEndpoint,
+  skipSsrf = false,
 ): Promise<Replayability> {
   const url = endpoint.examples.request.url;
   if (!url) return classifyHeuristic(endpoint);
+
+  // SSRF check before verification fetch
+  if (!skipSsrf) {
+    const ssrfResult = validateUrl(url);
+    if (!ssrfResult.safe) return classifyHeuristic(endpoint);
+  }
 
   // Build headers: use endpoint headers but exclude [stored] auth placeholders
   const headers: Record<string, string> = {};
@@ -89,9 +97,16 @@ async function verifySingle(
  */
 async function verifySinglePost(
   endpoint: SkillEndpoint,
+  skipSsrf = false,
 ): Promise<Replayability> {
   const url = endpoint.examples.request.url;
   if (!url || !endpoint.requestBody) return classifyHeuristic(endpoint);
+
+  // SSRF check before verification fetch
+  if (!skipSsrf) {
+    const ssrfResult = validateUrl(url);
+    if (!ssrfResult.safe) return classifyHeuristic(endpoint);
+  }
 
   const headers: Record<string, string> = {};
   for (const [k, v] of Object.entries(endpoint.headers)) {
@@ -144,6 +159,8 @@ async function verifySinglePost(
 export interface VerifyOptions {
   /** Verify POST/PUT/PATCH endpoints by replaying them (opt-in, may cause side effects). */
   verifyPosts?: boolean;
+  /** @internal Skip SSRF check — for testing only */
+  _skipSsrfCheck?: boolean;
 }
 
 /**
@@ -156,10 +173,11 @@ export async function verifyEndpoints(skill: SkillFile, opts?: VerifyOptions): P
   const verifiedEndpoints = await Promise.all(
     skill.endpoints.map(async (ep) => {
       let replayability: Replayability;
+      const skipSsrf = opts?._skipSsrfCheck ?? false;
       if (ep.method === 'GET') {
-        replayability = await verifySingle(ep);
+        replayability = await verifySingle(ep, skipSsrf);
       } else if (opts?.verifyPosts) {
-        replayability = await verifySinglePost(ep);
+        replayability = await verifySinglePost(ep, skipSsrf);
       } else {
         replayability = classifyHeuristic(ep);
       }

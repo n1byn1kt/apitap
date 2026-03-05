@@ -55,9 +55,8 @@ describe('refreshOAuth', () => {
 
     const result = await refreshOAuth('example.com', baseConfig, authManager, { _skipSsrfCheck: true });
     assert.equal(result.success, true);
-    assert.equal(result.accessToken, 'new-access-token');
-
-    // Verify stored
+    // accessToken no longer returned (security: don't expose tokens)
+    // Verify stored instead
     const stored = await authManager.retrieve('example.com');
     assert.equal(stored?.value, 'Bearer new-access-token');
   });
@@ -345,6 +344,8 @@ describe('refreshOAuth', () => {
 
     const result = await refreshOAuth('myapp.com', auth0Config, authManager, { _skipSsrfCheck: true });
     assert.equal(result.success, true);
-    assert.equal(result.accessToken, 'auth0-access-token');
+    // Verify token was stored (accessToken no longer returned for security)
+    const stored = await authManager.retrieve('myapp.com');
+    assert.equal(stored?.value, 'Bearer auth0-access-token');
   });
 });

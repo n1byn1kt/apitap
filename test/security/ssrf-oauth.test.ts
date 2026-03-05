@@ -59,7 +59,7 @@ describe('F2: OAuth token endpoint SSRF validation', () => {
         { _skipSsrfCheck: true },
       );
       assert.equal(result.success, true);
-      assert.equal(result.accessToken, 'new_token_123');
+      // accessToken no longer in result (security hardening)
     } finally {
       globalThis.fetch = originalFetch;
     }

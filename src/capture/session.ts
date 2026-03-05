@@ -10,7 +10,7 @@ import { verifyEndpoints } from './verifier.js';
 import { signSkillFile } from '../skill/signing.js';
 import { writeSkillFile } from '../skill/store.js';
 import { AuthManager, getMachineId } from '../auth/manager.js';
-import { deriveKey } from '../auth/crypto.js';
+import { deriveSigningKey } from '../auth/crypto.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { CapturedExchange, PageSnapshot, PageElement, InteractionResult, FinishResult } from '../types.js';
@@ -204,7 +204,7 @@ export class CaptureSession {
 
     // Finalize: generate skill files, verify, sign, write
     const machineId = await getMachineId();
-    const key = deriveKey(machineId);
+    const key = deriveSigningKey(machineId);
     const authManager = new AuthManager(APITAP_DIR, machineId);
 
     const domains: FinishResult['domains'] = [];

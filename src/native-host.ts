@@ -7,7 +7,7 @@ import path from 'node:path';
 import os from 'node:os';
 import net from 'node:net';
 import { signSkillFile } from './skill/signing.js';
-import { deriveKey } from './auth/crypto.js';
+import { deriveSigningKey } from './auth/crypto.js';
 import { getMachineId } from './auth/manager.js';
 
 const SKILLS_DIR = path.join(os.homedir(), '.apitap', 'skills');
@@ -18,7 +18,7 @@ async function signSkillJson(skillJson: string): Promise<string> {
   try {
     const skill = JSON.parse(skillJson);
     const machineId = await getMachineId();
-    const key = deriveKey(machineId);
+    const key = deriveSigningKey(machineId);
     const signed = signSkillFile(skill, key);
     return JSON.stringify(signed);
   } catch {

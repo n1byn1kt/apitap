@@ -54,6 +54,24 @@ export function deriveKey(machineId: string, saltFile?: string): Buffer {
 }
 
 /**
+ * Derive a purpose-specific encryption key from the master key.
+ * Uses HKDF-like expansion: HMAC-SHA256(masterKey, purpose-string).
+ */
+export function deriveEncryptionKey(machineId: string, saltFile?: string): Buffer {
+  const master = deriveKey(machineId, saltFile);
+  return createHmac('sha256', master).update('apitap-encryption-v1').digest();
+}
+
+/**
+ * Derive a purpose-specific signing key from the master key.
+ * Uses HKDF-like expansion: HMAC-SHA256(masterKey, purpose-string).
+ */
+export function deriveSigningKey(machineId: string, saltFile?: string): Buffer {
+  const master = deriveKey(machineId, saltFile);
+  return createHmac('sha256', master).update('apitap-signing-v1').digest();
+}
+
+/**
  * Encrypt plaintext using AES-256-GCM.
  * Each call generates a random IV for semantic security.
  */

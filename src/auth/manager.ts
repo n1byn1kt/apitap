@@ -1,7 +1,7 @@
 // src/auth/manager.ts
 import { readFile, writeFile, mkdir, chmod } from 'node:fs/promises';
 import { join } from 'node:path';
-import { encrypt, decrypt, deriveKey, type EncryptedData } from './crypto.js';
+import { encrypt, decrypt, deriveKey, deriveEncryptionKey, type EncryptedData } from './crypto.js';
 import type { StoredAuth, StoredToken, StoredSession } from '../types.js';
 
 const AUTH_FILENAME = 'auth.enc';
@@ -12,10 +12,12 @@ const AUTH_FILENAME = 'auth.enc';
  */
 export class AuthManager {
   private key: Buffer;
+  private legacyKey: Buffer;
   private authPath: string;
 
   constructor(baseDir: string, machineId: string, saltFile?: string) {
-    this.key = deriveKey(machineId, saltFile);
+    this.key = deriveEncryptionKey(machineId, saltFile);
+    this.legacyKey = deriveKey(machineId, saltFile);
     this.authPath = join(baseDir, AUTH_FILENAME);
   }
 
@@ -141,8 +143,13 @@ export class AuthManager {
     try {
       const content = await readFile(this.authPath, 'utf-8');
       const encrypted: EncryptedData = JSON.parse(content);
-      const plaintext = decrypt(encrypted, this.key);
-      return JSON.parse(plaintext);
+      try {
+        // Try new encryption key first
+        return JSON.parse(decrypt(encrypted, this.key));
+      } catch {
+        // Fall back to legacy key (pre-key-separation installs)
+        return JSON.parse(decrypt(encrypted, this.legacyKey));
+      }
     } catch {
       return {};
     }

@@ -15,7 +15,7 @@
     "test": "node --import tsx --test 'test/**/*.test.ts'",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build",
-    "postpublish": "gh release create v$(node -p \"require('./package.json').version\") --title \"v$(node -p \\\"require('./package.json').version\\\")\" --generate-notes && echo '✅ GitHub release created'"
+    "postpublish": "node -e \"const v=require('./package.json').version; const {execSync}=require('child_process'); execSync('gh release create v'+v+' --title v'+v+' --generate-notes', {stdio:'inherit'}); console.log('Release created: v'+v);\""
   },
   "license": "BSL-1.1",
   "repository": {

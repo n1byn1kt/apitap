@@ -42,7 +42,7 @@ npm publish --ignore-scripts
 
 # Push commits + tag
 echo "⬆️  Pushing to GitHub..."
-git push origin main --tags
+git push origin main "refs/tags/v$VERSION"
 
 # Create GitHub release (after tag is pushed)
 VERSION=$(node -p "require('./package.json').version")

@@ -3,6 +3,7 @@ import { readSkillFile } from '../skill/store.js';
 import { replayEndpoint } from '../replay/engine.js';
 import { SessionCache } from './cache.js';
 import { read } from '../read/index.js';
+import { bridgeAvailable, requestBridgeCapture } from '../bridge/client.js';
 
 export interface BrowseOptions {
   skillsDir?: string;
@@ -13,6 +14,10 @@ export interface BrowseOptions {
   maxBytes?: number;
   /** @internal Skip SSRF check — for testing only */
   _skipSsrfCheck?: boolean;
+  /** @internal Override bridge socket path — for testing only */
+  _bridgeSocketPath?: string;
+  /** @internal Override bridge timeout — for testing only */
+  _bridgeTimeout?: number;
 }
 
 export interface BrowseSuccess {
@@ -22,7 +27,7 @@ export interface BrowseSuccess {
   domain: string;
   endpointId: string;
   tier: string;
-  skillSource: 'disk' | 'discovered' | 'captured';
+  skillSource: 'disk' | 'discovered' | 'captured' | 'bridge';
   capturedAt: string;
   task?: string;
   truncated?: boolean;
@@ -39,6 +44,107 @@ export interface BrowseGuidance {
 }
 
 export type BrowseResult = BrowseSuccess | BrowseGuidance;
+
+/**
+ * Try escalating to the Chrome extension bridge for authenticated capture.
+ * Returns a BrowseResult if the bridge handled it, or null to fall through.
+ */
+async function tryBridgeCapture(
+  domain: string,
+  fullUrl: string,
+  options: BrowseOptions,
+): Promise<BrowseResult | null> {
+  const socketPath = options._bridgeSocketPath;
+  if (!await bridgeAvailable(socketPath)) return null;
+
+  const result = await requestBridgeCapture(domain, socketPath, {
+    timeout: options._bridgeTimeout,
+  });
+
+  if (result.success && result.skillFiles?.length > 0) {
+    // Save each skill file to disk
+    try {
+      const { writeSkillFile: writeSF } = await import('../skill/store.js');
+      for (const skill of result.skillFiles) {
+        await writeSF(skill, options.skillsDir);
+      }
+    } catch {
+      // Saving failed — still have the data in memory
+    }
+
+    // Find the skill file matching the requested domain
+    const primarySkill = result.skillFiles.find((s: any) => s.domain === domain)
+      ?? result.skillFiles[0];
+
+    if (primarySkill?.endpoints?.length > 0) {
+      // Pick the best endpoint and replay it
+      let urlPath = '/';
+      try { urlPath = new URL(fullUrl).pathname; } catch { /* use default */ }
+      const endpoint = pickEndpoint(primarySkill, urlPath);
+
+      if (endpoint) {
+        try {
+          const replayResult = await replayEndpoint(primarySkill, endpoint.id, {
+            maxBytes: options.maxBytes,
+            _skipSsrfCheck: options._skipSsrfCheck,
+          });
+          if (replayResult.status >= 200 && replayResult.status < 300) {
+            return {
+              success: true,
+              data: replayResult.data,
+              status: replayResult.status,
+              domain,
+              endpointId: endpoint.id,
+              tier: endpoint.replayability?.tier ?? 'unknown',
+              skillSource: 'bridge',
+              capturedAt: primarySkill.capturedAt ?? new Date().toISOString(),
+              task: options.task,
+              ...(replayResult.truncated ? { truncated: true } : {}),
+            };
+          }
+        } catch {
+          // Replay failed — but skill file is saved for next time
+        }
+      }
+    }
+
+    // Skill file saved but replay didn't work
+    return {
+      success: false,
+      reason: 'bridge_capture_saved',
+      suggestion: `Captured ${result.skillFiles.length} skill file(s) from browser. Replay failed — try 'apitap replay ${domain}'.`,
+      domain,
+      url: fullUrl,
+      task: options.task,
+    };
+  }
+
+  // Bridge returned an error
+  if (result.error === 'user_denied') {
+    return {
+      success: false,
+      reason: 'user_denied',
+      suggestion: `User denied browser access to ${domain}. Use 'apitap auth request ${domain}' for manual login instead.`,
+      domain,
+      url: fullUrl,
+      task: options.task,
+    };
+  }
+
+  if (result.error === 'approval_timeout') {
+    return {
+      success: false,
+      reason: 'approval_timeout',
+      suggestion: `User approval pending for ${domain}. Click Allow in the ApiTap extension and try again.`,
+      domain,
+      url: fullUrl,
+      task: options.task,
+    };
+  }
+
+  // Other bridge errors — fall through to existing fallback
+  return null;
+}
 
 /**
  * High-level browse: check cache → disk → discover → replay.
@@ -121,6 +227,10 @@ export async function browse(
         } catch {
           // Read failed — fall through to capture_needed
         }
+        // Try extension bridge before giving up
+        const bridgeResult1 = await tryBridgeCapture(domain, fullUrl, options);
+        if (bridgeResult1) return bridgeResult1;
+
         return {
           success: false,
           reason: 'no_replayable_endpoints',
@@ -158,6 +268,10 @@ export async function browse(
         // Read failed — fall through to capture_needed
       }
     }
+    // Try extension bridge before giving up
+    const bridgeResult2 = await tryBridgeCapture(domain, fullUrl, options);
+    if (bridgeResult2) return bridgeResult2;
+
     return {
       success: false,
       reason: 'no_skill_file',
@@ -171,6 +285,10 @@ export async function browse(
   // Step 4: Pick best endpoint
   const endpoint = pickEndpoint(skill, urlPath);
   if (!endpoint) {
+    // Try extension bridge before giving up
+    const bridgeResult3 = await tryBridgeCapture(domain, fullUrl, options);
+    if (bridgeResult3) return bridgeResult3;
+
     return {
       success: false,
       reason: 'no_replayable_endpoints',
@@ -213,6 +331,10 @@ export async function browse(
       ...(result.truncated ? { truncated: true } : {}),
     };
   } catch {
+    // Try extension bridge before giving up
+    const bridgeResult4 = await tryBridgeCapture(domain, fullUrl, options);
+    if (bridgeResult4) return bridgeResult4;
+
     return {
       success: false,
       reason: 'replay_failed',

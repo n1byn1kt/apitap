@@ -58,6 +58,10 @@ async function recoverDeletedComments(
   const recovered = new Map<string, { author: string; body: string }>();
   if (commentIds.length === 0) return recovered;
 
+  // Third-party disclosure: PullPush is an external service.
+  // Users can opt out via APITAP_NO_THIRD_PARTY=1.
+  if (process.env.APITAP_NO_THIRD_PARTY === '1') return recovered;
+
   try {
     const ids = commentIds.join(',');
     const ppUrl = `https://api.pullpush.io/reddit/search/comment/?ids=${ids}`;

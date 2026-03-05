@@ -3,65 +3,114 @@ import './shim.js';
 
 import { shouldCapture } from '../../src/capture/filter.js';
 import type { CapturedExchange } from '../../src/types.js';
-import type { CaptureState, CaptureMessage, CaptureResponse } from './types.js';
+import type { CaptureState, CaptureMessage, CaptureResponse, AgentRequest, AgentResponse } from './types.js';
 import { extractDomain, pickPrimaryDomain } from './domain-utils.js';
 import { DomainGeneratorMap } from './multi-domain.js';
 import { isAllowedUrl, scrubAuthFromSkillJson } from './security.js';
 
-// --- Native messaging bridge ---
+// --- Native messaging bridge (persistent port) ---
 
 const NATIVE_HOST = 'com.apitap.native';
 
 let bridgeAvailable = false;
+let nativePort: chrome.runtime.Port | null = null;
 
-async function checkBridge(): Promise<boolean> {
-  return new Promise((resolve) => {
-    try {
-      chrome.runtime.sendNativeMessage(NATIVE_HOST, { action: 'ping' }, (response) => {
-        if (chrome.runtime.lastError || !response?.success) {
-          bridgeAvailable = false;
-          resolve(false);
-          return;
-        }
-        bridgeAvailable = true;
-        resolve(true);
-      });
-    } catch {
+// Pending responses for one-shot messages (save_skill, ping)
+const pendingPortMessages = new Map<string, {
+  resolve: (value: any) => void;
+  timer: ReturnType<typeof setTimeout>;
+}>();
+let portMsgCounter = 0;
+
+function connectNativePort(): void {
+  try {
+    nativePort = chrome.runtime.connectNative(NATIVE_HOST);
+    bridgeAvailable = true;
+
+    nativePort.onMessage.addListener((message: any) => {
+      // Check if this is a response to a message we sent
+      if (message._portMsgId && pendingPortMessages.has(message._portMsgId)) {
+        const pending = pendingPortMessages.get(message._portMsgId)!;
+        clearTimeout(pending.timer);
+        pendingPortMessages.delete(message._portMsgId);
+        const { _portMsgId, ...response } = message;
+        pending.resolve(response);
+        return;
+      }
+
+      // Otherwise, this is a CLI-initiated request relayed through the native host
+      if (message.action === 'capture_request') {
+        handleAgentCapture(message as AgentRequest).then((response) => {
+          // Send response back with the relay ID so native host can route it
+          nativePort?.postMessage({ ...response, _relayId: message._relayId });
+        });
+      }
+    });
+
+    nativePort.onDisconnect.addListener(() => {
       bridgeAvailable = false;
-      resolve(false);
+      nativePort = null;
+      // Reject all pending messages
+      for (const [, pending] of pendingPortMessages) {
+        clearTimeout(pending.timer);
+        pending.resolve({ success: false, error: 'native host disconnected' });
+      }
+      pendingPortMessages.clear();
+
+      // Reconnect after a delay
+      setTimeout(connectNativePort, 5000);
+    });
+  } catch {
+    bridgeAvailable = false;
+    nativePort = null;
+  }
+}
+
+// Send a message to the native host and wait for response
+function sendNativePortMessage(message: any, timeout = 10_000): Promise<any> {
+  return new Promise((resolve) => {
+    if (!nativePort) {
+      resolve({ success: false, error: 'native host not connected' });
+      return;
     }
+
+    const id = String(++portMsgCounter);
+    const timer = setTimeout(() => {
+      pendingPortMessages.delete(id);
+      resolve({ success: false, error: 'timeout' });
+    }, timeout);
+
+    pendingPortMessages.set(id, { resolve, timer });
+    nativePort.postMessage({ ...message, _portMsgId: id });
   });
+}
+
+// Convenience wrappers (replace old checkBridge/saveViaBridge)
+async function checkBridge(): Promise<boolean> {
+  if (!nativePort) {
+    connectNativePort();
+    // Give it a moment to connect
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return bridgeAvailable;
 }
 
 async function saveViaBridge(skills: Array<{ domain: string; skillJson: string }>): Promise<{ success: boolean; paths?: string[]; error?: string }> {
   if (skills.length === 1) {
-    return new Promise((resolve) => {
-      chrome.runtime.sendNativeMessage(NATIVE_HOST, {
-        action: 'save_skill',
-        domain: skills[0].domain,
-        skillJson: skills[0].skillJson,
-      }, (response) => {
-        if (chrome.runtime.lastError) {
-          resolve({ success: false, error: chrome.runtime.lastError.message });
-          return;
-        }
-        resolve(response);
-      });
+    return sendNativePortMessage({
+      action: 'save_skill',
+      domain: skills[0].domain,
+      skillJson: skills[0].skillJson,
     });
   }
+  return sendNativePortMessage({ action: 'save_batch', skills });
+}
 
-  return new Promise((resolve) => {
-    chrome.runtime.sendNativeMessage(NATIVE_HOST, {
-      action: 'save_batch',
-      skills,
-    }, (response) => {
-      if (chrome.runtime.lastError) {
-        resolve({ success: false, error: chrome.runtime.lastError.message });
-        return;
-      }
-      resolve(response);
-    });
-  });
+// --- Agent-initiated capture ---
+// Placeholder — full implementation in Task 5
+
+async function handleAgentCapture(request: AgentRequest): Promise<AgentResponse> {
+  return { success: false, error: 'not_implemented' };
 }
 
 // --- State ---
@@ -445,8 +494,7 @@ chrome.runtime.onMessage.addListener(
   },
 );
 
-// Check if native messaging bridge is available on startup
-checkBridge().then(() => {
-  state.bridgeConnected = bridgeAvailable;
-  persistState();
-});
+// Connect to native messaging host on startup
+connectNativePort();
+state.bridgeConnected = bridgeAvailable;
+persistState();

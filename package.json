@@ -14,7 +14,8 @@
     "dev": "tsx src/cli.ts",
     "test": "node --import tsx --test 'test/**/*.test.ts'",
     "typecheck": "tsc --noEmit",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "postpublish": "gh release create v$(node -p \"require('./package.json').version\") --title \"v$(node -p \\\"require('./package.json').version\\\")\" --generate-notes && echo '✅ GitHub release created'"
   },
   "license": "BSL-1.1",
   "repository": {

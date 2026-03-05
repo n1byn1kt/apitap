@@ -3,6 +3,7 @@ import { readFile, writeFile, mkdir, readdir, access } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import type { SkillFile, SkillSummary } from '../types.js';
+import { validateSkillFile } from './validate.js';
 
 const DEFAULT_SKILLS_DIR = join(homedir(), '.apitap', 'skills');
 
@@ -52,7 +53,8 @@ export async function readSkillFile(
   const path = skillPath(domain, skillsDir);
   try {
     const content = await readFile(path, 'utf-8');
-    const skill = JSON.parse(content) as SkillFile;
+    const raw = JSON.parse(content);
+    const skill = validateSkillFile(raw);
 
     // If verification requested, check signature
     if (options?.verifySignature && options.signingKey) {

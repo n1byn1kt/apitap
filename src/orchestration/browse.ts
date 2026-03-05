@@ -3,7 +3,7 @@ import { readSkillFile } from '../skill/store.js';
 import { replayEndpoint } from '../replay/engine.js';
 import { SessionCache } from './cache.js';
 import { read } from '../read/index.js';
-import { bridgeAvailable, requestBridgeCapture } from '../bridge/client.js';
+import { bridgeAvailable, requestBridgeCapture, DEFAULT_SOCKET } from '../bridge/client.js';
 
 export interface BrowseOptions {
   skillsDir?: string;
@@ -54,12 +54,10 @@ async function tryBridgeCapture(
   fullUrl: string,
   options: BrowseOptions,
 ): Promise<BrowseResult | null> {
-  const socketPath = options._bridgeSocketPath;
+  const socketPath = options._bridgeSocketPath ?? DEFAULT_SOCKET;
   if (!await bridgeAvailable(socketPath)) return null;
 
-  const result = await requestBridgeCapture(domain, socketPath, {
-    timeout: options._bridgeTimeout,
-  });
+  const result = await requestBridgeCapture(domain, socketPath, { timeout: options._bridgeTimeout });
 
   if (result.success && result.skillFiles && result.skillFiles.length > 0) {
     const skillFiles = result.skillFiles;

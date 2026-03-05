@@ -1,0 +1,198 @@
+{
+  "version": "1.2",
+  "domain": "www.reddit.com",
+  "capturedAt": "2026-03-02T02:39:23.334Z",
+  "baseUrl": "https://www.reddit.com",
+  "endpoints": [
+    {
+      "id": "post-svc-shreddit-graphql",
+      "method": "POST",
+      "path": "/svc/shreddit/graphql",
+      "queryParams": {},
+      "headers": {
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "accept": "application/json",
+        "content-type": "application/json"
+      },
+      "responseShape": {
+        "type": "object",
+        "fields": [
+          "data",
+          "errors",
+          "operation"
+        ]
+      },
+      "examples": {
+        "request": {
+          "url": "https://www.reddit.com/svc/shreddit/graphql",
+          "headers": {
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "accept": "application/json",
+            "content-type": "application/json"
+          }
+        },
+        "responsePreview": null
+      },
+      "requestBody": {
+        "contentType": "application/json",
+        "template": {
+          "operation": "ExposeVariant",
+          "variables": {
+            "input": {
+              "experimentName": "web3x_search_bar_ask_button",
+              "variant": "enabled",
+              "experimentVersion": "8"
+            }
+          },
+          "csrf_token": "50f64667aab8dbb57253f77490649741"
+        },
+        "variables": [
+          "variables.input.experimentName",
+          "csrf_token",
+          "operation",
+          "variables.imageMaxWidth",
+          "variables.input",
+          "variables.input.experimentVersion",
+          "variables.input.postId",
+          "variables.input.token",
+          "variables.input.variant",
+          "variables.input.voteState",
+          "variables.name",
+          "variables.subredditId",
+          "variables.username"
+        ],
+        "refreshableTokens": [
+          "csrf_token"
+        ]
+      },
+      "responseBytes": 95,
+      "responseSchema": {
+        "type": "object",
+        "fields": {
+          "data": {
+            "type": "object",
+            "fields": {
+              "exposeExperiment": {
+                "type": "object",
+                "fields": {
+                  "ok": {
+                    "type": "boolean"
+                  },
+                  "errors": {
+                    "type": "null",
+                    "nullable": true
+                  }
+                }
+              }
+            }
+          },
+          "errors": {
+            "type": "array"
+          },
+          "operation": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "id": "get-svc-shreddit-styling-overrides",
+      "method": "GET",
+      "path": "/svc/shreddit/styling-overrides/",
+      "queryParams": {
+        "context": {
+          "type": "string",
+          "example": "namespaced"
+        }
+      },
+      "headers": {
+        "referer": "[stored]",
+        "user-agent": "[stored]"
+      },
+      "responseShape": {
+        "type": "array"
+      },
+      "examples": {
+        "request": {
+          "url": "https://www.reddit.com/svc/shreddit/styling-overrides/?context=namespaced",
+          "headers": {
+            "referer": "[stored]",
+            "user-agent": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 2,
+      "responseSchema": {
+        "type": "array"
+      }
+    },
+    {
+      "id": "post-svc-shreddit-token",
+      "method": "POST",
+      "path": "/svc/shreddit/token",
+      "queryParams": {},
+      "headers": {
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "accept": "application/json",
+        "content-type": "application/json"
+      },
+      "responseShape": {
+        "type": "object",
+        "fields": [
+          "token",
+          "expires"
+        ]
+      },
+      "examples": {
+        "request": {
+          "url": "https://www.reddit.com/svc/shreddit/token",
+          "headers": {
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "accept": "application/json",
+            "content-type": "application/json"
+          }
+        },
+        "responsePreview": null
+      },
+      "requestBody": {
+        "contentType": "application/json",
+        "template": {
+          "csrf_token": "50f64667aab8dbb57253f77490649741"
+        },
+        "variables": [
+          "csrf_token"
+        ],
+        "refreshableTokens": [
+          "csrf_token"
+        ]
+      },
+      "responseBytes": 1331,
+      "responseSchema": {
+        "type": "object",
+        "fields": {
+          "token": {
+            "type": "string"
+          },
+          "expires": {
+            "type": "number"
+          }
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "captureCount": 29,
+    "filteredCount": 0,
+    "toolVersion": "1.0.0"
+  },
+  "provenance": "unsigned",
+  "auth": {
+    "browserMode": "headless",
+    "captchaRisk": false
+  }
+}

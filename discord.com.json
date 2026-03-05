@@ -1,0 +1,3156 @@
+{
+  "version": "1.2",
+  "domain": "discord.com",
+  "capturedAt": "2026-03-02T02:42:56.559Z",
+  "baseUrl": "https://discord.com",
+  "endpoints": [
+    {
+      "id": "get-api-v9-experiments",
+      "method": "GET",
+      "path": "/api/v9/experiments",
+      "queryParams": {
+        "with_guild_experiments": {
+          "type": "string",
+          "example": "true"
+        }
+      },
+      "headers": {
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-context-properties": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-fingerprint": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "object",
+        "fields": [
+          "assignments",
+          "guild_experiments"
+        ]
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/experiments?with_guild_experiments=true",
+          "headers": {
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-context-properties": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-fingerprint": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 22038,
+      "responseSchema": {
+        "type": "object",
+        "fields": {
+          "assignments": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            }
+          },
+          "guild_experiments": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "get-api-v9-auth-location-metadata",
+      "method": "GET",
+      "path": "/api/v9/auth/location-metadata",
+      "queryParams": {},
+      "headers": {
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-fingerprint": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "object",
+        "fields": [
+          "consent_required",
+          "country_code",
+          "promotional_email_opt_in"
+        ]
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/auth/location-metadata",
+          "headers": {
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-fingerprint": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 113,
+      "responseSchema": {
+        "type": "object",
+        "fields": {
+          "consent_required": {
+            "type": "boolean"
+          },
+          "country_code": {
+            "type": "string"
+          },
+          "promotional_email_opt_in": {
+            "type": "object",
+            "fields": {
+              "required": {
+                "type": "boolean"
+              },
+              "pre_checked": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "post-api-v9-auth-conditional-start",
+      "method": "POST",
+      "path": "/api/v9/auth/conditional/start",
+      "queryParams": {},
+      "headers": {
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-fingerprint": "[stored]",
+        "x-super-properties": "[stored]",
+        "authorization": "[stored]"
+      },
+      "responseShape": {
+        "type": "object",
+        "fields": [
+          "challenge",
+          "ticket"
+        ]
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/auth/conditional/start",
+          "headers": {
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-fingerprint": "[stored]",
+            "x-super-properties": "[stored]",
+            "authorization": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 306,
+      "responseSchema": {
+        "type": "object",
+        "fields": {
+          "challenge": {
+            "type": "string"
+          },
+          "ticket": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "id": "post-api-v9-auth-login",
+      "method": "POST",
+      "path": "/api/v9/auth/login",
+      "queryParams": {},
+      "headers": {
+        "content-type": "application/json",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-fingerprint": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "object",
+        "fields": [
+          "user_id",
+          "token",
+          "user_settings"
+        ]
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/auth/login",
+          "headers": {
+            "content-type": "application/json",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-fingerprint": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "requestBody": {
+        "contentType": "application/json",
+        "template": {
+          "login": "[email]",
+          "password": "6DS4d5iDE!vr0k1rPKOj5wYnJk!",
+          "undelete": false,
+          "login_source": null,
+          "gift_code_sku_id": null
+        }
+      },
+      "responseBytes": 166,
+      "responseSchema": {
+        "type": "object",
+        "fields": {
+          "user_id": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          },
+          "user_settings": {
+            "type": "object",
+            "fields": {
+              "locale": {
+                "type": "string"
+              },
+              "theme": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "get-api-v9-users-me-survey",
+      "method": "GET",
+      "path": "/api/v9/users/@me/survey",
+      "queryParams": {
+        "disable_auto_seen": {
+          "type": "string",
+          "example": "true"
+        }
+      },
+      "headers": {
+        "authorization": "[stored]",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "object",
+        "fields": [
+          "survey"
+        ]
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/users/@me/survey?disable_auto_seen=true",
+          "headers": {
+            "authorization": "[stored]",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 16,
+      "responseSchema": {
+        "type": "object",
+        "fields": {
+          "survey": {
+            "type": "null",
+            "nullable": true
+          }
+        }
+      }
+    },
+    {
+      "id": "get-api-v9-users-me-affinities-guilds",
+      "method": "GET",
+      "path": "/api/v9/users/@me/affinities/guilds",
+      "queryParams": {},
+      "headers": {
+        "authorization": "[stored]",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "object",
+        "fields": [
+          "guild_affinities"
+        ]
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/users/@me/affinities/guilds",
+          "headers": {
+            "authorization": "[stored]",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 152,
+      "responseSchema": {
+        "type": "object",
+        "fields": {
+          "guild_affinities": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "fields": {
+                "guild_id": {
+                  "type": "string"
+                },
+                "affinity": {
+                  "type": "number"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "get-api-v9-users-me-affinities-v2-users",
+      "method": "GET",
+      "path": "/api/v9/users/@me/affinities/v2/users",
+      "queryParams": {},
+      "headers": {
+        "authorization": "[stored]",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "object",
+        "fields": [
+          "user_affinities"
+        ]
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/users/@me/affinities/v2/users",
+          "headers": {
+            "authorization": "[stored]",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 390,
+      "responseSchema": {
+        "type": "object",
+        "fields": {
+          "user_affinities": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "fields": {
+                "other_user_id": {
+                  "type": "string"
+                },
+                "user_segment": {
+                  "type": "string"
+                },
+                "other_user_segment": {
+                  "type": "string"
+                },
+                "is_friend": {
+                  "type": "boolean"
+                },
+                "dm_probability": {
+                  "type": "number"
+                },
+                "dm_rank": {
+                  "type": "number"
+                },
+                "vc_probability": {
+                  "type": "number"
+                },
+                "vc_rank": {
+                  "type": "number"
+                },
+                "server_message_probability": {
+                  "type": "number"
+                },
+                "server_message_rank": {
+                  "type": "number"
+                },
+                "communication_probability": {
+                  "type": "number"
+                },
+                "communication_rank": {
+                  "type": "number"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "get-api-v9-users-me-entitlements",
+      "method": "GET",
+      "path": "/api/v9/users/@me/entitlements",
+      "queryParams": {
+        "with_sku": {
+          "type": "string",
+          "example": "false"
+        },
+        "with_application": {
+          "type": "string",
+          "example": "false"
+        },
+        "entitlement_type": {
+          "type": "string",
+          "example": "11"
+        },
+        "exclude_ended": {
+          "type": "string",
+          "example": "true"
+        }
+      },
+      "headers": {
+        "authorization": "[stored]",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "array"
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/users/@me/entitlements?with_sku=false&with_application=false&entitlement_type=11&exclude_ended=true",
+          "headers": {
+            "authorization": "[stored]",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 3,
+      "responseSchema": {
+        "type": "array"
+      }
+    },
+    {
+      "id": "get-api-v9-promotions",
+      "method": "GET",
+      "path": "/api/v9/promotions",
+      "queryParams": {
+        "locale": {
+          "type": "string",
+          "example": "en-US"
+        },
+        "platform": {
+          "type": "string",
+          "example": "0"
+        }
+      },
+      "headers": {
+        "authorization": "[stored]",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "array"
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/promotions?locale=en-US&platform=0",
+          "headers": {
+            "authorization": "[stored]",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 2,
+      "responseSchema": {
+        "type": "array"
+      }
+    },
+    {
+      "id": "get-api-v9-users-me-billing-country-code",
+      "method": "GET",
+      "path": "/api/v9/users/@me/billing/country-code",
+      "queryParams": {},
+      "headers": {
+        "authorization": "[stored]",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "object",
+        "fields": [
+          "country_code"
+        ]
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/users/@me/billing/country-code",
+          "headers": {
+            "authorization": "[stored]",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 22,
+      "responseSchema": {
+        "type": "object",
+        "fields": {
+          "country_code": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "id": "get-api-v9-users-me-applications-entitlements",
+      "method": "GET",
+      "path": "/api/v9/users/@me/applications/:id/entitlements",
+      "queryParams": {
+        "exclude_consumed": {
+          "type": "string",
+          "example": "false"
+        }
+      },
+      "headers": {
+        "authorization": "[stored]",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "array"
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/users/@me/applications/521842831262875670/entitlements?exclude_consumed=false",
+          "headers": {
+            "authorization": "[stored]",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 3,
+      "responseSchema": {
+        "type": "array"
+      }
+    },
+    {
+      "id": "get-api-v9-games-detectable-exclusions",
+      "method": "GET",
+      "path": "/api/v9/games/detectable/exclusions",
+      "queryParams": {},
+      "headers": {
+        "authorization": "[stored]",
+        "if-none-match": "",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "object",
+        "fields": [
+          "executables",
+          "patterns"
+        ]
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/games/detectable/exclusions",
+          "headers": {
+            "authorization": "[stored]",
+            "if-none-match": "",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 606,
+      "responseSchema": {
+        "type": "object",
+        "fields": {
+          "executables": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "patterns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "get-api-v9-applications-non-games-detectable",
+      "method": "GET",
+      "path": "/api/v9/applications/non-games/detectable",
+      "queryParams": {},
+      "headers": {
+        "authorization": "[stored]",
+        "if-none-match": "",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "array",
+        "fields": [
+          "aliases",
+          "executables",
+          "hook",
+          "icon_hash",
+          "id",
+          "name",
+          "overlay",
+          "overlay_compatibility_hook",
+          "overlay_methods",
+          "overlay_warn",
+          "themes",
+          "third_party_skus"
+        ]
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/applications/non-games/detectable",
+          "headers": {
+            "authorization": "[stored]",
+            "if-none-match": "",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 1876,
+      "responseSchema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "fields": {
+            "aliases": {
+              "type": "array"
+            },
+            "executables": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "fields": {
+                  "is_launcher": {
+                    "type": "boolean"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "os": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "hook": {
+              "type": "boolean"
+            },
+            "icon_hash": {
+              "type": "string"
+            },
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "overlay": {
+              "type": "boolean"
+            },
+            "overlay_compatibility_hook": {
+              "type": "boolean"
+            },
+            "overlay_methods": {
+              "type": "number"
+            },
+            "overlay_warn": {
+              "type": "boolean"
+            },
+            "themes": {
+              "type": "array"
+            },
+            "third_party_skus": {
+              "type": "array"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "get-api-v9-users-me-billing-checkout-recovery",
+      "method": "GET",
+      "path": "/api/v9/users/@me/billing/checkout-recovery",
+      "queryParams": {},
+      "headers": {
+        "authorization": "[stored]",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "object",
+        "fields": [
+          "is_eligible"
+        ]
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/users/@me/billing/checkout-recovery",
+          "headers": {
+            "authorization": "[stored]",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 22,
+      "responseSchema": {
+        "type": "object",
+        "fields": {
+          "is_eligible": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "id": "get-api-v9-partner-sdk-storefront-config",
+      "method": "GET",
+      "path": "/api/v9/partner-sdk/storefront-config",
+      "queryParams": {},
+      "headers": {
+        "authorization": "[stored]",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "object",
+        "fields": [
+          "promotional_sku_ids",
+          "promotion_end_datetime"
+        ]
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/partner-sdk/storefront-config",
+          "headers": {
+            "authorization": "[stored]",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 167,
+      "responseSchema": {
+        "type": "object",
+        "fields": {
+          "promotional_sku_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "promotion_end_datetime": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "id": "get-api-v9-users-me-collectibles-marketing",
+      "method": "GET",
+      "path": "/api/v9/users/@me/collectibles-marketing",
+      "queryParams": {
+        "platform": {
+          "type": "string",
+          "example": "0"
+        }
+      },
+      "headers": {
+        "authorization": "[stored]",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "object",
+        "fields": [
+          "marketings"
+        ]
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/users/@me/collectibles-marketing?platform=0",
+          "headers": {
+            "authorization": "[stored]",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 1487,
+      "responseSchema": {
+        "type": "object",
+        "fields": {
+          "marketings": {
+            "type": "object",
+            "fields": {
+              "0": {
+                "type": "object",
+                "fields": {
+                  "type": {
+                    "type": "number"
+                  },
+                  "version": {
+                    "type": "number"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "body": {
+                    "type": "string"
+                  },
+                  "avatar": {
+                    "type": "string"
+                  },
+                  "decorations": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "avatar_decoration_sku_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "dismissible_content": {
+                    "type": "number"
+                  },
+                  "ref_target_background": {
+                    "type": "object",
+                    "fields": {
+                      "style": {
+                        "type": "object",
+                        "fields": {
+                          "resting": {
+                            "type": "object"
+                          },
+                          "hovered": {
+                            "type": "object"
+                          }
+                        }
+                      },
+                      "asset": {
+                        "type": "object",
+                        "fields": {
+                          "resting": {
+                            "type": "object"
+                          },
+                          "hovered": {
+                            "type": "object"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "badge_icon": {
+                    "type": "null",
+                    "nullable": true
+                  },
+                  "badge_text": {
+                    "type": "null",
+                    "nullable": true
+                  }
+                }
+              },
+              "2": {
+                "type": "object",
+                "fields": {
+                  "type": {
+                    "type": "number"
+                  },
+                  "version": {
+                    "type": "number"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "body": {
+                    "type": "string"
+                  },
+                  "asset": {
+                    "type": "string"
+                  },
+                  "popout_asset": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "get-api-v9-games-detectable",
+      "method": "GET",
+      "path": "/api/v9/games/detectable",
+      "queryParams": {},
+      "headers": {
+        "authorization": "[stored]",
+        "if-none-match": "",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "unknown"
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/games/detectable",
+          "headers": {
+            "authorization": "[stored]",
+            "if-none-match": "",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 524288
+    },
+    {
+      "id": "get-api-v9-users-me-mfa-webauthn-credentials",
+      "method": "GET",
+      "path": "/api/v9/users/@me/mfa/webauthn/credentials",
+      "queryParams": {},
+      "headers": {
+        "authorization": "[stored]",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "array"
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/users/@me/mfa/webauthn/credentials",
+          "headers": {
+            "authorization": "[stored]",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 3,
+      "responseSchema": {
+        "type": "array"
+      }
+    },
+    {
+      "id": "get-api-v9-content-inventory-users-me",
+      "method": "GET",
+      "path": "/api/v9/content-inventory/users/@me",
+      "queryParams": {
+        "for_game_profile": {
+          "type": "string",
+          "example": "false"
+        },
+        "feature": {
+          "type": "string",
+          "example": "inbox"
+        }
+      },
+      "headers": {
+        "authorization": "[stored]",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "object",
+        "fields": [
+          "request_id",
+          "entries",
+          "unranked_game_entries",
+          "entries_hash",
+          "expired_at",
+          "refresh_stale_inbox_after_ms",
+          "refresh_token",
+          "wait_ms_until_next_fetch"
+        ]
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/content-inventory/users/@me?for_game_profile=false&feature=inbox",
+          "headers": {
+            "authorization": "[stored]",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 397,
+      "responseSchema": {
+        "type": "object",
+        "fields": {
+          "request_id": {
+            "type": "string"
+          },
+          "entries": {
+            "type": "array"
+          },
+          "unranked_game_entries": {
+            "type": "array"
+          },
+          "entries_hash": {
+            "type": "number"
+          },
+          "expired_at": {
+            "type": "string"
+          },
+          "refresh_stale_inbox_after_ms": {
+            "type": "number"
+          },
+          "refresh_token": {
+            "type": "string"
+          },
+          "wait_ms_until_next_fetch": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    {
+      "id": "patch-api-v9-users-me-settings-proto",
+      "method": "PATCH",
+      "path": "/api/v9/users/@me/settings-proto/:id",
+      "queryParams": {},
+      "headers": {
+        "authorization": "[stored]",
+        "content-type": "application/json",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "object",
+        "fields": [
+          "settings"
+        ]
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/users/@me/settings-proto/1",
+          "headers": {
+            "authorization": "[stored]",
+            "content-type": "application/json",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "requestBody": {
+        "contentType": "application/json",
+        "template": {
+          "settings": "It0BClJAC0OASAAggAAAIAAAAIAAKAAAAoBAAAAwAAADAAIAIAEAAAAAIIWAAWAAAAQAEIAACAAAABGAQIBAAAAAlCEAjiIIABAAARAAARAAACAAAQBAEhoKGDIwMjUtMDctMDFUMTc6MDA6MDAuMDAwWjF4AMBxPxrhEzoOCKYDEgkIIhD07IjdgTM6EAjUAxILCAMQnPj415wzIAE6DgjWAxIJCAEQn8T1icAyOhYIlAQSERD2/N23/jIYqKCAkPLn+qMTOhgI+QQSExC00LyVvzMYgICAkN7z46IUIAE="
+        },
+        "variables": [
+          "settings"
+        ]
+      },
+      "responseBytes": 852,
+      "responseSchema": {
+        "type": "object",
+        "fields": {
+          "settings": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "id": "get-api-v9-channels-messages",
+      "method": "GET",
+      "path": "/api/v9/channels/:id/messages",
+      "queryParams": {
+        "limit": {
+          "type": "string",
+          "example": "30"
+        }
+      },
+      "headers": {
+        "authorization": "[stored]",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "array",
+        "fields": [
+          "type",
+          "content",
+          "mentions",
+          "mention_roles",
+          "attachments",
+          "embeds",
+          "timestamp",
+          "edited_timestamp",
+          "flags",
+          "components",
+          "id",
+          "channel_id",
+          "author",
+          "pinned",
+          "mention_everyone",
+          "tts",
+          "reactions"
+        ]
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/channels/1471745479229309039/messages?limit=30",
+          "headers": {
+            "authorization": "[stored]",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 6476,
+      "responseSchema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "fields": {
+            "type": {
+              "type": "number"
+            },
+            "content": {
+              "type": "string"
+            },
+            "mentions": {
+              "type": "array"
+            },
+            "mention_roles": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "attachments": {
+              "type": "array"
+            },
+            "embeds": {
+              "type": "array"
+            },
+            "timestamp": {
+              "type": "string"
+            },
+            "edited_timestamp": {
+              "type": "string"
+            },
+            "flags": {
+              "type": "number"
+            },
+            "components": {
+              "type": "array"
+            },
+            "id": {
+              "type": "string"
+            },
+            "channel_id": {
+              "type": "string"
+            },
+            "author": {
+              "type": "object",
+              "fields": {
+                "id": {
+                  "type": "string"
+                },
+                "username": {
+                  "type": "string"
+                },
+                "avatar": {
+                  "type": "string"
+                },
+                "discriminator": {
+                  "type": "string"
+                },
+                "public_flags": {
+                  "type": "number"
+                },
+                "flags": {
+                  "type": "number"
+                },
+                "banner": {
+                  "type": "null",
+                  "nullable": true
+                },
+                "accent_color": {
+                  "type": "null",
+                  "nullable": true
+                },
+                "global_name": {
+                  "type": "string"
+                },
+                "avatar_decoration_data": {
+                  "type": "object",
+                  "fields": {
+                    "asset": {
+                      "type": "string"
+                    },
+                    "sku_id": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "null",
+                      "nullable": true
+                    }
+                  }
+                },
+                "collectibles": {
+                  "type": "object",
+                  "fields": {
+                    "nameplate": {
+                      "type": "object",
+                      "fields": {
+                        "sku_id": {
+                          "type": "string"
+                        },
+                        "asset": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "palette": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "display_name_styles": {
+                  "type": "object",
+                  "fields": {
+                    "font_id": {
+                      "type": "number"
+                    },
+                    "effect_id": {
+                      "type": "number"
+                    },
+                    "colors": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    }
+                  }
+                },
+                "banner_color": {
+                  "type": "null",
+                  "nullable": true
+                },
+                "clan": {
+                  "type": "object",
+                  "fields": {
+                    "identity_guild_id": {
+                      "type": "string"
+                    },
+                    "identity_enabled": {
+                      "type": "boolean"
+                    },
+                    "tag": {
+                      "type": "string"
+                    },
+                    "badge": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "primary_guild": {
+                  "type": "object",
+                  "fields": {
+                    "identity_guild_id": {
+                      "type": "string"
+                    },
+                    "identity_enabled": {
+                      "type": "boolean"
+                    },
+                    "tag": {
+                      "type": "string"
+                    },
+                    "badge": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            "pinned": {
+              "type": "boolean"
+            },
+            "mention_everyone": {
+              "type": "boolean"
+            },
+            "tts": {
+              "type": "boolean"
+            },
+            "reactions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "fields": {
+                  "emoji": {
+                    "type": "object",
+                    "fields": {
+                      "id": {
+                        "type": "null",
+                        "nullable": true
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "count": {
+                    "type": "number"
+                  },
+                  "count_details": {
+                    "type": "object",
+                    "fields": {
+                      "burst": {
+                        "type": "number"
+                      },
+                      "normal": {
+                        "type": "number"
+                      }
+                    }
+                  },
+                  "burst_colors": {
+                    "type": "array"
+                  },
+                  "me_burst": {
+                    "type": "boolean"
+                  },
+                  "burst_me": {
+                    "type": "boolean"
+                  },
+                  "me": {
+                    "type": "boolean"
+                  },
+                  "burst_count": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "get-api-v9-guilds-scheduled-events-users-counts",
+      "method": "GET",
+      "path": "/api/v9/guilds/:id/scheduled-events/:id/users/counts",
+      "queryParams": {},
+      "headers": {
+        "authorization": "[stored]",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "object",
+        "fields": [
+          "guild_scheduled_event_count",
+          "guild_scheduled_event_exception_counts"
+        ]
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/guilds/1456350064065904867/scheduled-events/1477064810490499305/users/counts",
+          "headers": {
+            "authorization": "[stored]",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 80,
+      "responseSchema": {
+        "type": "object",
+        "fields": {
+          "guild_scheduled_event_count": {
+            "type": "number"
+          },
+          "guild_scheduled_event_exception_counts": {
+            "type": "object",
+            "fields": {}
+          }
+        }
+      }
+    },
+    {
+      "id": "get-api-v9-users-me-scheduled-events",
+      "method": "GET",
+      "path": "/api/v9/users/@me/scheduled-events",
+      "queryParams": {
+        "guild_ids": {
+          "type": "string",
+          "example": "1456350064065904867"
+        }
+      },
+      "headers": {
+        "authorization": "[stored]",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "array"
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/users/@me/scheduled-events?guild_ids=1456350064065904867",
+          "headers": {
+            "authorization": "[stored]",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 3,
+      "responseSchema": {
+        "type": "array"
+      }
+    },
+    {
+      "id": "get-api-v9-quests-me",
+      "method": "GET",
+      "path": "/api/v9/quests/@me",
+      "queryParams": {},
+      "headers": {
+        "authorization": "[stored]",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "object",
+        "fields": [
+          "quests",
+          "excluded_quests",
+          "quest_enrollment_blocked_until"
+        ]
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/quests/@me",
+          "headers": {
+            "authorization": "[stored]",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 111058,
+      "responseSchema": {
+        "type": "object",
+        "fields": {
+          "quests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "fields": {
+                "id": {
+                  "type": "string"
+                },
+                "config": {
+                  "type": "object",
+                  "fields": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "config_version": {
+                      "type": "number"
+                    },
+                    "starts_at": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "string"
+                    },
+                    "features": {
+                      "type": "array",
+                      "items": {
+                        "type": "number"
+                      }
+                    },
+                    "application": {
+                      "type": "object",
+                      "fields": {
+                        "link": {
+                          "type": "string"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "assets": {
+                      "type": "object",
+                      "fields": {
+                        "hero": {
+                          "type": "string"
+                        },
+                        "hero_video": {
+                          "type": "string"
+                        },
+                        "quest_bar_hero_blurhash": {
+                          "type": "string"
+                        },
+                        "quest_bar_hero": {
+                          "type": "string"
+                        },
+                        "quest_bar_hero_video": {
+                          "type": "string"
+                        },
+                        "game_tile": {
+                          "type": "string"
+                        },
+                        "logotype": {
+                          "type": "string"
+                        },
+                        "game_tile_light": {
+                          "type": "string"
+                        },
+                        "game_tile_dark": {
+                          "type": "string"
+                        },
+                        "logotype_light": {
+                          "type": "string"
+                        },
+                        "logotype_dark": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "colors": {
+                      "type": "object",
+                      "fields": {
+                        "primary": {
+                          "type": "string"
+                        },
+                        "secondary": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "messages": {
+                      "type": "object",
+                      "fields": {
+                        "quest_name": {
+                          "type": "string"
+                        },
+                        "game_title": {
+                          "type": "string"
+                        },
+                        "game_publisher": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "task_config": {
+                      "type": "object",
+                      "fields": {
+                        "type": {
+                          "type": "number"
+                        },
+                        "join_operator": {
+                          "type": "string"
+                        },
+                        "tasks": {
+                          "type": "object"
+                        }
+                      }
+                    },
+                    "task_config_v2": {
+                      "type": "object",
+                      "fields": {
+                        "tasks": {
+                          "type": "object"
+                        },
+                        "join_operator": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "rewards_config": {
+                      "type": "object",
+                      "fields": {
+                        "assignment_method": {
+                          "type": "number"
+                        },
+                        "rewards": {
+                          "type": "array",
+                          "items": {
+                            "type": "object"
+                          }
+                        },
+                        "rewards_expire_at": {
+                          "type": "string"
+                        },
+                        "platforms": {
+                          "type": "array",
+                          "items": {
+                            "type": "number"
+                          }
+                        }
+                      }
+                    },
+                    "share_policy": {
+                      "type": "string"
+                    },
+                    "cta_config": {
+                      "type": "object",
+                      "fields": {
+                        "link": {
+                          "type": "string"
+                        },
+                        "button_label": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "user_status": {
+                  "type": "null",
+                  "nullable": true
+                },
+                "targeted_content": {
+                  "type": "array"
+                },
+                "preview": {
+                  "type": "boolean"
+                },
+                "traffic_metadata_raw": {
+                  "type": "string"
+                },
+                "traffic_metadata_sealed": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "excluded_quests": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "fields": {
+                "id": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "quest_enrollment_blocked_until": {
+            "type": "null",
+            "nullable": true
+          }
+        }
+      }
+    },
+    {
+      "id": "get-api-v9-quests-decision",
+      "method": "GET",
+      "path": "/api/v9/quests/decision",
+      "queryParams": {
+        "placement": {
+          "type": "string",
+          "example": "1"
+        },
+        "client_heartbeat_session_id": {
+          "type": "string",
+          "example": "4cec115f-02db-453b-9d9c-065229b2da75"
+        },
+        "client_ad_session_id": {
+          "type": "string",
+          "example": "d3f0f537-bc88-42b5-95a2-05b0a8a7064b"
+        }
+      },
+      "headers": {
+        "authorization": "[stored]",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "object",
+        "fields": [
+          "request_id",
+          "quest",
+          "ad_identifiers",
+          "ad_context",
+          "response_ttl_seconds",
+          "metadata_raw",
+          "metadata_sealed",
+          "traffic_metadata_raw",
+          "traffic_metadata_sealed"
+        ]
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/quests/decision?placement=1&client_heartbeat_session_id=4cec115f-02db-453b-9d9c-065229b2da75&client_ad_session_id=d3f0f537-bc88-42b5-95a2-05b0a8a7064b",
+          "headers": {
+            "authorization": "[stored]",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 3002,
+      "responseSchema": {
+        "type": "object",
+        "fields": {
+          "request_id": {
+            "type": "string"
+          },
+          "quest": {
+            "type": "object",
+            "fields": {
+              "id": {
+                "type": "string"
+              },
+              "config_version": {
+                "type": "number"
+              },
+              "starts_at": {
+                "type": "string"
+              },
+              "expires_at": {
+                "type": "string"
+              },
+              "features": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                }
+              },
+              "application": {
+                "type": "object",
+                "fields": {
+                  "link": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              },
+              "assets": {
+                "type": "object",
+                "fields": {
+                  "hero": {
+                    "type": "string"
+                  },
+                  "hero_video": {
+                    "type": "string"
+                  },
+                  "quest_bar_hero_blurhash": {
+                    "type": "string"
+                  },
+                  "quest_bar_hero": {
+                    "type": "string"
+                  },
+                  "quest_bar_hero_video": {
+                    "type": "string"
+                  },
+                  "game_tile": {
+                    "type": "string"
+                  },
+                  "logotype": {
+                    "type": "string"
+                  },
+                  "game_tile_light": {
+                    "type": "string"
+                  },
+                  "game_tile_dark": {
+                    "type": "string"
+                  },
+                  "logotype_light": {
+                    "type": "string"
+                  },
+                  "logotype_dark": {
+                    "type": "string"
+                  }
+                }
+              },
+              "colors": {
+                "type": "object",
+                "fields": {
+                  "primary": {
+                    "type": "string"
+                  },
+                  "secondary": {
+                    "type": "string"
+                  }
+                }
+              },
+              "messages": {
+                "type": "object",
+                "fields": {
+                  "quest_name": {
+                    "type": "string"
+                  },
+                  "game_title": {
+                    "type": "string"
+                  },
+                  "game_publisher": {
+                    "type": "string"
+                  }
+                }
+              },
+              "task_config": {
+                "type": "object",
+                "fields": {
+                  "type": {
+                    "type": "number"
+                  },
+                  "join_operator": {
+                    "type": "string"
+                  },
+                  "tasks": {
+                    "type": "object",
+                    "fields": {
+                      "PLAY_ON_DESKTOP": {
+                        "type": "object",
+                        "fields": {
+                          "event_name": {
+                            "type": "string"
+                          },
+                          "target": {
+                            "type": "number"
+                          },
+                          "external_ids": {
+                            "type": "array"
+                          }
+                        }
+                      },
+                      "PLAY_ON_PLAYSTATION": {
+                        "type": "object",
+                        "fields": {
+                          "event_name": {
+                            "type": "string"
+                          },
+                          "target": {
+                            "type": "number"
+                          },
+                          "external_ids": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "task_config_v2": {
+                "type": "object",
+                "fields": {
+                  "tasks": {
+                    "type": "object",
+                    "fields": {
+                      "PLAY_ON_DESKTOP": {
+                        "type": "object",
+                        "fields": {
+                          "type": {
+                            "type": "string"
+                          },
+                          "target": {
+                            "type": "number"
+                          },
+                          "applications": {
+                            "type": "array",
+                            "items": {
+                              "type": "object"
+                            }
+                          }
+                        }
+                      },
+                      "PLAY_ON_PLAYSTATION": {
+                        "type": "object",
+                        "fields": {
+                          "type": {
+                            "type": "string"
+                          },
+                          "target": {
+                            "type": "number"
+                          },
+                          "applications": {
+                            "type": "array",
+                            "items": {
+                              "type": "object"
+                            }
+                          },
+                          "external_ids": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "join_operator": {
+                    "type": "string"
+                  }
+                }
+              },
+              "rewards_config": {
+                "type": "object",
+                "fields": {
+                  "assignment_method": {
+                    "type": "number"
+                  },
+                  "rewards": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "fields": {
+                        "type": {
+                          "type": "number"
+                        },
+                        "sku_id": {
+                          "type": "string"
+                        },
+                        "messages": {
+                          "type": "object"
+                        },
+                        "orb_quantity": {
+                          "type": "number"
+                        },
+                        "premium_orb_quantity": {
+                          "type": "number"
+                        }
+                      }
+                    }
+                  },
+                  "rewards_expire_at": {
+                    "type": "string"
+                  },
+                  "platforms": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    }
+                  }
+                }
+              },
+              "share_policy": {
+                "type": "string"
+              },
+              "cta_config": {
+                "type": "object",
+                "fields": {
+                  "link": {
+                    "type": "string"
+                  },
+                  "button_label": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "ad_identifiers": {
+            "type": "object",
+            "fields": {
+              "campaign_id": {
+                "type": "string"
+              },
+              "ad_set_id": {
+                "type": "string"
+              },
+              "ad_id": {
+                "type": "string"
+              },
+              "creative_id": {
+                "type": "string"
+              },
+              "creative_type": {
+                "type": "number"
+              }
+            }
+          },
+          "ad_context": {
+            "type": "object",
+            "fields": {
+              "is_campaign_ias_enabled": {
+                "type": "boolean"
+              }
+            }
+          },
+          "response_ttl_seconds": {
+            "type": "number"
+          },
+          "metadata_raw": {
+            "type": "string"
+          },
+          "metadata_sealed": {
+            "type": "string"
+          },
+          "traffic_metadata_raw": {
+            "type": "string"
+          },
+          "traffic_metadata_sealed": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "id": "get-api-v9-applications-public",
+      "method": "GET",
+      "path": "/api/v9/applications/public",
+      "queryParams": {
+        "application_ids": {
+          "type": "string",
+          "example": "1437509662303059998"
+        }
+      },
+      "headers": {
+        "authorization": "[stored]",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "array",
+        "fields": [
+          "id",
+          "name",
+          "icon",
+          "description",
+          "summary",
+          "type",
+          "is_monetized",
+          "is_verified",
+          "is_discoverable",
+          "cover_image",
+          "third_party_skus",
+          "hook",
+          "executables",
+          "storefront_available",
+          "integration_types_config",
+          "verify_key",
+          "flags"
+        ]
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/applications/public?application_ids=1437509662303059998",
+          "headers": {
+            "authorization": "[stored]",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 1368,
+      "responseSchema": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "fields": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "icon": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "type": {
+              "type": "number"
+            },
+            "is_monetized": {
+              "type": "boolean"
+            },
+            "is_verified": {
+              "type": "boolean"
+            },
+            "is_discoverable": {
+              "type": "boolean"
+            },
+            "cover_image": {
+              "type": "string"
+            },
+            "third_party_skus": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "fields": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "sku": {
+                    "type": "string"
+                  },
+                  "distributor": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "hook": {
+              "type": "boolean"
+            },
+            "executables": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "fields": {
+                  "os": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "is_launcher": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            },
+            "storefront_available": {
+              "type": "boolean"
+            },
+            "integration_types_config": {
+              "type": "object",
+              "fields": {
+                "0": {
+                  "type": "object",
+                  "fields": {}
+                }
+              }
+            },
+            "verify_key": {
+              "type": "string"
+            },
+            "flags": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "get-api-v9-applications-games-supplemental",
+      "method": "GET",
+      "path": "/api/v9/applications/games-supplemental",
+      "queryParams": {
+        "application_ids": {
+          "type": "string",
+          "example": "1437509662303059998"
+        }
+      },
+      "headers": {
+        "authorization": "[stored]",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "object",
+        "fields": [
+          "supplemental_game_data"
+        ]
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/applications/games-supplemental?application_ids=1437509662303059998",
+          "headers": {
+            "authorization": "[stored]",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 2841,
+      "responseSchema": {
+        "type": "object",
+        "fields": {
+          "supplemental_game_data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "fields": {
+                "application_id": {
+                  "type": "string"
+                },
+                "igdb_game_id": {
+                  "type": "null",
+                  "nullable": true
+                },
+                "name": {
+                  "type": "string"
+                },
+                "summary": {
+                  "type": "string"
+                },
+                "summary_localized": {
+                  "type": "null",
+                  "nullable": true
+                },
+                "icon_hash": {
+                  "type": "string"
+                },
+                "cover_image_url": {
+                  "type": "string"
+                },
+                "artwork_urls": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "screenshot_urls": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "themes": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  }
+                },
+                "platforms": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  }
+                },
+                "genres": {
+                  "type": "array",
+                  "items": {
+                    "type": "number"
+                  }
+                },
+                "first_release_date": {
+                  "type": "string"
+                },
+                "websites": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "fields": {
+                      "category": {
+                        "type": "number"
+                      },
+                      "url": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "publisher_names": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "developer_names": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "steam_id": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "get-api-v9-channels-follower-stats",
+      "method": "GET",
+      "path": "/api/v9/channels/:id/follower-stats",
+      "queryParams": {},
+      "headers": {
+        "authorization": "[stored]",
+        "content-type": "application/json",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "object",
+        "fields": [
+          "guild_id",
+          "webhook_source_channel_id",
+          "users_seen_ever"
+        ]
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/channels/1464036817866068028/follower-stats",
+          "headers": {
+            "authorization": "[stored]",
+            "content-type": "application/json",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 74,
+      "responseSchema": {
+        "type": "object",
+        "fields": {
+          "guild_id": {
+            "type": "null",
+            "nullable": true
+          },
+          "webhook_source_channel_id": {
+            "type": "null",
+            "nullable": true
+          },
+          "users_seen_ever": {
+            "type": "null",
+            "nullable": true
+          }
+        }
+      }
+    },
+    {
+      "id": "get-api-v9-invites-prjhusykx",
+      "method": "GET",
+      "path": "/api/v9/invites/PrJhUsykX",
+      "queryParams": {
+        "with_counts": {
+          "type": "string",
+          "example": "true"
+        },
+        "with_expiration": {
+          "type": "string",
+          "example": "true"
+        },
+        "guild_scheduled_event_id": {
+          "type": "string",
+          "example": "1472296997913628776"
+        },
+        "with_permissions": {
+          "type": "string",
+          "example": "true"
+        }
+      },
+      "headers": {
+        "authorization": "[stored]",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "object",
+        "fields": [
+          "type",
+          "code",
+          "inviter",
+          "expires_at",
+          "id",
+          "guild",
+          "guild_id",
+          "channel",
+          "guild_scheduled_event",
+          "profile",
+          "approximate_member_count",
+          "approximate_presence_count",
+          "is_nickname_changeable"
+        ]
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/invites/PrJhUsykX?with_counts=true&with_expiration=true&guild_scheduled_event_id=1472296997913628776&with_permissions=true",
+          "headers": {
+            "authorization": "[stored]",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 4573,
+      "responseSchema": {
+        "type": "object",
+        "fields": {
+          "type": {
+            "type": "number"
+          },
+          "code": {
+            "type": "string"
+          },
+          "inviter": {
+            "type": "object",
+            "fields": {
+              "id": {
+                "type": "string"
+              },
+              "username": {
+                "type": "string"
+              },
+              "avatar": {
+                "type": "string"
+              },
+              "discriminator": {
+                "type": "string"
+              },
+              "public_flags": {
+                "type": "number"
+              },
+              "flags": {
+                "type": "number"
+              },
+              "banner": {
+                "type": "string"
+              },
+              "accent_color": {
+                "type": "null",
+                "nullable": true
+              },
+              "global_name": {
+                "type": "string"
+              },
+              "avatar_decoration_data": {
+                "type": "object",
+                "fields": {
+                  "asset": {
+                    "type": "string"
+                  },
+                  "sku_id": {
+                    "type": "string"
+                  },
+                  "expires_at": {
+                    "type": "null",
+                    "nullable": true
+                  }
+                }
+              },
+              "collectibles": {
+                "type": "object",
+                "fields": {
+                  "nameplate": {
+                    "type": "object",
+                    "fields": {
+                      "sku_id": {
+                        "type": "string"
+                      },
+                      "asset": {
+                        "type": "string"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "palette": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "display_name_styles": {
+                "type": "object",
+                "fields": {
+                  "font_id": {
+                    "type": "number"
+                  },
+                  "effect_id": {
+                    "type": "number"
+                  },
+                  "colors": {
+                    "type": "array",
+                    "items": {
+                      "type": "number"
+                    }
+                  }
+                }
+              },
+              "banner_color": {
+                "type": "null",
+                "nullable": true
+              },
+              "clan": {
+                "type": "object",
+                "fields": {
+                  "identity_guild_id": {
+                    "type": "string"
+                  },
+                  "identity_enabled": {
+                    "type": "boolean"
+                  },
+                  "tag": {
+                    "type": "string"
+                  },
+                  "badge": {
+                    "type": "string"
+                  }
+                }
+              },
+              "primary_guild": {
+                "type": "object",
+                "fields": {
+                  "identity_guild_id": {
+                    "type": "string"
+                  },
+                  "identity_enabled": {
+                    "type": "boolean"
+                  },
+                  "tag": {
+                    "type": "string"
+                  },
+                  "badge": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "guild": {
+            "type": "object",
+            "fields": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "splash": {
+                "type": "string"
+              },
+              "banner": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "icon": {
+                "type": "string"
+              },
+              "features": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "verification_level": {
+                "type": "number"
+              },
+              "vanity_url_code": {
+                "type": "string"
+              },
+              "nsfw_level": {
+                "type": "number"
+              },
+              "nsfw": {
+                "type": "boolean"
+              },
+              "premium_subscription_count": {
+                "type": "number"
+              },
+              "premium_tier": {
+                "type": "number"
+              }
+            }
+          },
+          "guild_id": {
+            "type": "string"
+          },
+          "channel": {
+            "type": "object",
+            "fields": {
+              "id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "number"
+              },
+              "name": {
+                "type": "string"
+              }
+            }
+          },
+          "guild_scheduled_event": {
+            "type": "object",
+            "fields": {
+              "id": {
+                "type": "string"
+              },
+              "guild_id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "channel_id": {
+                "type": "string"
+              },
+              "creator_id": {
+                "type": "string"
+              },
+              "image": {
+                "type": "string"
+              },
+              "scheduled_start_time": {
+                "type": "string"
+              },
+              "scheduled_end_time": {
+                "type": "null",
+                "nullable": true
+              },
+              "status": {
+                "type": "number"
+              },
+              "entity_type": {
+                "type": "number"
+              },
+              "entity_id": {
+                "type": "string"
+              },
+              "recurrence_rule": {
+                "type": "null",
+                "nullable": true
+              },
+              "user_count": {
+                "type": "number"
+              },
+              "privacy_level": {
+                "type": "number"
+              },
+              "sku_ids": {
+                "type": "array"
+              },
+              "user_rsvp": {
+                "type": "null",
+                "nullable": true
+              },
+              "guild_scheduled_event_exceptions": {
+                "type": "array"
+              },
+              "entity_metadata": {
+                "type": "object",
+                "fields": {
+                  "speaker_ids": {
+                    "type": "array"
+                  }
+                }
+              }
+            }
+          },
+          "profile": {
+            "type": "object",
+            "fields": {
+              "id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "icon_hash": {
+                "type": "string"
+              },
+              "member_count": {
+                "type": "number"
+              },
+              "online_count": {
+                "type": "number"
+              },
+              "description": {
+                "type": "string"
+              },
+              "brand_color_primary": {
+                "type": "string"
+              },
+              "banner_hash": {
+                "type": "null",
+                "nullable": true
+              },
+              "game_application_ids": {
+                "type": "array"
+              },
+              "game_activity": {
+                "type": "object",
+                "fields": {}
+              },
+              "tag": {
+                "type": "string"
+              },
+              "badge": {
+                "type": "number"
+              },
+              "badge_color_primary": {
+                "type": "string"
+              },
+              "badge_color_secondary": {
+                "type": "string"
+              },
+              "badge_hash": {
+                "type": "string"
+              },
+              "traits": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "fields": {
+                    "emoji_id": {
+                      "type": "null",
+                      "nullable": true
+                    },
+                    "emoji_name": {
+                      "type": "null",
+                      "nullable": true
+                    },
+                    "emoji_animated": {
+                      "type": "boolean"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "position": {
+                      "type": "number"
+                    }
+                  }
+                }
+              },
+              "features": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "visibility": {
+                "type": "number"
+              },
+              "custom_banner_hash": {
+                "type": "null",
+                "nullable": true
+              },
+              "premium_subscription_count": {
+                "type": "number"
+              },
+              "premium_tier": {
+                "type": "number"
+              }
+            }
+          },
+          "approximate_member_count": {
+            "type": "number"
+          },
+          "approximate_presence_count": {
+            "type": "number"
+          },
+          "is_nickname_changeable": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    {
+      "id": "get-api-v9-users-me-settings-proto",
+      "method": "GET",
+      "path": "/api/v9/users/@me/settings-proto/:id",
+      "queryParams": {},
+      "headers": {
+        "authorization": "[stored]",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "object",
+        "fields": [
+          "settings"
+        ]
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/users/@me/settings-proto/2",
+          "headers": {
+            "authorization": "[stored]",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "responseBytes": 3544,
+      "responseSchema": {
+        "type": "object",
+        "fields": {
+          "settings": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "id": "post-api-v9-channels-messages-ack",
+      "method": "POST",
+      "path": "/api/v9/channels/:id/messages/:id/ack",
+      "queryParams": {},
+      "headers": {
+        "authorization": "[stored]",
+        "content-type": "application/json",
+        "referer": "[stored]",
+        "user-agent": "[stored]",
+        "x-debug-options": "[stored]",
+        "x-discord-locale": "en-US",
+        "x-discord-timezone": "[stored]",
+        "x-super-properties": "[stored]"
+      },
+      "responseShape": {
+        "type": "object",
+        "fields": [
+          "token"
+        ]
+      },
+      "examples": {
+        "request": {
+          "url": "https://discord.com/api/v9/channels/825551628819103767/messages/1271720564465209498/ack",
+          "headers": {
+            "authorization": "[stored]",
+            "content-type": "application/json",
+            "referer": "[stored]",
+            "user-agent": "[stored]",
+            "x-debug-options": "[stored]",
+            "x-discord-locale": "en-US",
+            "x-discord-timezone": "[stored]",
+            "x-super-properties": "[stored]"
+          }
+        },
+        "responsePreview": null
+      },
+      "requestBody": {
+        "contentType": "application/json",
+        "template": {
+          "token": null,
+          "last_viewed": 4079
+        },
+        "variables": [
+          "last_viewed"
+        ]
+      },
+      "responseBytes": 14,
+      "responseSchema": {
+        "type": "object",
+        "fields": {
+          "token": {
+            "type": "null",
+            "nullable": true
+          }
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "captureCount": 38,
+    "filteredCount": 0,
+    "toolVersion": "1.0.0"
+  },
+  "provenance": "unsigned"
+}

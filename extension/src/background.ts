@@ -107,10 +107,221 @@ async function saveViaBridge(skills: Array<{ domain: string; skillJson: string }
 }
 
 // --- Agent-initiated capture ---
-// Placeholder — full implementation in Task 5
+
+import { isApproved, addApprovedDomain } from './consent.js';
+
+// Pending consent callbacks — keyed by domain
+const pendingConsent = new Map<string, {
+  resolve: (granted: boolean) => void;
+  timer: ReturnType<typeof setTimeout>;
+}>();
+
+function requestConsentUI(domain: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const notifId = `consent-${domain}`;
+
+    // 60 second timeout for user response
+    const timer = setTimeout(() => {
+      pendingConsent.delete(domain);
+      chrome.notifications.clear(notifId);
+      resolve(false);
+    }, 60_000);
+
+    pendingConsent.set(domain, { resolve, timer });
+
+    chrome.notifications.create(notifId, {
+      type: 'basic',
+      iconUrl: 'icons/48.png',
+      title: 'ApiTap Agent Request',
+      message: `An agent wants to capture API traffic from ${domain}. Click to allow or deny.`,
+      requireInteraction: true,
+    });
+  });
+}
+
+// Handle notification click → Allow
+chrome.notifications.onClicked.addListener((notifId) => {
+  if (!notifId.startsWith('consent-')) return;
+  const domain = notifId.replace('consent-', '');
+
+  const pending = pendingConsent.get(domain);
+  if (pending) {
+    clearTimeout(pending.timer);
+    pendingConsent.delete(domain);
+    chrome.notifications.clear(notifId);
+    pending.resolve(true);
+  }
+});
+
+// Handle notification closed without clicking → Deny
+chrome.notifications.onClosed.addListener((notifId, byUser) => {
+  if (!notifId.startsWith('consent-')) return;
+  const domain = notifId.replace('consent-', '');
+
+  const pending = pendingConsent.get(domain);
+  if (pending) {
+    clearTimeout(pending.timer);
+    pendingConsent.delete(domain);
+    pending.resolve(false);
+  }
+});
+
+async function findOrOpenTab(domain: string): Promise<chrome.tabs.Tab> {
+  return new Promise((resolve) => {
+    chrome.tabs.query({ url: `*://${domain}/*` }, (tabs) => {
+      if (tabs.length > 0) {
+        const active = tabs.find(t => t.active) ?? tabs[0];
+        resolve(active);
+      } else {
+        chrome.tabs.create({ url: `https://${domain}`, active: false }, (tab) => {
+          resolve(tab);
+        });
+      }
+    });
+  });
+}
+
+function captureWithPlateau(
+  tabId: number,
+  options: { idleTimeout: number; maxDuration: number },
+): Promise<string[]> {
+  return new Promise((resolve) => {
+    // Reset state for agent capture
+    generators = new DomainGeneratorMap();
+    allSkillFiles = [];
+    capturedDomains = [];
+    lastSkillJson = null;
+
+    let lastEndpointCount = 0;
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
+    let maxTimer: ReturnType<typeof setTimeout> | null = null;
+    let plateauInterval: ReturnType<typeof setInterval> | null = null;
+
+    function checkPlateau() {
+      const current = generators.totalEndpoints;
+      if (current > lastEndpointCount) {
+        lastEndpointCount = current;
+        // Reset idle timer — new endpoints found
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(finishCapture, options.idleTimeout);
+      }
+    }
+
+    function finishCapture() {
+      if (idleTimer) clearTimeout(idleTimer);
+      if (maxTimer) clearTimeout(maxTimer);
+      if (plateauInterval) clearInterval(plateauInterval);
+
+      chrome.debugger.onEvent.removeListener(onCdpEvent);
+      chrome.debugger.detach({ tabId }, () => {
+        if (chrome.runtime.lastError) { /* tab may be closed */ }
+      });
+
+      // Generate skill files
+      const primaryDomain = pickPrimaryDomain(capturedDomains);
+      if (primaryDomain && generators.domains.length > 0) {
+        const skills = generators.toSkillFiles(state.requestCount);
+        allSkillFiles = skills.map(s => scrubAuthFromSkillJson(JSON.stringify(s)));
+      }
+
+      state.active = false;
+      state.tabId = null;
+      pendingRequests.clear();
+      pendingResponses.clear();
+      generators.clear();
+      capturedDomains = [];
+
+      broadcastState();
+      resolve(allSkillFiles);
+    }
+
+    // Set up state
+    state = {
+      active: true,
+      tabId,
+      domain: null,
+      requestCount: 0,
+      endpointCount: 0,
+      authDetected: null,
+      bridgeConnected: bridgeAvailable,
+      autoSaved: null,
+    };
+    pendingRequests.clear();
+    pendingResponses.clear();
+
+    // Hard timeout
+    maxTimer = setTimeout(finishCapture, options.maxDuration);
+
+    // Start idle timer (first endpoints must appear within idleTimeout)
+    idleTimer = setTimeout(finishCapture, options.idleTimeout);
+
+    // Check for plateau every second
+    plateauInterval = setInterval(checkPlateau, 1000);
+
+    // Attach debugger and start capture
+    chrome.debugger.attach({ tabId }, '1.3', () => {
+      if (chrome.runtime.lastError) {
+        if (idleTimer) clearTimeout(idleTimer);
+        if (maxTimer) clearTimeout(maxTimer);
+        if (plateauInterval) clearInterval(plateauInterval);
+        state.active = false;
+        resolve([]);
+        return;
+      }
+
+      chrome.debugger.sendCommand({ tabId }, 'Network.enable', {}, () => {
+        chrome.debugger.onEvent.addListener(onCdpEvent);
+        broadcastState();
+      });
+    });
+  });
+}
 
 async function handleAgentCapture(request: AgentRequest): Promise<AgentResponse> {
-  return { success: false, error: 'not_implemented' };
+  const { domain } = request;
+
+  if (!domain) {
+    return { success: false, error: 'missing_domain' };
+  }
+
+  // Don't start a capture if one is already active
+  if (state.active) {
+    return { success: false, error: 'capture_in_progress' };
+  }
+
+  // Check per-site consent
+  const approved = await isApproved(domain);
+  if (!approved) {
+    const granted = await requestConsentUI(domain);
+    if (!granted) {
+      return { success: false, error: 'user_denied' };
+    }
+    await addApprovedDomain(domain);
+  }
+
+  // Find or open a tab for the domain
+  const tab = await findOrOpenTab(domain);
+  if (!tab.id) {
+    return { success: false, error: 'no_tab' };
+  }
+
+  // Capture with plateau detection
+  const skillFiles = await captureWithPlateau(tab.id, {
+    idleTimeout: 10_000,   // 10s no new endpoints → stop
+    maxDuration: 120_000,  // 2 minute hard cap
+  });
+
+  if (skillFiles.length === 0) {
+    return { success: false, error: 'no_endpoints_captured' };
+  }
+
+  // Parse skill files for the response
+  const parsed = skillFiles.map(json => {
+    try { return JSON.parse(json); }
+    catch { return null; }
+  }).filter(Boolean);
+
+  return { success: true, skillFiles: parsed };
 }
 
 // --- State ---

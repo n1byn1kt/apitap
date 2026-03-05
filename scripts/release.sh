@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Usage: bash scripts/release.sh [patch|minor|major]
 # Bumps version, publishes to npm, pushes tag to GitHub.
-# GitHub release is created automatically via postpublish hook.
 
 set -euo pipefail
 
@@ -24,17 +23,37 @@ if [[ -n $(git status --porcelain) ]]; then
   exit 1
 fi
 
+# ── Pre-release checklist ─────────────────────────────────────────────────────
+ACTUAL_TESTS=$(npm test 2>&1 | grep "^# tests" | awk '{print $3}')
+WEBSITE_TESTS=$(grep -o 'APITAP_TESTS = [0-9]*' ../apitap-website/index.html 2>/dev/null | awk '{print $3}' || echo "?")
+README_TESTS=$(grep -o 'tests-[0-9]*%20passing' README.md | grep -o '[0-9]*' || echo "?")
+
+if [[ "$ACTUAL_TESTS" != "$WEBSITE_TESTS" || "$ACTUAL_TESTS" != "$README_TESTS" ]]; then
+  echo ""
+  echo "⚠️  Test count mismatch — update before releasing:"
+  echo "   Actual tests:  $ACTUAL_TESTS"
+  echo "   Website (APITAP_TESTS): $WEBSITE_TESTS  → ../apitap-website/index.html"
+  echo "   README badge:  $README_TESTS  → README.md"
+  echo ""
+  read -r -p "Continue anyway? (y/N) " REPLY
+  if [[ ! "$REPLY" =~ ^[Yy]$ ]]; then
+    echo "Aborted. Update test counts and re-run."
+    exit 1
+  fi
+else
+  echo "✅ Test count consistent: $ACTUAL_TESTS tests"
+fi
+# ─────────────────────────────────────────────────────────────────────────────
+
 # Pull latest
 echo "⬇️  Pulling latest main..."
 git pull origin main
 
-# Run tests
-echo "🧪 Running tests..."
-npm test
-
 # Bump version (creates git tag)
 echo "🔖 Bumping $BUMP version..."
 npm version "$BUMP"
+
+VERSION=$(node -p "require('./package.json').version")
 
 # Publish to npm
 echo "🚀 Publishing to npm..."
@@ -45,7 +64,6 @@ echo "⬆️  Pushing to GitHub..."
 git push origin main "refs/tags/v$VERSION"
 
 # Create GitHub release (after tag is pushed)
-VERSION=$(node -p "require('./package.json').version")
 echo "🏷️  Creating GitHub release..."
 gh release create "v$VERSION" --title "v$VERSION" --generate-notes
 

@@ -1,9 +1,10 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer, type Server } from 'node:http';
+import net from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { browse } from '../../src/orchestration/browse.js';
 import { SessionCache } from '../../src/orchestration/cache.js';
@@ -197,5 +198,133 @@ describe('browse orchestration', () => {
     assert.equal(!result.success && result.suggestion, 'capture_needed');
 
     await new Promise<void>(r => htmlServer.close(() => r()));
+  });
+});
+
+describe('browse with bridge escalation', () => {
+  let testDir: string;
+  let bridgeDir: string;
+  let socketPath: string;
+  let bridgeServer: net.Server;
+  let httpServer: Server;
+  let baseUrl: string;
+
+  beforeEach(async () => {
+    testDir = await mkdtemp(join(tmpdir(), 'apitap-browse-bridge-'));
+    bridgeDir = await mkdtemp(join(tmpdir(), 'apitap-bridge-'));
+    socketPath = join(bridgeDir, 'bridge.sock');
+
+    httpServer = createServer((req, res) => {
+      if (req.url === '/api/data') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ items: [{ id: 1 }] }));
+      } else {
+        res.writeHead(404);
+        res.end();
+      }
+    });
+    await new Promise<void>(r => httpServer.listen(0, r));
+    baseUrl = `http://localhost:${(httpServer.address() as AddressInfo).port}`;
+  });
+
+  afterEach(async () => {
+    bridgeServer?.close();
+    await new Promise<void>(r => httpServer.close(() => r()));
+    await rm(testDir, { recursive: true, force: true });
+    await rm(bridgeDir, { recursive: true, force: true });
+  });
+
+  function startBridgeServer(handler: (msg: any) => any): Promise<void> {
+    return new Promise((resolve) => {
+      bridgeServer = net.createServer((conn) => {
+        let buf = '';
+        conn.on('data', (chunk) => {
+          buf += chunk.toString();
+          const idx = buf.indexOf('\n');
+          if (idx === -1) return;
+          const msg = JSON.parse(buf.slice(0, idx));
+          const response = handler(msg);
+          conn.end(JSON.stringify(response) + '\n');
+        });
+      });
+      bridgeServer.listen(socketPath, resolve);
+    });
+  }
+
+  it('skips bridge when socket does not exist', async () => {
+    const result = await browse('http://no-bridge.example.com', {
+      skillsDir: testDir,
+      skipDiscovery: true,
+      _skipSsrfCheck: true,
+      _bridgeSocketPath: join(bridgeDir, 'nonexistent.sock'),
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(!result.success && result.suggestion, 'capture_needed');
+  });
+
+  it('escalates to bridge and returns data when skill files received', async () => {
+    // Bridge returns a skill file pointing to our test HTTP server
+    await startBridgeServer((msg) => ({
+      success: true,
+      skillFiles: [makeSkill(msg.domain, baseUrl, [
+        { id: 'get-api-data', method: 'GET', path: '/api/data' },
+      ])],
+    }));
+
+    const result = await browse('http://bridge-test.example.com/api/data', {
+      skillsDir: testDir,
+      skipDiscovery: true,
+      _skipSsrfCheck: true,
+      _bridgeSocketPath: socketPath,
+    });
+
+    assert.equal(result.success, true);
+    if (result.success) {
+      assert.equal(result.domain, 'bridge-test.example.com');
+      assert.equal(result.skillSource, 'bridge');
+      assert.ok(result.data);
+    }
+  });
+
+  it('handles user denial gracefully', async () => {
+    await startBridgeServer(() => ({
+      success: false,
+      error: 'user_denied',
+    }));
+
+    const result = await browse('http://denied.example.com', {
+      skillsDir: testDir,
+      skipDiscovery: true,
+      _skipSsrfCheck: true,
+      _bridgeSocketPath: socketPath,
+    });
+
+    assert.equal(result.success, false);
+    if (!result.success) {
+      assert.equal(result.reason, 'user_denied');
+      assert.ok(result.suggestion.includes('auth'));
+    }
+  });
+
+  it('handles bridge timeout gracefully', async () => {
+    // Server that never responds
+    await new Promise<void>((resolve) => {
+      bridgeServer = net.createServer(() => { /* no response */ });
+      bridgeServer.listen(socketPath, resolve);
+    });
+
+    const result = await browse('http://timeout.example.com', {
+      skillsDir: testDir,
+      skipDiscovery: true,
+      _skipSsrfCheck: true,
+      _bridgeSocketPath: socketPath,
+      _bridgeTimeout: 500,
+    });
+
+    assert.equal(result.success, false);
+    if (!result.success) {
+      assert.equal(result.suggestion, 'capture_needed');
+    }
   });
 });

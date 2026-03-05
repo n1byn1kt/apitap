@@ -27,7 +27,7 @@ async function signSkillJson(skillJson: string): Promise<string> {
 }
 
 export interface NativeRequest {
-  action: 'save_skill' | 'save_batch' | 'ping';
+  action: 'save_skill' | 'save_batch' | 'ping' | 'capture_request';
   domain?: string;
   skillJson?: string;
   skills?: Array<{ domain: string; skillJson: string }>;
@@ -119,6 +119,35 @@ export async function handleNativeMessage(
   } catch (err) {
     return { success: false, error: String(err) };
   }
+}
+
+// --- Relay handler ---
+
+// Actions handled locally by the native host (filesystem operations)
+const LOCAL_ACTIONS = new Set(['save_skill', 'save_batch', 'ping']);
+
+// Actions relayed to the extension (browser operations)
+const EXTENSION_ACTIONS = new Set(['capture_request']);
+
+export function createRelayHandler(
+  sendToExtension: (msg: any) => Promise<any>,
+  skillsDir: string = SKILLS_DIR,
+): MessageHandler {
+  return async (message: any) => {
+    if (LOCAL_ACTIONS.has(message.action)) {
+      return handleNativeMessage(message, skillsDir);
+    }
+
+    if (EXTENSION_ACTIONS.has(message.action)) {
+      try {
+        return await sendToExtension(message);
+      } catch (err) {
+        return { success: false, error: String(err) };
+      }
+    }
+
+    return { success: false, error: `Unknown action: ${message.action}` };
+  };
 }
 
 // --- Unix socket server for CLI relay ---
@@ -262,12 +291,64 @@ const isMainModule = process.argv[1] &&
   (process.argv[1].endsWith('native-host.ts') || process.argv[1].endsWith('native-host.js'));
 
 if (isMainModule) {
+  const bridgeDir = path.join(os.homedir(), '.apitap');
+  const socketPath = path.join(bridgeDir, 'bridge.sock');
+
+  // Pending CLI requests waiting for extension responses
+  const pendingRequests = new Map<string, {
+    resolve: (value: any) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
+  let requestCounter = 0;
+
+  // Send a message to the extension via stdout and wait for response
+  function sendToExtension(message: any): Promise<any> {
+    return new Promise((resolve) => {
+      const id = String(++requestCounter);
+      const timer = setTimeout(() => {
+        pendingRequests.delete(id);
+        resolve({ success: false, error: 'approval_timeout' });
+      }, 60_000);
+
+      pendingRequests.set(id, { resolve, timer });
+
+      // Tag message with ID so we can match the response
+      sendMessage({ ...message, _relayId: id } as any);
+    });
+  }
+
+  const handler = createRelayHandler(sendToExtension);
+
   (async () => {
+    // Ensure bridge directory exists
+    await fs.mkdir(bridgeDir, { recursive: true });
+
+    // Start socket server for CLI connections
+    await startSocketServer(socketPath, handler);
+
+    // Read messages from extension via stdin
     while (true) {
-      const request = await readMessage();
-      if (!request) break;
-      const response = await handleNativeMessage(request);
+      const message = await readMessage();
+      if (!message) break;
+
+      // Check if this is a response to a relayed request
+      const relayId = (message as any)._relayId;
+      if (relayId && pendingRequests.has(relayId)) {
+        const pending = pendingRequests.get(relayId)!;
+        clearTimeout(pending.timer);
+        pendingRequests.delete(relayId);
+        const { _relayId, ...response } = message as any;
+        pending.resolve(response);
+        continue;
+      }
+
+      // Otherwise, handle as a direct extension message (save_skill, etc.)
+      const response = await handleNativeMessage(message);
       sendMessage(response);
     }
+
+    // Extension disconnected — clean up
+    await stopSocketServer();
+    try { await fs.unlink(socketPath); } catch { /* already gone */ }
   })();
 }

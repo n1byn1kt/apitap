@@ -4,7 +4,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import net from 'node:net';
-import { handleNativeMessage, startSocketServer, stopSocketServer, type NativeRequest, type NativeResponse } from '../src/native-host.js';
+import { handleNativeMessage, startSocketServer, stopSocketServer, createRelayHandler, type NativeRequest, type NativeResponse } from '../src/native-host.js';
 
 describe('native messaging host', () => {
   let tmpDir: string;
@@ -207,5 +207,54 @@ describe('unix socket relay', () => {
 
     assert.equal(response.success, false);
     assert.ok(response.error?.includes('Invalid'));
+  });
+});
+
+describe('relay handler', () => {
+  it('routes save_skill to local handler', async () => {
+    let relayedToExtension = false;
+    const sendToExtension = async (msg: any) => {
+      relayedToExtension = true;
+      return { success: true };
+    };
+
+    const tmpDir2 = await fs.mkdtemp(path.join(os.tmpdir(), 'apitap-relay-test-'));
+    const handler = createRelayHandler(sendToExtension, tmpDir2);
+
+    const result = await handler({
+      action: 'save_skill',
+      domain: 'test.com',
+      skillJson: JSON.stringify({ domain: 'test.com', endpoints: [] }),
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(relayedToExtension, false);
+    await fs.rm(tmpDir2, { recursive: true, force: true });
+  });
+
+  it('routes capture_request to extension', async () => {
+    let relayedMessage: any = null;
+    const sendToExtension = async (msg: any) => {
+      relayedMessage = msg;
+      return { success: true, skillFiles: [{ domain: 'x.com', endpoints: [] }] };
+    };
+
+    const handler = createRelayHandler(sendToExtension);
+    const result = await handler({ action: 'capture_request', domain: 'x.com' });
+
+    assert.equal(result.success, true);
+    assert.deepEqual(relayedMessage, { action: 'capture_request', domain: 'x.com' });
+  });
+
+  it('returns error when extension relay fails', async () => {
+    const sendToExtension = async () => {
+      throw new Error('extension disconnected');
+    };
+
+    const handler = createRelayHandler(sendToExtension);
+    const result = await handler({ action: 'capture_request', domain: 'x.com' });
+
+    assert.equal(result.success, false);
+    assert.ok(result.error?.includes('extension disconnected'));
   });
 });

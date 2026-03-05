@@ -62,8 +62,9 @@ export async function readSkillFile(
         // Imported files had foreign signature stripped — can't verify, warn only
         // Future: re-sign on import with local key
       } else if (!skill.signature) {
-        // No signature present on non-imported file
-        throw new Error(`Skill file for ${domain} has no signature — file may be tampered`);
+        // Phase 2: warn for unsigned files, don't reject
+        // (user-created or pre-signing files are legitimately unsigned)
+        console.error(`[apitap] Warning: skill file for ${domain} is unsigned`);
       } else {
         const { verifySignature } = await import('./signing.js');
         if (!verifySignature(skill, options.signingKey)) {

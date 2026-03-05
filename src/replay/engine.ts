@@ -569,17 +569,20 @@ export async function replayMultiple(
 
   const { readSkillFile } = await import('../skill/store.js');
   const { AuthManager, getMachineId } = await import('../auth/manager.js');
+  const { deriveSigningKey } = await import('../auth/crypto.js');
+
+  const machineId = await getMachineId();
+  const signingKey = deriveSigningKey(machineId);
 
   // Deduplicate skill file reads
   const skillCache = new Map<string, SkillFile | null>();
   const uniqueDomains = [...new Set(requests.map(r => r.domain))];
   await Promise.all(uniqueDomains.map(async (domain) => {
-    const skill = await readSkillFile(domain, options.skillsDir);
+    const skill = await readSkillFile(domain, options.skillsDir, { verifySignature: true, signingKey });
     skillCache.set(domain, skill);
   }));
 
   // Shared auth manager
-  const machineId = await getMachineId();
   const authManager = new AuthManager(
     (await import('node:os')).homedir() + '/.apitap',
     machineId,

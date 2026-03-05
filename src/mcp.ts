@@ -7,6 +7,7 @@ import { searchSkills } from './skill/search.js';
 import { readSkillFile } from './skill/store.js';
 import { replayEndpoint } from './replay/engine.js';
 import { AuthManager, getMachineId } from './auth/manager.js';
+import { deriveSigningKey } from './auth/crypto.js';
 import { requestAuth } from './auth/handoff.js';
 import { CaptureSession } from './capture/session.js';
 import { discover } from './discovery/index.js';
@@ -153,7 +154,9 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
       },
     },
     async ({ domain, endpointId, params, fresh, maxBytes }) => {
-      const skill = await readSkillFile(domain, skillsDir);
+      const machineId = await getMachineId();
+      const signingKey = deriveSigningKey(machineId);
+      const skill = await readSkillFile(domain, skillsDir, { verifySignature: true, signingKey });
       if (!skill) {
         return {
           content: [{ type: 'text' as const, text: `No skill file found for "${domain}". Use apitap_capture to capture it first.` }],
@@ -170,7 +173,6 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
       }
 
       // Get auth manager for token injection and header auth
-      const machineId = await getMachineId();
       const authManager = new AuthManager(APITAP_DIR, machineId);
 
       try {

@@ -4,7 +4,7 @@ import { capture } from './capture/monitor.js';
 import { writeSkillFile, readSkillFile, listSkillFiles } from './skill/store.js';
 import { replayEndpoint } from './replay/engine.js';
 import { AuthManager, getMachineId } from './auth/manager.js';
-import { deriveKey } from './auth/crypto.js';
+import { deriveSigningKey } from './auth/crypto.js';
 import { signSkillFile } from './skill/signing.js';
 import { importSkillFile } from './skill/importer.js';
 import { resolveAndValidateUrl } from './skill/ssrf.js';
@@ -194,7 +194,7 @@ async function handleCapture(positional: string[], flags: Record<string, string 
 
   // Get machine ID for signing and auth storage
   const machineId = await getMachineId();
-  const key = deriveKey(machineId);
+  const key = deriveSigningKey(machineId);
   const authManager = new AuthManager(APITAP_DIR, machineId);
 
   // Write skill files for each domain
@@ -378,7 +378,9 @@ async function handleReplay(positional: string[], flags: Record<string, string |
     process.exit(1);
   }
 
-  const skill = await readSkillFile(domain, SKILLS_DIR);
+  const machineId = await getMachineId();
+  const signingKey = deriveSigningKey(machineId);
+  const skill = await readSkillFile(domain, SKILLS_DIR, { verifySignature: true, signingKey });
   if (!skill) {
     console.error(`Error: No skill file found for "${domain}".`);
     process.exit(1);
@@ -394,7 +396,6 @@ async function handleReplay(positional: string[], flags: Record<string, string |
   }
 
   // Merge stored auth into endpoint headers for replay
-  const machineId = await getMachineId();
   const authManager = new AuthManager(APITAP_DIR, machineId);
   const storedAuth = await authManager.retrieve(domain);
 
@@ -446,7 +447,7 @@ async function handleImport(positional: string[], flags: Record<string, string |
 
   // Get local key for signature verification
   const machineId = await getMachineId();
-  const key = deriveKey(machineId);
+  const key = deriveSigningKey(machineId);
 
   // DNS-resolving SSRF check before importing (prevents DNS rebinding attacks)
   try {
@@ -863,9 +864,9 @@ async function handleDiscover(positional: string[], flags: Record<string, string
   if (save && result.skillFile) {
     const { writeSkillFile } = await import('./skill/store.js');
     const { signSkillFile } = await import('./skill/signing.js');
-    const { deriveKey } = await import('./auth/crypto.js');
+    const { deriveSigningKey } = await import('./auth/crypto.js');
     const machineId = await getMachineId();
-    const key = deriveKey(machineId);
+    const key = deriveSigningKey(machineId);
 
     const signed = signSkillFile(result.skillFile, key);
     const path = await writeSkillFile(signed, SKILLS_DIR);

@@ -160,7 +160,7 @@ describe('H2: SSRF env-var bypass removed', () => {
     ];
 
     for (const file of srcFiles) {
-      const content = await readFile(join('/tmp/apitap-security-fixes', file), 'utf-8');
+      const content = await readFile(join(process.cwd(), file), 'utf-8');
       assert.ok(
         !content.includes('APITAP_SKIP_SSRF_CHECK'),
         `${file} should not reference APITAP_SKIP_SSRF_CHECK env var`,
@@ -234,7 +234,7 @@ describe('H5+H7: MCP untrusted content marking', () => {
   it('wrapExternalContent function marks data as untrusted', async () => {
     // Import the MCP module and verify the wrapping function
     const { readFile } = await import('node:fs/promises');
-    const mcpSource = await readFile(join('/tmp/apitap-security-fixes', 'src/mcp.ts'), 'utf-8');
+    const mcpSource = await readFile(join(process.cwd(), 'src/mcp.ts'), 'utf-8');
 
     // Verify wrapExternalContent is used for all external-data tools
     const expectedWraps = [
@@ -263,7 +263,7 @@ describe('H5+H7: MCP untrusted content marking', () => {
 describe('H6: CLI SSRF validation', () => {
   it('CLI source uses resolveAndValidateUrl for URL-accepting commands', async () => {
     const { readFile } = await import('node:fs/promises');
-    const cliSource = await readFile(join('/tmp/apitap-security-fixes', 'src/cli.ts'), 'utf-8');
+    const cliSource = await readFile(join(process.cwd(), 'src/cli.ts'), 'utf-8');
 
     // Verify resolveAndValidateUrl is imported and used
     assert.ok(

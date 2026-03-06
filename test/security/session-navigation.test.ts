@@ -32,7 +32,7 @@ describe('F7: Session navigation URL validation', () => {
     const { session } = createSessionWithMockPage();
     const result = await session.interact({ action: 'navigate', url: 'file:///etc/passwd' });
     assert.equal(result.success, false);
-    assert.ok(result.error!.includes('Blocked scheme'));
+    assert.ok(result.error!.includes('Navigation blocked'));
   });
 
   it('blocks javascript: URLs', async () => {
@@ -45,14 +45,14 @@ describe('F7: Session navigation URL validation', () => {
     const { session } = createSessionWithMockPage();
     const result = await session.interact({ action: 'navigate', url: 'data:text/html,<h1>evil</h1>' });
     assert.equal(result.success, false);
-    assert.ok(result.error!.includes('Blocked scheme'));
+    assert.ok(result.error!.includes('Navigation blocked'));
   });
 
   it('blocks ftp: URLs', async () => {
     const { session } = createSessionWithMockPage();
     const result = await session.interact({ action: 'navigate', url: 'ftp://example.com/file' });
     assert.equal(result.success, false);
-    assert.ok(result.error!.includes('Blocked scheme'));
+    assert.ok(result.error!.includes('Navigation blocked'));
   });
 
   it('allows https: URLs', async () => {

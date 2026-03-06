@@ -78,6 +78,42 @@ export function validateSkillFile(raw: unknown, options?: { checkSsrf?: boolean 
     if (e.path.length > 2000) {
       throw new Error(`Endpoint ${i}: path exceeds 2000 characters`);
     }
+
+    // M11: Deep type validation on nested structures
+    if ('headers' in e && e.headers !== undefined) {
+      if (typeof e.headers !== 'object' || e.headers === null || Array.isArray(e.headers)) {
+        throw new Error(`Endpoint ${i}: headers must be an object`);
+      }
+      for (const [hk, hv] of Object.entries(e.headers as Record<string, unknown>)) {
+        if (typeof hv !== 'string') {
+          throw new Error(`Endpoint ${i}: header "${hk}" value must be a string`);
+        }
+      }
+    }
+
+    if ('queryParams' in e && e.queryParams !== undefined) {
+      if (typeof e.queryParams !== 'object' || e.queryParams === null || Array.isArray(e.queryParams)) {
+        throw new Error(`Endpoint ${i}: queryParams must be an object`);
+      }
+      for (const [qk, qv] of Object.entries(e.queryParams as Record<string, unknown>)) {
+        if (typeof qv !== 'object' || qv === null || typeof (qv as any).example !== 'string') {
+          throw new Error(`Endpoint ${i}: queryParam "${qk}" must have a string example`);
+        }
+      }
+    }
+
+    if ('requestBody' in e && e.requestBody !== undefined) {
+      const rb = e.requestBody as Record<string, unknown>;
+      if (typeof rb !== 'object' || rb === null) {
+        throw new Error(`Endpoint ${i}: requestBody must be an object`);
+      }
+      if (typeof rb.contentType !== 'string') {
+        throw new Error(`Endpoint ${i}: requestBody.contentType must be a string`);
+      }
+      if (rb.variables !== undefined && !Array.isArray(rb.variables)) {
+        throw new Error(`Endpoint ${i}: requestBody.variables must be an array`);
+      }
+    }
   }
 
   return raw as SkillFile;

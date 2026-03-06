@@ -27,9 +27,9 @@ export async function safeFetch(
   url: string,
   options: SafeFetchOptions = {},
 ): Promise<FetchResult | null> {
-  // SSRF check
+  // M18: Use DNS-resolving SSRF check to prevent rebinding attacks
   if (!options.skipSsrf) {
-    const ssrfResult = validateUrl(url);
+    const ssrfResult = await resolveAndValidateUrl(url);
     if (!ssrfResult.safe) return null;
   }
 

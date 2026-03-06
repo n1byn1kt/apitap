@@ -244,7 +244,7 @@ export async function replayEndpoint(
   // SSRF validation — resolve DNS and check the IP isn't private/internal.
   // We do NOT substitute the IP into the URL because that breaks TLS/SNI
   // for sites behind CDNs (Cloudflare, etc.) where the cert is for the hostname.
-  // The DNS check still prevents rebinding attacks by validating at request time.
+  // M15: We re-validate DNS after fetch to narrow the TOCTOU window.
   const fetchUrl = url.toString();
   if (!options._skipSsrfCheck) {
     const ssrfCheck = await resolveAndValidateUrl(url.toString());
@@ -423,6 +423,16 @@ export async function replayEndpoint(
     signal: AbortSignal.timeout(30_000),
     redirect: 'manual',  // Don't auto-follow redirects
   });
+
+  // M15: Post-fetch DNS re-validation to narrow TOCTOU window.
+  // Re-resolves DNS and checks if the hostname now points to a private IP
+  // (indicates DNS rebinding attack between our pre-check and the actual connection).
+  if (!options._skipSsrfCheck && url.hostname && !url.hostname.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)) {
+    const postCheck = await resolveAndValidateUrl(fetchUrl);
+    if (!postCheck.safe) {
+      throw new Error(`DNS rebinding detected (post-fetch): ${postCheck.reason}`);
+    }
+  }
 
   // Handle redirects with SSRF validation (single hop only)
   if (response.status >= 300 && response.status < 400) {

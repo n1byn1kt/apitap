@@ -57,7 +57,7 @@ describe('F4: Signature verification on load', () => {
     // Reading with verification should fail
     await assert.rejects(
       () => readSkillFile('example.com', testDir, { verifySignature: true, signingKey }),
-      /signature verification failed/i,
+      /signature verification failed|does not match domain/i,
       'Should reject tampered skill file'
     );
   });

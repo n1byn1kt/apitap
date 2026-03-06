@@ -158,6 +158,15 @@ async function handleCapture(positional: string[], flags: Record<string, string 
   const skipVerify = flags['no-verify'] === true;
   const verifyPosts = flags['verify-posts'] === true;
 
+  // SSRF validation for CLI (H6 fix)
+  if (flags['danger-disable-ssrf'] !== true) {
+    const ssrfCheck = await resolveAndValidateUrl(fullUrl);
+    if (!ssrfCheck.safe) {
+      console.error(`Error: URL blocked (SSRF): ${ssrfCheck.reason}`);
+      process.exit(1);
+    }
+  }
+
   if (!json) {
     const domainOnly = flags['all-domains'] !== true;
     console.log(`\n  🔍 Capturing ${url}...${duration ? ` (${duration}s)` : ' (Ctrl+C to stop)'}${domainOnly ? ' [domain-only]' : ' [all domains]'}\n`);
@@ -341,7 +350,7 @@ async function handleShow(positional: string[], flags: Record<string, string | b
     process.exit(1);
   }
 
-  const skill = await readSkillFile(domain, SKILLS_DIR);
+  const skill = await readSkillFile(domain, SKILLS_DIR, { trustUnsigned: true });
   if (!skill) {
     console.error(`Error: No skill file found for "${domain}". Run \`apitap capture\` first.`);
     process.exit(1);
@@ -380,7 +389,8 @@ async function handleReplay(positional: string[], flags: Record<string, string |
 
   const machineId = await getMachineId();
   const signingKey = deriveSigningKey(machineId);
-  const skill = await readSkillFile(domain, SKILLS_DIR, { verifySignature: true, signingKey });
+  const trustUnsigned = flags['trust-unsigned'] === true;
+  const skill = await readSkillFile(domain, SKILLS_DIR, { verifySignature: true, signingKey, trustUnsigned });
   if (!skill) {
     console.error(`Error: No skill file found for "${domain}".`);
     process.exit(1);
@@ -417,6 +427,10 @@ async function handleReplay(positional: string[], flags: Record<string, string |
   const fresh = flags.fresh === true;
   const json = flags.json === true;
   const maxBytes = typeof flags['max-bytes'] === 'string' ? parseInt(flags['max-bytes'], 10) : undefined;
+  const dangerDisableSsrf = flags['danger-disable-ssrf'] === true;
+  if (dangerDisableSsrf) {
+    console.error('[apitap] WARNING: SSRF protection is disabled via --danger-disable-ssrf');
+  }
 
   const result = await replayEndpoint(skill, endpointId, {
     params: Object.keys(params).length > 0 ? params : undefined,
@@ -424,7 +438,7 @@ async function handleReplay(positional: string[], flags: Record<string, string |
     domain,
     fresh,
     maxBytes,
-    _skipSsrfCheck: process.env.APITAP_SKIP_SSRF_CHECK === '1',
+    _skipSsrfCheck: dangerDisableSsrf,
   });
 
   if (json) {
@@ -493,7 +507,8 @@ async function handleRefresh(positional: string[], flags: Record<string, string 
     process.exit(1);
   }
 
-  const skill = await readSkillFile(domain, SKILLS_DIR);
+  const trustUnsigned = flags['trust-unsigned'] === true;
+  const skill = await readSkillFile(domain, SKILLS_DIR, { trustUnsigned });
   if (!skill) {
     console.error(`Error: No skill file found for "${domain}".`);
     process.exit(1);
@@ -597,8 +612,8 @@ async function handleAuth(positional: string[], flags: Record<string, string | b
     }
   }
 
-  // Read skill file for OAuth config (non-secret)
-  const skill = await readSkillFile(domain, SKILLS_DIR);
+  // Read skill file for OAuth config (non-secret) — trustUnsigned for display only
+  const skill = await readSkillFile(domain, SKILLS_DIR, { trustUnsigned: true });
   const oauthConfig = skill?.auth?.oauthConfig;
 
   const status = {
@@ -660,7 +675,7 @@ async function handleServe(positional: string[], flags: Record<string, string | 
     });
 
     // Print tool list to stderr (stdout is the MCP transport)
-    const skill = await readSkillFile(domain, SKILLS_DIR);
+    const skill = await readSkillFile(domain, SKILLS_DIR, { trustUnsigned: true });
     const tools = buildServeTools(skill!);
 
     if (json) {
@@ -682,10 +697,13 @@ async function handleServe(positional: string[], flags: Record<string, string | 
   }
 }
 
-async function handleMcp(): Promise<void> {
+async function handleMcp(flags: Record<string, string | boolean>): Promise<void> {
+  if (flags['danger-disable-ssrf'] === true) {
+    console.error('[apitap] WARNING: SSRF protection is disabled via --danger-disable-ssrf');
+  }
   const server = createMcpServer({
     skillsDir: SKILLS_DIR,
-    _skipSsrfCheck: process.env.APITAP_SKIP_SSRF_CHECK === '1',
+    _skipSsrfCheck: flags['danger-disable-ssrf'] === true,
   });
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
   const transport = new StdioServerTransport();
@@ -708,6 +726,16 @@ async function handleInspect(positional: string[], flags: Record<string, string 
   if (!url) {
     console.error('Usage: apitap inspect <url>');
     process.exit(1);
+  }
+
+  // SSRF validation for CLI (H6 fix)
+  const fullInspectUrl = url.startsWith('http') ? url : `https://${url}`;
+  if (flags['danger-disable-ssrf'] !== true) {
+    const ssrfCheck = await resolveAndValidateUrl(fullInspectUrl);
+    if (!ssrfCheck.safe) {
+      console.error(`Error: URL blocked (SSRF): ${ssrfCheck.reason}`);
+      process.exit(1);
+    }
   }
 
   const json = flags.json === true;
@@ -798,6 +826,20 @@ async function handleDiscover(positional: string[], flags: Record<string, string
 
   const json = flags.json === true;
   const save = flags.save === true;
+
+  // SSRF validation for CLI (H6 fix)
+  const fullDiscoverUrl = url.startsWith('http') ? url : `https://${url}`;
+  if (flags['danger-disable-ssrf'] !== true) {
+    const ssrfCheck = await resolveAndValidateUrl(fullDiscoverUrl);
+    if (!ssrfCheck.safe) {
+      if (json) {
+        console.log(JSON.stringify({ error: `URL blocked (SSRF): ${ssrfCheck.reason}` }));
+      } else {
+        console.error(`Error: URL blocked (SSRF): ${ssrfCheck.reason}`);
+      }
+      process.exit(1);
+    }
+  }
 
   if (!json) {
     console.log(`\n  Discovering APIs for ${url}...\n`);
@@ -902,7 +944,7 @@ async function handleBrowse(positional: string[], flags: Record<string, string |
     skillsDir: SKILLS_DIR,
     cache: new SessionCache(),
     maxBytes,
-    _skipSsrfCheck: process.env.APITAP_SKIP_SSRF_CHECK === '1',
+    _skipSsrfCheck: flags['danger-disable-ssrf'] === true,
   });
 
   if (json) {
@@ -932,6 +974,15 @@ async function handlePeek(positional: string[], flags: Record<string, string | b
 
   const json = flags.json === true;
   const fullUrl = url.startsWith('http') ? url : `https://${url}`;
+
+  // SSRF validation for CLI (H6 fix)
+  if (flags['danger-disable-ssrf'] !== true) {
+    const ssrfCheck = await resolveAndValidateUrl(fullUrl);
+    if (!ssrfCheck.safe) {
+      console.error(`Error: URL blocked (SSRF): ${ssrfCheck.reason}`);
+      process.exit(1);
+    }
+  }
 
   if (!json) {
     console.log(`\n  Peeking at ${url}...\n`);
@@ -963,6 +1014,15 @@ async function handleRead(positional: string[], flags: Record<string, string | b
   const json = flags.json === true;
   const fullUrl = url.startsWith('http') ? url : `https://${url}`;
   const maxBytes = typeof flags['max-bytes'] === 'string' ? parseInt(flags['max-bytes'], 10) : undefined;
+
+  // SSRF validation for CLI (H6 fix)
+  if (flags['danger-disable-ssrf'] !== true) {
+    const ssrfCheck = await resolveAndValidateUrl(fullUrl);
+    if (!ssrfCheck.safe) {
+      console.error(`Error: URL blocked (SSRF): ${ssrfCheck.reason}`);
+      process.exit(1);
+    }
+  }
 
   if (!json) {
     console.log(`\n  Reading ${url}...\n`);
@@ -1073,7 +1133,7 @@ async function main(): Promise<void> {
       await handleServe(positional, flags);
       break;
     case 'mcp':
-      await handleMcp();
+      await handleMcp(flags);
       break;
     case 'inspect':
       await handleInspect(positional, flags);

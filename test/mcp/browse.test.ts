@@ -8,6 +8,9 @@ import type { AddressInfo } from 'node:net';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { writeSkillFile } from '../../src/skill/store.js';
+import { signSkillFile } from '../../src/skill/signing.js';
+import { deriveSigningKey } from '../../src/auth/crypto.js';
+import { getMachineId } from '../../src/auth/manager.js';
 import type { SkillFile } from '../../src/types.js';
 import { createMcpServer } from '../../src/mcp.js';
 
@@ -53,9 +56,11 @@ describe('apitap_browse via MCP', () => {
     await new Promise<void>(r => httpServer.listen(0, r));
     const port = (httpServer.address() as AddressInfo).port;
 
-    await writeSkillFile(makeSkill('browse-test.example.com', `http://localhost:${port}`, [
+    const machineId = await getMachineId();
+    const sigKey = deriveSigningKey(machineId);
+    await writeSkillFile(signSkillFile(makeSkill('localhost', `http://localhost:${port}`, [
       { id: 'get-api-search', method: 'GET', path: '/api/search' },
-    ]), testDir);
+    ]), sigKey), testDir);
 
     const server = createMcpServer({ skillsDir: testDir, _skipSsrfCheck: true });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -87,12 +92,12 @@ describe('apitap_browse via MCP', () => {
   it('browses known domain and returns data', async () => {
     const result = await client.callTool({
       name: 'apitap_browse',
-      arguments: { url: 'http://browse-test.example.com/api/search' },
+      arguments: { url: 'http://localhost/api/search' },
     });
     assert.equal(result.isError, undefined);
     const data = JSON.parse((result.content as any)[0].text);
     assert.equal(data.success, true);
-    assert.equal(data.domain, 'browse-test.example.com');
+    assert.equal(data.domain, 'localhost');
     assert.ok(data.data);
     assert.equal(data.skillSource, 'disk');
   });
@@ -112,7 +117,7 @@ describe('apitap_browse via MCP', () => {
   it('passes task through', async () => {
     const result = await client.callTool({
       name: 'apitap_browse',
-      arguments: { url: 'http://browse-test.example.com', task: 'find items' },
+      arguments: { url: 'http://localhost', task: 'find items' },
     });
     const data = JSON.parse((result.content as any)[0].text);
     assert.equal(data.task, 'find items');

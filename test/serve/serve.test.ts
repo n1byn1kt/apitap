@@ -132,7 +132,7 @@ describe('createServeServer', () => {
     const port = (httpServer.address() as AddressInfo).port;
     const baseUrl = `http://localhost:${port}`;
 
-    await writeSkillFile(makeSkill('test-api.example.com', baseUrl, [{
+    await writeSkillFile(makeSkill('localhost', baseUrl, [{
       id: 'get-trending',
       method: 'GET',
       path: '/trending',
@@ -142,7 +142,7 @@ describe('createServeServer', () => {
       examples: { request: { url: `${baseUrl}/trending`, headers: {} }, responsePreview: null },
     }]), testDir);
 
-    const server = await createServeServer('test-api.example.com', { skillsDir: testDir, noAuth: true, _skipSsrfCheck: true });
+    const server = await createServeServer('localhost', { skillsDir: testDir, noAuth: true, trustUnsigned: true, _skipSsrfCheck: true });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     client = new Client({ name: 'test-client', version: '1.0.0' });
     await server.connect(serverTransport);
@@ -162,12 +162,12 @@ describe('createServeServer', () => {
   it('registers one tool per endpoint', async () => {
     const { tools } = await client.listTools();
     assert.equal(tools.length, 1);
-    assert.equal(tools[0].name, 'test-api.example.com_get-trending');
+    assert.equal(tools[0].name, 'localhost_get-trending');
   });
 
   it('tool call returns live API data', async () => {
     const result = await client.callTool({
-      name: 'test-api.example.com_get-trending',
+      name: 'localhost_get-trending',
       arguments: {},
     });
     assert.equal(result.isError, undefined);

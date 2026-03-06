@@ -305,7 +305,7 @@ describe('E2E: Auth Refresh Flow', () => {
     await writeSkillFile(skill, testDir);
 
     // Read it back
-    const loaded = await readSkillFile('test-domain.example.com', testDir);
+    const loaded = await readSkillFile('test-domain.example.com', testDir, { trustUnsigned: true });
 
     assert.ok(loaded, 'should load skill file');
     assert.ok(loaded?.auth, 'should preserve auth config');

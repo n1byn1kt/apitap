@@ -73,8 +73,12 @@ export function validateUrl(urlString: string): ValidationResult {
     return { safe: false, reason: `URL targets IPv6 unique-local address: ${hostname}` };
   }
 
-  // IPv4 private ranges
-  const ipv4Match = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  // Normalize IP representations: decimal integer, octal, hex → dotted-decimal (M17 fix)
+  const normalizedIp = normalizeIpv4(hostname);
+  const ipToCheck = normalizedIp ?? hostname;
+
+  // IPv4 private/reserved ranges (M16: added CGNAT, IETF, benchmarking, reserved)
+  const ipv4Match = ipToCheck.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (ipv4Match) {
     const [, a, b] = ipv4Match.map(Number);
     const first = Number(a);
@@ -104,9 +108,68 @@ export function validateUrl(urlString: string): ValidationResult {
     if (first === 169 && second === 254) {
       return { safe: false, reason: `URL targets link-local address: ${hostname}` };
     }
+    // 100.64.0.0/10 — CGNAT (RFC 6598), used in cloud/Tailscale
+    if (first === 100 && second >= 64 && second <= 127) {
+      return { safe: false, reason: `URL targets CGNAT address: ${hostname}` };
+    }
+    // 192.0.0.0/24 — IETF Protocol Assignments (RFC 6890)
+    if (first === 192 && second === 0 && Number(ipv4Match[3]) === 0) {
+      return { safe: false, reason: `URL targets IETF reserved address: ${hostname}` };
+    }
+    // 198.18.0.0/15 — Benchmarking (RFC 2544)
+    if (first === 198 && (second === 18 || second === 19)) {
+      return { safe: false, reason: `URL targets benchmarking address: ${hostname}` };
+    }
+    // 240.0.0.0/4 — Reserved/future use
+    if (first >= 240) {
+      return { safe: false, reason: `URL targets reserved address: ${hostname}` };
+    }
   }
 
   return { safe: true };
+}
+
+/**
+ * Normalize alternative IPv4 representations to dotted-decimal.
+ * Handles decimal integer (2130706433), octal (0177.0.0.1), and hex (0x7f.0.0.1).
+ * Returns null if hostname is not an IP address or can't be parsed.
+ */
+function normalizeIpv4(hostname: string): string | null {
+  // Already standard dotted-decimal
+  if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
+    return hostname;
+  }
+
+  // Pure decimal integer (e.g. 2130706433 = 127.0.0.1)
+  if (/^\d+$/.test(hostname)) {
+    const num = parseInt(hostname, 10);
+    if (num >= 0 && num <= 0xFFFFFFFF) {
+      return `${(num >>> 24) & 0xFF}.${(num >>> 16) & 0xFF}.${(num >>> 8) & 0xFF}.${num & 0xFF}`;
+    }
+  }
+
+  // Dotted with octal (0-prefixed) or hex (0x-prefixed) octets
+  const parts = hostname.split('.');
+  if (parts.length === 4) {
+    const octets: number[] = [];
+    for (const part of parts) {
+      let val: number;
+      if (/^0x[0-9a-f]+$/i.test(part)) {
+        val = parseInt(part, 16);
+      } else if (/^0[0-7]+$/.test(part)) {
+        val = parseInt(part, 8);
+      } else if (/^\d+$/.test(part)) {
+        val = parseInt(part, 10);
+      } else {
+        return null; // Not an IP
+      }
+      if (val < 0 || val > 255) return null;
+      octets.push(val);
+    }
+    return octets.join('.');
+  }
+
+  return null;
 }
 
 /**
@@ -148,6 +211,10 @@ function isPrivateIp(ip: string): string | null {
   if (first === 192 && second === 168) return 'private (192.168.x)';
   if (first === 169 && second === 254) return 'link-local';
   if (first === 0) return 'unspecified';
+  // M16: additional reserved ranges
+  if (first === 100 && second >= 64 && second <= 127) return 'CGNAT (100.64/10)';
+  if (first === 198 && (second === 18 || second === 19)) return 'benchmarking (198.18/15)';
+  if (first >= 240) return 'reserved (240/4)';
 
   return null;
 }

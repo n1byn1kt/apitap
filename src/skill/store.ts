@@ -37,7 +37,7 @@ export async function writeSkillFile(
   skill: SkillFile,
   skillsDir: string = DEFAULT_SKILLS_DIR,
 ): Promise<string> {
-  await mkdir(skillsDir, { recursive: true });
+  await mkdir(skillsDir, { recursive: true, mode: 0o700 });
   await ensureGitignore(skillsDir);
   const filePath = skillPath(skill.domain, skillsDir);
   await writeFile(filePath, JSON.stringify(skill, null, 2) + '\n', { mode: 0o600 });

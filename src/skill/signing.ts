@@ -9,7 +9,26 @@ import type { SkillFile } from '../types.js';
  */
 export function canonicalize(skill: SkillFile): string {
   const { signature: _sig, provenance: _prov, ...rest } = skill;
-  return JSON.stringify(rest, Object.keys(rest).sort());
+  return JSON.stringify(sortKeysDeep(rest));
+}
+
+/**
+ * Recursively sort all object keys for stable canonicalization (M10 fix).
+ * Ensures identical skill files always produce the same canonical string
+ * regardless of key insertion order at any nesting level.
+ */
+function sortKeysDeep(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(sortKeysDeep);
+  }
+  if (value !== null && typeof value === 'object') {
+    const sorted: Record<string, unknown> = {};
+    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+      sorted[key] = sortKeysDeep((value as Record<string, unknown>)[key]);
+    }
+    return sorted;
+  }
+  return value;
 }
 
 /**

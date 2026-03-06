@@ -198,8 +198,20 @@ async function doHandoff(
     let detectedOAuth: OAuthTokenDetection | undefined;
     let latestCookies: Array<{ name: string; value: string; domain: string; path: string; expires: number; httpOnly: boolean; secure: boolean; sameSite: 'Strict' | 'Lax' | 'None' }> = [];
 
+    // M13 fix: Only capture auth from requests targeting the handoff domain
+    const targetDomain = domain;
+
     // Watch network responses for auth signals (bearer tokens, API keys, OAuth tokens)
     page.on('response', async (response) => {
+      // M13: Filter by request origin — only capture auth from target domain
+      let reqHost: string;
+      try {
+        reqHost = new URL(response.request().url()).hostname;
+      } catch { return; }
+      if (reqHost !== targetDomain && !reqHost.endsWith('.' + targetDomain)) {
+        return; // Skip cross-origin requests
+      }
+
       const reqHeaders = response.request().headers();
 
       // Detect auth from request headers
@@ -279,7 +291,13 @@ async function doHandoff(
       // Browser disconnected — use last snapshot from interval
     }
 
-    const cookies = latestCookies;
+    // M4 fix: Filter cookies to only the target domain and its subdomains
+    const cookies = latestCookies.filter(c => {
+      const cookieDomain = (c.domain || '').replace(/^\./, ''); // Remove leading dot
+      return cookieDomain === domain ||
+        cookieDomain.endsWith('.' + domain) ||
+        domain.endsWith('.' + cookieDomain);
+    });
 
     if (cookies.length === 0 && !authDetected) {
       return {

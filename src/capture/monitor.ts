@@ -34,6 +34,10 @@ export interface CaptureResult {
   domBytes?: number; // v1.0: measured DOM size for browser cost comparison
 }
 
+// SECURITY NOTE (M9): CDP connections use unauthenticated HTTP on localhost.
+// Any local process can connect to the same port. This is a known limitation of
+// Chrome DevTools Protocol. Prefer Playwright's built-in launch over connecting
+// to an existing browser when possible. Never expose CDP ports on non-loopback interfaces.
 const DEFAULT_CDP_PORTS = [18792, 18800, 9222];
 const APITAP_DIR = process.env.APITAP_DIR || join(homedir(), '.apitap');
 

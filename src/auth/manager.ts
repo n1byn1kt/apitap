@@ -157,7 +157,7 @@ export class AuthManager {
 
   private async saveAll(data: Record<string, StoredAuth>): Promise<void> {
     const dir = join(this.authPath, '..');
-    await mkdir(dir, { recursive: true });
+    await mkdir(dir, { recursive: true, mode: 0o700 });
 
     const plaintext = JSON.stringify(data);
     const encrypted = encrypt(plaintext, this.key);
@@ -201,13 +201,30 @@ export function getParentDomains(domain: string): string[] {
  * Fallback: hostname + homedir (less secure but portable)
  */
 export async function getMachineId(): Promise<string> {
+  // Allow override for testing
+  if (process.env.APITAP_MACHINE_ID) {
+    return process.env.APITAP_MACHINE_ID;
+  }
+
   try {
     const id = await readFile('/etc/machine-id', 'utf-8');
     return id.trim();
   } catch {
-    // Fallback for non-Linux systems
-    const { hostname } = await import('node:os');
-    const { homedir } = await import('node:os');
-    return `${hostname()}-${homedir()}`;
+    // M1 fix: generate a random per-install ID instead of hostname+homedir
+    const { homedir: hd } = await import('node:os');
+    const installIdPath = join(hd(), '.apitap', 'install-id');
+    try {
+      const existing = await readFile(installIdPath, 'utf-8');
+      return existing.trim();
+    } catch {
+      // Generate and save new random ID
+      const { randomBytes } = await import('node:crypto');
+      const newId = randomBytes(32).toString('hex');
+      try {
+        await mkdir(join(hd(), '.apitap'), { recursive: true, mode: 0o700 });
+        await writeFile(installIdPath, newId, { mode: 0o600 });
+      } catch { /* best effort save — use the generated ID anyway */ }
+      return newId;
+    }
   }
 }

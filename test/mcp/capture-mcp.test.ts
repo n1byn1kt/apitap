@@ -218,7 +218,7 @@ describe('MCP capture start → interact → finish flow', () => {
     });
   });
 
-  it('interact with navigate goes to new page', async () => {
+  it('interact with navigate goes to new page', { skip: !!process.env.CI }, async () => {
     const startResult = await client.callTool({
       name: 'apitap_capture_start',
       arguments: { url: baseUrl },

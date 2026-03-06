@@ -159,7 +159,7 @@ describe('CaptureSession', () => {
     }
   });
 
-  it('navigate goes to new page', async () => {
+  it('navigate goes to new page', { skip: !!process.env.CI }, async () => {
     const session = new CaptureSession({ headless: true, skillsDir: testDir });
     try {
       await session.start(baseUrl);

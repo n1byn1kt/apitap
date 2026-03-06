@@ -118,7 +118,7 @@ describe('end-to-end: capture → skill file → replay', () => {
 
     // 7. Write and re-read skill file
     await writeSkillFile(skill, testDir);
-    const loaded = await readSkillFile(domain, testDir);
+    const loaded = await readSkillFile(domain, testDir, { signingKey: key });
     assert.ok(loaded, 'Skill file should be readable');
     assert.equal(loaded!.endpoints.length, skill.endpoints.length);
     assert.equal(loaded!.provenance, 'self');

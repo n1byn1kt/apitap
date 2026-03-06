@@ -8,6 +8,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeSkillFile } from '../../src/skill/store.js';
 import { createPlugin } from '../../src/plugin.js';
+import { signSkillFile } from '../../src/skill/signing.js';
+import { deriveSigningKey } from '../../src/auth/crypto.js';
+import { getMachineId } from '../../src/auth/manager.js';
 import type { SkillFile } from '../../src/types.js';
 
 describe('end-to-end: search → replay via plugin', () => {
@@ -46,10 +49,13 @@ describe('end-to-end: search → replay via plugin', () => {
 
     testDir = await mkdtemp(join(tmpdir(), 'apitap-e2e-search-'));
 
-    // Write skill file matching the test server
+    const machineId = await getMachineId();
+    const sigKey = deriveSigningKey(machineId);
+
+    // Write skill file matching the test server (domain must match baseUrl hostname)
     const skill: SkillFile = {
       version: '1.2',
-      domain: 'gamma-api.polymarket.com',
+      domain: 'localhost',
       capturedAt: '2026-02-04T12:00:00.000Z',
       baseUrl,
       endpoints: [
@@ -75,9 +81,9 @@ describe('end-to-end: search → replay via plugin', () => {
         },
       ],
       metadata: { captureCount: 5, filteredCount: 20, toolVersion: '0.4.0' },
-      provenance: 'self',
-    };
-    await writeSkillFile(skill, testDir);
+      provenance: 'unsigned',
+    } as SkillFile;
+    await writeSkillFile(signSkillFile(skill, sigKey), testDir);
   });
 
   after(async () => {
@@ -90,13 +96,13 @@ describe('end-to-end: search → replay via plugin', () => {
     const search = plugin.tools.find(t => t.name === 'apitap_search')!;
     const replay = plugin.tools.find(t => t.name === 'apitap_replay')!;
 
-    // Step 1: Agent searches for polymarket
-    const searchResult: any = await search.execute({ query: 'polymarket events' });
-    assert.ok(searchResult.found, 'Should find polymarket skill');
+    // Step 1: Agent searches for events
+    const searchResult: any = await search.execute({ query: 'events' });
+    assert.ok(searchResult.found, 'Should find skill with events endpoint');
     assert.equal(searchResult.results.length, 1);
 
     const found = searchResult.results[0];
-    assert.equal(found.domain, 'gamma-api.polymarket.com');
+    assert.equal(found.domain, 'localhost');
     assert.equal(found.endpointId, 'get-events');
     assert.equal(found.tier, 'green');
 
@@ -118,7 +124,7 @@ describe('end-to-end: search → replay via plugin', () => {
     const searchResult: any = await search.execute({ query: 'hacker-news' });
     assert.equal(searchResult.found, false);
     assert.ok(searchResult.suggestion);
-    assert.ok(searchResult.suggestion.includes('gamma-api.polymarket.com'));
+    assert.ok(searchResult.suggestion.includes('localhost'));
   });
 
   it('agent workflow: search → replay with params', async () => {

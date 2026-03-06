@@ -156,10 +156,10 @@ describe('apitap_replay tool execute', () => {
     const port = (server.address() as any).port;
     baseUrl = `http://localhost:${port}`;
 
-    // Write a skill file pointing at our test server
+    // Write a skill file pointing at our test server (domain must match baseUrl hostname)
     const skill: SkillFile = {
       version: '1.2',
-      domain: 'test-api.example.com',
+      domain: 'localhost',
       capturedAt: '2026-02-04T12:00:00.000Z',
       baseUrl,
       endpoints: [{
@@ -190,7 +190,7 @@ describe('apitap_replay tool execute', () => {
     const plugin = createPlugin({ skillsDir: testDir, _skipSsrfCheck: true });
     const replay = plugin.tools.find(t => t.name === 'apitap_replay')!;
     const result: any = await replay.execute({
-      domain: 'test-api.example.com',
+      domain: 'localhost',
       endpointId: 'get-events',
     });
     assert.equal(result.status, 200);
@@ -213,7 +213,7 @@ describe('apitap_replay tool execute', () => {
     const plugin = createPlugin({ skillsDir: testDir });
     const replay = plugin.tools.find(t => t.name === 'apitap_replay')!;
     const result: any = await replay.execute({
-      domain: 'test-api.example.com',
+      domain: 'localhost',
       endpointId: 'nonexistent',
     });
     assert.ok(result.error);

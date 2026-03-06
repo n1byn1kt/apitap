@@ -9,6 +9,9 @@ import type { AddressInfo } from 'node:net';
 import { browse } from '../../src/orchestration/browse.js';
 import { SessionCache } from '../../src/orchestration/cache.js';
 import { writeSkillFile } from '../../src/skill/store.js';
+import { signSkillFile } from '../../src/skill/signing.js';
+import { deriveSigningKey } from '../../src/auth/crypto.js';
+import { getMachineId } from '../../src/auth/manager.js';
 import type { SkillFile } from '../../src/types.js';
 
 function makeSkill(domain: string, baseUrl: string, endpoints: Array<{ id: string; method: string; path: string; tier?: string }>): SkillFile {
@@ -68,40 +71,44 @@ describe('browse orchestration', () => {
   });
 
   it('replays from existing skill file on disk', async () => {
-    await writeSkillFile(makeSkill('test.example.com', baseUrl, [
+    const machineId = await getMachineId();
+    const sigKey = deriveSigningKey(machineId);
+    await writeSkillFile(signSkillFile(makeSkill('localhost', baseUrl, [
       { id: 'get-api-search', method: 'GET', path: '/api/search' },
-    ]), testDir);
+    ]), sigKey), testDir);
 
     const cache = new SessionCache();
-    const result = await browse('http://test.example.com/api/search', {
+    const result = await browse('http://localhost/api/search', {
       skillsDir: testDir,
       cache,
       _skipSsrfCheck: true,
     });
 
     assert.equal(result.success, true);
-    assert.equal(result.domain, 'test.example.com');
+    assert.equal(result.domain, 'localhost');
     assert.ok(result.success && result.data);
     assert.equal(result.success && result.skillSource, 'disk');
   });
 
   it('uses session cache on second call', async () => {
-    await writeSkillFile(makeSkill('test.example.com', baseUrl, [
+    const machineId = await getMachineId();
+    const sigKey = deriveSigningKey(machineId);
+    await writeSkillFile(signSkillFile(makeSkill('localhost', baseUrl, [
       { id: 'get-api-items', method: 'GET', path: '/api/items' },
-    ]), testDir);
+    ]), sigKey), testDir);
 
     const cache = new SessionCache();
 
     // First call populates cache
-    await browse('http://test.example.com/api/items', {
+    await browse('http://localhost/api/items', {
       skillsDir: testDir,
       cache,
       _skipSsrfCheck: true,
     });
-    assert.ok(cache.has('test.example.com'));
+    assert.ok(cache.has('localhost'));
 
     // Second call uses cache
-    const result = await browse('http://test.example.com/api/items', {
+    const result = await browse('http://localhost/api/items', {
       skillsDir: testDir,
       cache,
       _skipSsrfCheck: true,
@@ -125,12 +132,14 @@ describe('browse orchestration', () => {
   });
 
   it('passes task through in response', async () => {
-    await writeSkillFile(makeSkill('test.example.com', baseUrl, [
+    const machineId = await getMachineId();
+    const sigKey = deriveSigningKey(machineId);
+    await writeSkillFile(signSkillFile(makeSkill('localhost', baseUrl, [
       { id: 'get-api-items', method: 'GET', path: '/api/items' },
-    ]), testDir);
+    ]), sigKey), testDir);
 
     const cache = new SessionCache();
-    const result = await browse('http://test.example.com', {
+    const result = await browse('http://localhost', {
       skillsDir: testDir,
       cache,
       task: 'find apartments',
@@ -141,13 +150,15 @@ describe('browse orchestration', () => {
   });
 
   it('prefers endpoint matching URL path', async () => {
-    await writeSkillFile(makeSkill('test.example.com', baseUrl, [
+    const machineId = await getMachineId();
+    const sigKey = deriveSigningKey(machineId);
+    await writeSkillFile(signSkillFile(makeSkill('localhost', baseUrl, [
       { id: 'get-api-items', method: 'GET', path: '/api/items' },
       { id: 'get-api-search', method: 'GET', path: '/api/search' },
-    ]), testDir);
+    ]), sigKey), testDir);
 
     const cache = new SessionCache();
-    const result = await browse('http://test.example.com/api/search', {
+    const result = await browse('http://localhost/api/search', {
       skillsDir: testDir,
       cache,
       _skipSsrfCheck: true,
@@ -158,13 +169,15 @@ describe('browse orchestration', () => {
   });
 
   it('skips red-tier endpoints', async () => {
-    await writeSkillFile(makeSkill('test.example.com', baseUrl, [
+    const machineId = await getMachineId();
+    const sigKey = deriveSigningKey(machineId);
+    await writeSkillFile(signSkillFile(makeSkill('localhost', baseUrl, [
       { id: 'get-api-search', method: 'GET', path: '/api/search', tier: 'red' },
       { id: 'get-api-items', method: 'GET', path: '/api/items', tier: 'green' },
-    ]), testDir);
+    ]), sigKey), testDir);
 
     const cache = new SessionCache();
-    const result = await browse('http://test.example.com', {
+    const result = await browse('http://localhost', {
       skillsDir: testDir,
       cache,
       _skipSsrfCheck: true,
@@ -183,12 +196,14 @@ describe('browse orchestration', () => {
     await new Promise<void>(r => htmlServer.listen(0, r));
     const htmlBaseUrl = `http://localhost:${(htmlServer.address() as AddressInfo).port}`;
 
-    await writeSkillFile(makeSkill('html-site.example.com', htmlBaseUrl, [
+    const machineId = await getMachineId();
+    const sigKey = deriveSigningKey(machineId);
+    await writeSkillFile(signSkillFile(makeSkill('localhost', htmlBaseUrl, [
       { id: 'get-api-docs', method: 'GET', path: '/api/docs' },
-    ]), testDir);
+    ]), sigKey), testDir);
 
     const cache = new SessionCache();
-    const result = await browse('http://html-site.example.com', {
+    const result = await browse('http://localhost', {
       skillsDir: testDir,
       cache,
       _skipSsrfCheck: true,
@@ -273,7 +288,7 @@ describe('browse with bridge escalation', () => {
       ])],
     }));
 
-    const result = await browse('http://bridge-test.example.com/api/data', {
+    const result = await browse('http://localhost/api/data', {
       skillsDir: testDir,
       skipDiscovery: true,
       _skipSsrfCheck: true,
@@ -282,7 +297,7 @@ describe('browse with bridge escalation', () => {
 
     assert.equal(result.success, true);
     if (result.success) {
-      assert.equal(result.domain, 'bridge-test.example.com');
+      assert.equal(result.domain, 'localhost');
       assert.equal(result.skillSource, 'bridge');
       assert.ok(result.data);
     }

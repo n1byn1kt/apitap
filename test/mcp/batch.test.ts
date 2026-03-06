@@ -8,6 +8,9 @@ import type { AddressInfo } from 'node:net';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { writeSkillFile } from '../../src/skill/store.js';
+import { signSkillFile } from '../../src/skill/signing.js';
+import { deriveSigningKey } from '../../src/auth/crypto.js';
+import { getMachineId } from '../../src/auth/manager.js';
 import type { SkillFile } from '../../src/types.js';
 import { createMcpServer } from '../../src/mcp.js';
 
@@ -37,38 +40,31 @@ function makeSkill(domain: string, baseUrl: string, endpoints: Array<{ id: strin
 
 describe('apitap_replay_batch via MCP', () => {
   let testDir: string;
-  let serverA: Server;
-  let serverB: Server;
+  let httpServer: Server;
   let client: Client;
   let cleanup: () => Promise<void>;
 
   beforeEach(async () => {
     testDir = await mkdtemp(join(tmpdir(), 'apitap-mcp-batch-'));
 
-    serverA = createHttpServer((req, res) => {
+    httpServer = createHttpServer((req, res) => {
       if (req.url === '/items') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify([{ id: 1 }]));
-      } else { res.writeHead(404); res.end(); }
-    });
-    await new Promise<void>(r => serverA.listen(0, r));
-    const portA = (serverA.address() as AddressInfo).port;
-
-    serverB = createHttpServer((req, res) => {
-      if (req.url === '/data') {
+      } else if (req.url === '/data') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ value: 99 }));
       } else { res.writeHead(404); res.end(); }
     });
-    await new Promise<void>(r => serverB.listen(0, r));
-    const portB = (serverB.address() as AddressInfo).port;
+    await new Promise<void>(r => httpServer.listen(0, r));
+    const port = (httpServer.address() as AddressInfo).port;
 
-    await writeSkillFile(makeSkill('site-a.test', `http://localhost:${portA}`, [
+    const machineId = await getMachineId();
+    const sigKey = deriveSigningKey(machineId);
+    await writeSkillFile(signSkillFile(makeSkill('localhost', `http://localhost:${port}`, [
       { id: 'get-items', method: 'GET', path: '/items' },
-    ]), testDir);
-    await writeSkillFile(makeSkill('site-b.test', `http://localhost:${portB}`, [
       { id: 'get-data', method: 'GET', path: '/data' },
-    ]), testDir);
+    ]), sigKey), testDir);
 
     const server = createMcpServer({ skillsDir: testDir, _skipSsrfCheck: true });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -83,8 +79,7 @@ describe('apitap_replay_batch via MCP', () => {
 
   afterEach(async () => {
     await cleanup();
-    await new Promise<void>(r => serverA.close(() => r()));
-    await new Promise<void>(r => serverB.close(() => r()));
+    await new Promise<void>(r => httpServer.close(() => r()));
     await rm(testDir, { recursive: true, force: true });
   });
 
@@ -95,13 +90,13 @@ describe('apitap_replay_batch via MCP', () => {
     assert.equal(batch.annotations?.readOnlyHint, true);
   });
 
-  it('replays multiple domains in one call', async () => {
+  it('replays multiple endpoints in one call', async () => {
     const result = await client.callTool({
       name: 'apitap_replay_batch',
       arguments: {
         requests: [
-          { domain: 'site-a.test', endpointId: 'get-items' },
-          { domain: 'site-b.test', endpointId: 'get-data' },
+          { domain: 'localhost', endpointId: 'get-items' },
+          { domain: 'localhost', endpointId: 'get-data' },
         ],
       },
     });
@@ -120,7 +115,7 @@ describe('apitap_replay_batch via MCP', () => {
       name: 'apitap_replay_batch',
       arguments: {
         requests: [
-          { domain: 'site-a.test', endpointId: 'get-items' },
+          { domain: 'localhost', endpointId: 'get-items' },
           { domain: 'missing.test', endpointId: 'get-stuff' },
         ],
       },

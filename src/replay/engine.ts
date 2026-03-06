@@ -140,6 +140,41 @@ function normalizeOptions(
 }
 
 /**
+ * Check if redirect host is safe to send auth to.
+ * Allows exact match or single-level subdomain only (H4 fix).
+ */
+function isSafeAuthRedirectHost(originalHost: string, redirectHost: string): boolean {
+  if (redirectHost === originalHost) return true;
+  if (redirectHost.endsWith('.' + originalHost)) {
+    const prefix = redirectHost.slice(0, -(originalHost.length + 1));
+    // Only allow single-level subdomain (no dots in prefix)
+    return !prefix.includes('.');
+  }
+  return false;
+}
+
+/**
+ * Strip auth headers from redirect request if cross-domain (H4 fix).
+ * Shared between initial and retry redirect paths.
+ */
+function stripAuthForRedirect(
+  headers: Record<string, string>,
+  originalHost: string,
+  redirectHost: string,
+): Record<string, string> {
+  const redirectHeaders = { ...headers };
+  if (!isSafeAuthRedirectHost(originalHost, redirectHost)) {
+    delete redirectHeaders['authorization'];
+    for (const key of Object.keys(redirectHeaders)) {
+      if (key.toLowerCase() === 'authorization' || redirectHeaders[key] === '[stored]') {
+        delete redirectHeaders[key];
+      }
+    }
+  }
+  return redirectHeaders;
+}
+
+/**
  * Wrap a 401/403 response with structured auth guidance.
  */
 function wrapAuthError(
@@ -234,6 +269,19 @@ export async function replayEndpoint(
     } else {
       // Sanitize CRLF from header values to prevent header injection
       headers[key] = headers[key].replace(/[\r\n]/g, '');
+    }
+  }
+
+  // Domain-lock: verify request URL matches skill domain before injecting auth (C1 fix).
+  // validateSkillFile() enforces baseUrl-domain consistency at load time.
+  // This is defense-in-depth for manually-constructed SkillFile objects.
+  if (authManager && domain && !options._skipSsrfCheck) {
+    const fetchHost = url.hostname;
+    if (fetchHost !== skill.domain && !fetchHost.endsWith('.' + skill.domain)) {
+      throw new Error(
+        `Domain-lock violation: request host "${fetchHost}" does not match skill domain "${skill.domain}". ` +
+        `Auth injection blocked to prevent credential exfiltration.`
+      );
     }
   }
 
@@ -388,18 +436,8 @@ export async function replayEndpoint(
           throw new Error(`Redirect blocked (SSRF): ${redirectCheck.reason}`);
         }
       }
-      // Strip auth headers before cross-domain redirect
-      const redirectHeaders = { ...headers };
-      const originalHost = url.hostname;
-      const redirectHost = redirectUrl.hostname;
-      if (redirectHost !== originalHost && !redirectHost.endsWith('.' + originalHost)) {
-        delete redirectHeaders['authorization'];
-        for (const key of Object.keys(redirectHeaders)) {
-          if (key.toLowerCase() === 'authorization' || redirectHeaders[key] === '[stored]') {
-            delete redirectHeaders[key];
-          }
-        }
-      }
+      // Strip auth headers before cross-domain redirect (uses shared function)
+      const redirectHeaders = stripAuthForRedirect(headers, url.hostname, redirectUrl.hostname);
       // Follow the redirect manually (single hop to prevent chains)
       response = await fetch(redirectFetchUrl, {
         method: 'GET',  // Redirects typically become GET
@@ -437,7 +475,7 @@ export async function replayEndpoint(
         redirect: 'manual',
       });
 
-      // Handle redirects on retry (single hop)
+      // Handle redirects on retry (single hop) — with auth stripping (H4 fix)
       if (retryResponse.status >= 300 && retryResponse.status < 400) {
         const location = retryResponse.headers.get('location');
         if (location) {
@@ -449,9 +487,11 @@ export async function replayEndpoint(
               throw new Error(`Redirect blocked (SSRF): ${redirectCheck.reason}`);
             }
           }
+          // Strip auth headers on cross-domain redirect (same logic as initial path)
+          const retryRedirectHeaders = stripAuthForRedirect(headers, url.hostname, redirectUrl.hostname);
           retryResponse = await fetch(retryRedirectFetchUrl, {
             method: 'GET',
-            headers,
+            headers: retryRedirectHeaders,
             signal: AbortSignal.timeout(30_000),
             redirect: 'manual',
           });

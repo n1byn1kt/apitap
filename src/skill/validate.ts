@@ -25,14 +25,26 @@ export function validateSkillFile(raw: unknown, options?: { checkSsrf?: boolean 
   if (typeof obj.baseUrl !== 'string') {
     throw new Error('Missing baseUrl');
   }
+  let baseUrlHostname: string;
   try {
     const url = new URL(obj.baseUrl);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') {
       throw new Error('non-HTTP scheme');
     }
+    baseUrlHostname = url.hostname;
   } catch {
     throw new Error(`Invalid baseUrl: must be a valid HTTP(S) URL`);
   }
+
+  // Domain-lock: baseUrl hostname must match or be a subdomain of domain (C1 fix)
+  const domainStr = obj.domain as string;
+  if (baseUrlHostname !== domainStr && !baseUrlHostname.endsWith('.' + domainStr)) {
+    throw new Error(
+      `baseUrl hostname "${baseUrlHostname}" does not match domain "${domainStr}". ` +
+      `Skill files cannot redirect requests to unrelated hosts.`
+    );
+  }
+
   if (options?.checkSsrf) {
     const ssrf = validateUrl(obj.baseUrl);
     if (!ssrf.safe) {

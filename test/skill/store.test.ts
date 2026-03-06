@@ -44,8 +44,17 @@ describe('skill store', () => {
   it('writes and reads a skill file', async () => {
     const skill = makeSkill('example.com');
     await writeSkillFile(skill, testDir);
-    const loaded = await readSkillFile('example.com', testDir);
+    const loaded = await readSkillFile('example.com', testDir, { trustUnsigned: true });
     assert.deepEqual(loaded, skill);
+  });
+
+  it('rejects unsigned skill file by default', async () => {
+    const skill = makeSkill('example.com');
+    await writeSkillFile(skill, testDir);
+    await assert.rejects(
+      () => readSkillFile('example.com', testDir),
+      /unsigned/i,
+    );
   });
 
   it('lists skill files', async () => {

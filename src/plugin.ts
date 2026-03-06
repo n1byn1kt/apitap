@@ -88,7 +88,7 @@ export function createPlugin(options: PluginOptions = {}): Plugin {
       const endpointId = args.endpointId as string;
       const params = args.params as Record<string, string> | undefined;
 
-      const skill = await readSkillFile(domain, skillsDir);
+      const skill = await readSkillFile(domain, skillsDir, { trustUnsigned: true });
       if (!skill) {
         return {
           error: `No skill file found for "${domain}". Use apitap_capture to capture it first.`,

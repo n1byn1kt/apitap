@@ -316,10 +316,10 @@ export class SkillGenerator {
     this.totalNetworkBytes += exchange.response.body.length;
 
     if (this.endpoints.has(key)) {
-      // Store duplicate body for cross-request diffing (Strategy 1)
+      // Store duplicate body for cross-request diffing (Strategy 1) — scrubbed (H3 fix)
       if (exchange.request.postData) {
         const bodies = this.exchangeBodies.get(key);
-        if (bodies) bodies.push(exchange.request.postData);
+        if (bodies) bodies.push(this.scrubBodyString(exchange.request.postData));
       }
       return null;
     }
@@ -455,9 +455,17 @@ export class SkillGenerator {
 
     this.endpoints.set(key, endpoint);
 
-    // Store first body for cross-request diffing
+    // Store first body for cross-request diffing (scrub sensitive fields — H3 fix)
     if (exchange.request.postData) {
-      this.exchangeBodies.set(key, [exchange.request.postData]);
+      this.exchangeBodies.set(key, [this.scrubBodyString(exchange.request.postData)]);
+    }
+
+    // Clear auth values from exchange to reduce credential exposure window (H3 fix)
+    for (const key of Object.keys(exchange.request.headers)) {
+      const lower = key.toLowerCase();
+      if (AUTH_HEADERS.has(lower) || lower === 'cookie') {
+        exchange.request.headers[key] = '[scrubbed]';
+      }
     }
 
     return endpoint;
@@ -513,6 +521,23 @@ export class SkillGenerator {
     this.totalNetworkBytes += bytes;
   }
 
+  /**
+   * Scrub sensitive fields from a POST body string for intermediate storage (H3 fix).
+   * Preserves structure for cross-request diffing while removing credentials.
+   */
+  private scrubBodyString(bodyStr: string): string {
+    try {
+      const parsed = JSON.parse(bodyStr);
+      if (typeof parsed === 'object' && parsed !== null) {
+        const scrubbed = scrubBody(parsed, true) as Record<string, unknown>;
+        return JSON.stringify(scrubbed);
+      }
+    } catch {
+      // Non-JSON body — apply PII scrubber
+    }
+    return scrubPII(bodyStr);
+  }
+
   /** Generate the complete skill file for a domain. */
   toSkillFile(domain: string, options?: { domBytes?: number; totalRequests?: number }): SkillFile {
     // Apply cross-request diffing (Strategy 1) to endpoints with multiple bodies
@@ -558,6 +583,9 @@ export class SkillGenerator {
         ...(this.oauthConfig ? { oauthConfig: this.oauthConfig } : {}),
       };
     }
+
+    // Clear intermediate body storage to reduce credential exposure window (H3 fix)
+    this.exchangeBodies.clear();
 
     return skill;
   }

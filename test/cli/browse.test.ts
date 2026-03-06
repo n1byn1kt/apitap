@@ -8,6 +8,9 @@ import type { AddressInfo } from 'node:net';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { writeSkillFile } from '../../src/skill/store.js';
+import { signSkillFile } from '../../src/skill/signing.js';
+import { deriveSigningKey } from '../../src/auth/crypto.js';
+import { getMachineId } from '../../src/auth/manager.js';
 import type { SkillFile } from '../../src/types.js';
 
 const execFileAsync = promisify(execFile);
@@ -59,19 +62,22 @@ describe('CLI browse command', () => {
   });
 
   it('outputs JSON with --json flag', async () => {
-    await writeSkillFile(makeSkill('cli-test.example.com', baseUrl), testDir);
+    const machineId = await getMachineId();
+    const sigKey = deriveSigningKey(machineId);
+    const port = (httpServer.address() as AddressInfo).port;
+    await writeSkillFile(signSkillFile(makeSkill('localhost', baseUrl), sigKey), testDir);
 
     const { stdout } = await execFileAsync('node', [
       '--import', 'tsx',
-      'src/cli.ts', 'browse', `http://cli-test.example.com`, '--json',
+      'src/cli.ts', 'browse', `http://localhost:${port}`, '--json', '--danger-disable-ssrf',
     ], {
-      env: { ...process.env, APITAP_SKILLS_DIR: testDir, APITAP_SKIP_SSRF_CHECK: '1' },
+      env: { ...process.env, APITAP_SKILLS_DIR: testDir },
       timeout: 15000,
     });
 
     const data = JSON.parse(stdout);
     assert.equal(data.success, true);
-    assert.equal(data.domain, 'cli-test.example.com');
+    assert.equal(data.domain, 'localhost');
     assert.ok(data.data);
   });
 

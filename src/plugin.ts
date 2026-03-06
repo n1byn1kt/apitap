@@ -21,11 +21,16 @@ export interface Plugin {
 
 export interface PluginOptions {
   skillsDir?: string;
-  /** @internal Skip SSRF check — for testing only */
+  /** @internal Testing only — never expose to external callers (M14) */
   _skipSsrfCheck?: boolean;
 }
 
 const APITAP_DIR = join(homedir(), '.apitap');
+
+/** M20: Mark plugin responses as untrusted external content */
+function wrapUntrusted(data: unknown): unknown {
+  return { ...data as Record<string, unknown>, _meta: { externalContent: { untrusted: true } } };
+}
 
 export function createPlugin(options: PluginOptions = {}): Plugin {
   const skillsDir = options.skillsDir;
@@ -53,7 +58,7 @@ export function createPlugin(options: PluginOptions = {}): Plugin {
     },
     execute: async (args) => {
       const query = args.query as string;
-      return searchSkills(query, skillsDir);
+      return wrapUntrusted(await searchSkills(query, skillsDir));
     },
   };
 
@@ -104,7 +109,7 @@ export function createPlugin(options: PluginOptions = {}): Plugin {
           domain,
           _skipSsrfCheck: options._skipSsrfCheck,
         });
-        return { status: result.status, data: result.data };
+        return wrapUntrusted({ status: result.status, data: result.data });
       } catch (err: any) {
         return { error: err.message };
       }
@@ -142,6 +147,13 @@ export function createPlugin(options: PluginOptions = {}): Plugin {
       const duration = (args.duration as number) ?? 30;
       const allDomains = (args.allDomains as boolean) ?? false;
 
+      // M19: SSRF validation before capture
+      const { resolveAndValidateUrl } = await import('./skill/ssrf.js');
+      const ssrfCheck = await resolveAndValidateUrl(url);
+      if (!ssrfCheck.safe) {
+        return { error: `Blocked: ${ssrfCheck.reason}` };
+      }
+
       // Shell out to CLI for capture (it handles browser lifecycle, signing, etc.)
       const { execFile } = await import('node:child_process');
       const { promisify } = await import('node:util');
@@ -155,7 +167,7 @@ export function createPlugin(options: PluginOptions = {}): Plugin {
           timeout: (duration + 30) * 1000,
           env: { ...process.env, ...(skillsDir ? { APITAP_SKILLS_DIR: skillsDir } : {}) },
         });
-        return JSON.parse(stdout);
+        return wrapUntrusted(JSON.parse(stdout));
       } catch (err: any) {
         return { error: `Capture failed: ${err.message}` };
       }

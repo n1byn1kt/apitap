@@ -22,6 +22,12 @@ const SSN_RE = /\b\d{3}-\d{2}-\d{4}\b/g;
 const BEARER_TOKEN_RE = /\bBearer\s+[A-Za-z0-9._~+/-]+=*\b/g;
 const JWT_RE = /\beyJ[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_-]+\b/g;
 
+// M12: Cloud provider keys and private key material
+const AWS_ACCESS_KEY_RE = /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/g;
+const GCP_API_KEY_RE = /\bAIza[A-Za-z0-9_-]{35}\b/g;
+const PRIVATE_KEY_RE = /-----BEGIN[\s]+(?:RSA\s+|EC\s+|DSA\s+)?PRIVATE\s+KEY-----[\s\S]*?-----END[\s]+(?:RSA\s+|EC\s+|DSA\s+)?PRIVATE\s+KEY-----/g;
+const BASIC_AUTH_RE = /\bBasic\s+[A-Za-z0-9+/]{8,}={0,2}\b/g;
+
 /**
  * Scrub PII from a string. Returns the string with PII replaced by placeholders.
  * Order matters: SSN before phone (SSN is more specific).
@@ -52,6 +58,12 @@ export function scrubPII(input: string): string {
   // Auth tokens
   result = result.replace(BEARER_TOKEN_RE, '[token]');
   result = result.replace(JWT_RE, '[token]');
+
+  // M12: Cloud provider keys and private key material
+  result = result.replace(PRIVATE_KEY_RE, '[private-key]');
+  result = result.replace(AWS_ACCESS_KEY_RE, '[aws-key]');
+  result = result.replace(GCP_API_KEY_RE, '[gcp-key]');
+  result = result.replace(BASIC_AUTH_RE, '[token]');
 
   return result;
 }

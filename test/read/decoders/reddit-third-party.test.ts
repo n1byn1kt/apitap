@@ -4,18 +4,18 @@ import assert from 'node:assert/strict';
 import { redditDecoder } from '../../../src/read/decoders/reddit.js';
 
 describe('Reddit decoder third-party disclosure', () => {
-  const originalEnv = process.env.APITAP_NO_THIRD_PARTY;
+  const originalThirdParty = process.env.APITAP_THIRD_PARTY;
 
   afterEach(() => {
-    if (originalEnv === undefined) {
-      delete process.env.APITAP_NO_THIRD_PARTY;
+    if (originalThirdParty === undefined) {
+      delete process.env.APITAP_THIRD_PARTY;
     } else {
-      process.env.APITAP_NO_THIRD_PARTY = originalEnv;
+      process.env.APITAP_THIRD_PARTY = originalThirdParty;
     }
   });
 
-  it('does not call pullpush.io when APITAP_NO_THIRD_PARTY=1', async () => {
-    process.env.APITAP_NO_THIRD_PARTY = '1';
+  it('does not call pullpush.io by default (opt-in, not opt-out)', async () => {
+    delete process.env.APITAP_THIRD_PARTY;
 
     const originalFetch = globalThis.fetch;
     const fetchedUrls: string[] = [];
@@ -36,6 +36,6 @@ describe('Reddit decoder third-party disclosure', () => {
     }
 
     const pullpushCalls = fetchedUrls.filter(u => u.includes('pullpush.io'));
-    assert.equal(pullpushCalls.length, 0, 'Should not call pullpush.io when APITAP_NO_THIRD_PARTY=1');
+    assert.equal(pullpushCalls.length, 0, 'Should not call pullpush.io unless APITAP_THIRD_PARTY=1');
   });
 });

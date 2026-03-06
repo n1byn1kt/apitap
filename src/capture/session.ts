@@ -133,20 +133,11 @@ export class CaptureSession {
         case 'navigate': {
           if (!action.url) return { success: false, error: 'url required for navigate', snapshot: await this.takeSnapshot() };
 
-          // Basic URL validation — block non-HTTP schemes and cloud metadata
-          let parsed: URL;
-          try { parsed = new URL(action.url); } catch {
-            return { success: false, error: 'Invalid URL', snapshot: await this.takeSnapshot() };
-          }
-
-          // Block non-HTTP schemes (file://, ftp://, etc.)
-          if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-            return { success: false, error: `Blocked scheme: ${parsed.protocol}`, snapshot: await this.takeSnapshot() };
-          }
-
-          // Block cloud metadata endpoint specifically (high-value target)
-          if (parsed.hostname === '169.254.169.254') {
-            return { success: false, error: 'Navigation blocked: cloud metadata endpoint', snapshot: await this.takeSnapshot() };
+          // M7 fix: Full SSRF validation on navigate URLs (same checks as ssrf.ts)
+          const { validateUrl: validateNavUrl } = await import('../skill/ssrf.js');
+          const navResult = validateNavUrl(action.url);
+          if (!navResult.safe) {
+            return { success: false, error: `Navigation blocked: ${navResult.reason}`, snapshot: await this.takeSnapshot() };
           }
 
           await this.page.goto(action.url, { waitUntil: 'domcontentloaded' });

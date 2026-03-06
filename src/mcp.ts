@@ -49,14 +49,40 @@ export interface McpServerOptions {
   skillsDir?: string;
   /** @internal Skip SSRF check in replay — for testing only */
   _skipSsrfCheck?: boolean;
+  /** Rate limit: max outbound requests per minute (default: 60). Set 0 to disable. */
+  rateLimitPerMinute?: number;
 }
 
 const MAX_SESSIONS = 3;
+
+/**
+ * M23: Simple sliding-window rate limiter for outbound MCP tool calls.
+ * Prevents misconfigured agents from flooding target APIs.
+ */
+class RateLimiter {
+  private timestamps: number[] = [];
+  private readonly maxPerMinute: number;
+
+  constructor(maxPerMinute: number) {
+    this.maxPerMinute = maxPerMinute;
+  }
+
+  check(): boolean {
+    if (this.maxPerMinute <= 0) return true; // Disabled
+    const now = Date.now();
+    const windowStart = now - 60_000;
+    this.timestamps = this.timestamps.filter(t => t > windowStart);
+    if (this.timestamps.length >= this.maxPerMinute) return false;
+    this.timestamps.push(now);
+    return true;
+  }
+}
 
 export function createMcpServer(options: McpServerOptions = {}): McpServer {
   const skillsDir = options.skillsDir;
   const sessions = new Map<string, CaptureSession>();
   const sessionCache = new SessionCache();
+  const rateLimiter = new RateLimiter(options.rateLimitPerMinute ?? 60);
 
   const server = new McpServer({
     name: 'apitap',
@@ -101,6 +127,9 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
       },
     },
     async ({ url }) => {
+      if (!rateLimiter.check()) {
+        return { content: [{ type: 'text' as const, text: 'Rate limit exceeded. Try again in a moment.' }], isError: true };
+      }
       try {
         if (!options._skipSsrfCheck) {
           const validation = await resolveAndValidateUrl(url);
@@ -152,6 +181,9 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
       },
     },
     async ({ domain, endpointId, params, fresh, maxBytes }) => {
+      if (!rateLimiter.check()) {
+        return { content: [{ type: 'text' as const, text: 'Rate limit exceeded. Try again in a moment.' }], isError: true };
+      }
       const machineId = await getMachineId();
       const signingKey = deriveSigningKey(machineId);
       const skill = await readSkillFile(domain, skillsDir, { verifySignature: true, signingKey });
@@ -256,6 +288,9 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
       },
     },
     async ({ url, task, maxBytes }) => {
+      if (!rateLimiter.check()) {
+        return { content: [{ type: 'text' as const, text: 'Rate limit exceeded. Try again in a moment.' }], isError: true };
+      }
       if (!options._skipSsrfCheck) {
         const validation = await resolveAndValidateUrl(url);
         if (!validation.safe) {
@@ -329,6 +364,9 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
       },
     },
     async ({ url, maxBytes }) => {
+      if (!rateLimiter.check()) {
+        return { content: [{ type: 'text' as const, text: 'Rate limit exceeded. Try again in a moment.' }], isError: true };
+      }
       try {
         if (!options._skipSsrfCheck) {
           const validation = await resolveAndValidateUrl(url);

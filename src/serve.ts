@@ -148,11 +148,18 @@ export async function createServeServer(
             _skipSsrfCheck: options._skipSsrfCheck,
           });
 
+          // M22: Mark responses as untrusted external content
           return {
             content: [{
               type: 'text' as const,
               text: JSON.stringify({ status: result.status, data: result.data }),
             }],
+            _meta: {
+              externalContent: {
+                untrusted: true,
+                source: `apitap-serve-${domain}`,
+              },
+            },
           };
         } catch (err: any) {
           console.error('Replay failed:', err instanceof Error ? err.message : String(err));

@@ -24,9 +24,14 @@ function getInstallSalt(saltFile?: string): string {
   // Generate and save new salt
   const salt = randomBytes(32).toString('hex');
   try {
-    mkdirSync(saltPath.replace(/\/[^/]+$/, ''), { recursive: true });
+    mkdirSync(saltPath.replace(/\/[^/]+$/, ''), { recursive: true, mode: 0o700 });
     writeFileSync(saltPath, salt, { mode: 0o600 });
-  } catch {}
+  } catch (err: any) {
+    // M2 fix: only swallow EEXIST (dir already exists), throw on permission errors etc.
+    if (err?.code !== 'EEXIST') {
+      throw err;
+    }
+  }
   return salt;
 }
 
@@ -44,12 +49,15 @@ export interface EncryptedData {
  * being stretched through 100K iterations.
  */
 export function deriveKey(machineId: string, saltFile?: string): Buffer {
-  // Try per-install salt first, fallback to old constant for migration
+  // Try per-install salt first, fallback to old constant only on ENOENT (M2 fix)
   try {
     return pbkdf2Sync(machineId, getInstallSalt(saltFile), PBKDF2_ITERATIONS, KEY_LENGTH, 'sha512');
-  } catch {
-    // Fallback for old installs (migration note: remove after all users migrated)
-    return pbkdf2Sync(machineId, 'apitap-v0.2-key-derivation', PBKDF2_ITERATIONS, KEY_LENGTH, 'sha512');
+  } catch (err: any) {
+    // Only fall back to legacy salt on file-not-found (ENOENT) — not on permission errors, corrupt files, etc.
+    if (err?.code === 'ENOENT') {
+      return pbkdf2Sync(machineId, 'apitap-v0.2-key-derivation', PBKDF2_ITERATIONS, KEY_LENGTH, 'sha512');
+    }
+    throw err;
   }
 }
 

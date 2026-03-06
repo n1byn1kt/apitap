@@ -22,6 +22,7 @@ import { read } from './read/index.js';
 import { homedir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { readFileSync } from 'node:fs';
+import { stat, unlink } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createMcpServer } from './mcp.js';
 
@@ -79,6 +80,8 @@ function printUsage(): void {
     apitap browse <url>        Browse a URL (discover + replay in one step)
     apitap peek <url>          Zero-cost triage (HEAD only)
     apitap read <url>          Extract content without a browser
+    apitap audit               Audit stored skill files and credentials
+    apitap forget <domain>     Remove skill file and credentials for a domain
     apitap stats               Show token savings report
     apitap extension install   Register native messaging host for Chrome
 
@@ -1050,6 +1053,107 @@ async function handleRead(positional: string[], flags: Record<string, string | b
   console.log();
 }
 
+async function handleAudit(flags: Record<string, string | boolean>): Promise<void> {
+  const skillsDir = SKILLS_DIR || join(APITAP_DIR, 'skills');
+  const summaries = await listSkillFiles(skillsDir);
+  const machineId = await getEffectiveMachineId();
+  const authManager = new AuthManager(APITAP_DIR, machineId);
+  const authDomains = new Set(await authManager.listDomains());
+
+  // Get skill file last-modified dates
+  const rows: { domain: string; endpoints: number; auth: string; modified: string }[] = [];
+  for (const s of summaries) {
+    let modified = 'unknown';
+    try {
+      const st = await stat(s.skillFile);
+      modified = st.mtime.toISOString().slice(0, 10);
+    } catch {}
+    rows.push({
+      domain: s.domain,
+      endpoints: s.endpointCount,
+      auth: authDomains.has(s.domain) ? 'yes' : 'no',
+      modified,
+    });
+  }
+
+  // Get auth.enc last-modified
+  let authModified = 'none';
+  try {
+    const authStat = await stat(join(APITAP_DIR, 'auth.enc'));
+    authModified = authStat.mtime.toISOString().slice(0, 10);
+  } catch {}
+
+  if (flags.json === true) {
+    console.log(JSON.stringify({ domains: rows, authFileModified: authModified }, null, 2));
+    return;
+  }
+
+  if (rows.length === 0) {
+    console.log('\n  No skill files found.\n');
+    return;
+  }
+
+  // Table header
+  const domW = Math.max(6, ...rows.map(r => r.domain.length));
+  console.log();
+  console.log(`  ${'DOMAIN'.padEnd(domW)}  ${'ENDPOINTS'.padStart(9)}  ${'AUTH'.padEnd(4)}  MODIFIED`);
+  console.log(`  ${''.padEnd(domW, '-')}  ${''.padEnd(9, '-')}  ${''.padEnd(4, '-')}  ${''.padEnd(10, '-')}`);
+  for (const r of rows) {
+    console.log(`  ${r.domain.padEnd(domW)}  ${String(r.endpoints).padStart(9)}  ${r.auth.padEnd(4)}  ${r.modified}`);
+  }
+  console.log();
+  console.log(`  auth.enc last modified: ${authModified}`);
+  console.log();
+}
+
+async function handleForget(positional: string[]): Promise<void> {
+  const domain = positional[0];
+  if (!domain) {
+    console.error('Error: Domain required. Usage: apitap forget <domain>');
+    process.exit(1);
+  }
+
+  const skillsDir = SKILLS_DIR || join(APITAP_DIR, 'skills');
+  let skillRemoved = false;
+  let authRemoved = false;
+  let notFound = true;
+
+  // Remove skill file
+  const skillFilePath = join(skillsDir, `${domain}.json`);
+  try {
+    await stat(skillFilePath);
+    notFound = false;
+    await unlink(skillFilePath);
+    skillRemoved = true;
+  } catch {}
+
+  // Remove stored auth
+  try {
+    const machineId = await getEffectiveMachineId();
+    const authManager = new AuthManager(APITAP_DIR, machineId);
+    const hasAuth = await authManager.has(domain);
+    if (hasAuth) {
+      notFound = false;
+      await authManager.clear(domain);
+      authRemoved = true;
+    }
+  } catch (err: any) {
+    if (skillRemoved) {
+      console.error(`Warning: Could not remove auth credentials: ${err.message}`);
+    }
+  }
+
+  if (notFound) {
+    console.log(`${domain} not found`);
+    return;
+  }
+
+  const parts: string[] = [];
+  if (skillRemoved) parts.push('skill file');
+  if (authRemoved) parts.push('credentials');
+  console.log(`Forgot ${domain} — ${parts.join(' and ')} removed`);
+}
+
 async function handleExtension(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
   const subcommand = positional[0];
 
@@ -1149,6 +1253,12 @@ async function main(): Promise<void> {
       break;
     case 'read':
       await handleRead(positional, flags);
+      break;
+    case 'audit':
+      await handleAudit(flags);
+      break;
+    case 'forget':
+      await handleForget(positional);
       break;
     case 'extension':
       await handleExtension(positional, flags);

@@ -80,9 +80,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     },
     async ({ query }) => {
       const result = await searchSkills(query, skillsDir);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(result) }],
-      };
+      return wrapExternalContent(result, 'apitap_search');
     },
   );
 
@@ -112,18 +110,18 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
         }
         const result = await discover(url);
 
-        // If we got a skill file, save it automatically
+        // If we got a skill file, sign and save it automatically
         if (result.skillFile && (result.confidence === 'high' || result.confidence === 'medium')) {
           const { writeSkillFile } = await import('./skill/store.js');
+          const { signSkillFile } = await import('./skill/signing.js');
+          const machineId = await getMachineId();
+          const sigKey = deriveSigningKey(machineId);
+          result.skillFile = signSkillFile(result.skillFile, sigKey);
           const path = await writeSkillFile(result.skillFile, skillsDir);
-          return {
-            content: [{ type: 'text' as const, text: JSON.stringify({ ...result, savedTo: path }) }],
-          };
+          return wrapExternalContent({ ...result, savedTo: path }, 'apitap_discover');
         }
 
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify(result) }],
-        };
+        return wrapExternalContent(result, 'apitap_discover');
       } catch (err: any) {
         return {
           content: [{ type: 'text' as const, text: `Discovery failed: ${err.message}` }],
@@ -274,13 +272,8 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
         // In test mode, disable bridge to avoid connecting to real socket
         ...(options._skipSsrfCheck ? { _bridgeSocketPath: '/nonexistent' } : {}),
       });
-      // Only mark as untrusted if it contains external data
-      if (result.success && result.data) {
-        return wrapExternalContent(result, 'apitap_browse');
-      }
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(result) }],
-      };
+      // Always mark as untrusted — failed results may contain attacker-controlled strings (H7 fix)
+      return wrapExternalContent(result, 'apitap_browse');
     },
   );
 
@@ -404,9 +397,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
             setTimeout(() => reject(new Error('Capture timed out')), timeoutMs),
           ),
         ]);
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify(result) }],
-        };
+        return wrapExternalContent(result, 'apitap_capture');
       } catch (err: any) {
         try { await session.abort(); } catch { /* already closed */ }
         return {
@@ -457,9 +448,8 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
         });
         const snapshot = await session.start(url);
         sessions.set(session.id, session);
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify({ sessionId: session.id, snapshot }) }],
-        };
+        // Mark as untrusted — snapshot contains external page content (H5 fix)
+        return wrapExternalContent({ sessionId: session.id, snapshot }, 'apitap_capture_start');
       } catch (err: any) {
         return {
           content: [{ type: 'text' as const, text: `Failed to start capture session: ${err.message}` }],
@@ -518,8 +508,10 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
         submit,
       });
 
+      // Mark as untrusted — result contains external page content (H5 fix)
+      const wrapped = wrapExternalContent(result, 'apitap_capture_interact');
       return {
-        content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+        ...wrapped,
         ...(result.success ? {} : { isError: true }),
       };
     },
@@ -560,15 +552,11 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
       try {
         if (shouldAbort) {
           await session.abort();
-          return {
-            content: [{ type: 'text' as const, text: JSON.stringify({ aborted: true, domains: [] }) }],
-          };
+          return wrapExternalContent({ aborted: true, domains: [] }, 'apitap_capture_finish');
         }
 
         const result = await session.finish();
-        return {
-          content: [{ type: 'text' as const, text: JSON.stringify(result) }],
-        };
+        return wrapExternalContent(result, 'apitap_capture_finish');
       } catch (err: any) {
         return {
           content: [{ type: 'text' as const, text: `Finish failed: ${err.message}` }],
@@ -609,8 +597,9 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
           timeout: timeout ? timeout * 1000 : undefined,
         });
 
+        const wrapped = wrapExternalContent(result, 'apitap_auth_request');
         return {
-          content: [{ type: 'text' as const, text: JSON.stringify(result) }],
+          ...wrapped,
           ...(result.success ? {} : { isError: true }),
         };
       } catch (err: any) {

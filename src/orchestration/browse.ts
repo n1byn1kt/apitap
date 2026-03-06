@@ -4,6 +4,9 @@ import { replayEndpoint } from '../replay/engine.js';
 import { SessionCache } from './cache.js';
 import { read } from '../read/index.js';
 import { bridgeAvailable, requestBridgeCapture, DEFAULT_SOCKET } from '../bridge/client.js';
+import { signSkillFile } from '../skill/signing.js';
+import { deriveSigningKey } from '../auth/crypto.js';
+import { getMachineId } from '../auth/manager.js';
 
 export interface BrowseOptions {
   skillsDir?: string;
@@ -61,11 +64,14 @@ async function tryBridgeCapture(
 
   if (result.success && result.skillFiles && result.skillFiles.length > 0) {
     const skillFiles = result.skillFiles;
-    // Save each skill file to disk
+    // Sign and save each skill file to disk
     try {
       const { writeSkillFile: writeSF } = await import('../skill/store.js');
-      for (const skill of skillFiles) {
-        await writeSF(skill, options.skillsDir);
+      const mid = await getMachineId();
+      const sk = deriveSigningKey(mid);
+      for (let i = 0; i < skillFiles.length; i++) {
+        skillFiles[i] = signSkillFile(skillFiles[i], sk);
+        await writeSF(skillFiles[i], options.skillsDir);
       }
     } catch {
       // Saving failed — still have the data in memory
@@ -202,7 +208,10 @@ export async function browse(
         skill = discovery.skillFile;
         source = 'discovered';
 
-        // Save to disk
+        // Sign and save to disk (H1: skill files must be signed for verification)
+        const machineId = await getMachineId();
+        const sigKey = deriveSigningKey(machineId);
+        skill = signSkillFile(skill, sigKey);
         const { writeSkillFile: writeSF } = await import('../skill/store.js');
         await writeSF(skill, skillsDir);
         cache?.set(domain, skill, 'discovered');

@@ -85,11 +85,27 @@ describe('validateSkillFile', () => {
     assert.throws(() => validateSkillFile(s, { checkSsrf: true }), /baseUrl/i);
   });
 
-  it('allows localhost baseUrl without checkSsrf (default)', () => {
+  it('allows localhost baseUrl without checkSsrf when domain matches', () => {
     const s = validSkill();
+    s.domain = 'localhost';
     s.baseUrl = 'http://localhost:3000';
     const result = validateSkillFile(s);
     assert.equal(result.baseUrl, 'http://localhost:3000');
+  });
+
+  it('rejects baseUrl hostname mismatch with domain', () => {
+    const s = validSkill();
+    s.domain = 'example.com';
+    s.baseUrl = 'https://evil.com';
+    assert.throws(() => validateSkillFile(s), /does not match domain/i);
+  });
+
+  it('allows subdomain baseUrl for domain', () => {
+    const s = validSkill();
+    s.domain = 'example.com';
+    s.baseUrl = 'https://api.example.com';
+    const result = validateSkillFile(s);
+    assert.equal(result.baseUrl, 'https://api.example.com');
   });
 
   it('rejects missing endpoints', () => {

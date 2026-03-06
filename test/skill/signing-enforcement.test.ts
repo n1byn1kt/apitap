@@ -57,16 +57,25 @@ describe('HMAC enforcement Phase 2', () => {
     await writeSkillFile(signed, testDir);
     await assert.rejects(
       () => readSkillFile('example.com', testDir, { verifySignature: true, signingKey }),
-      /signature verification failed|tampered/i,
+      /signature verification failed|tampered|does not match domain/i,
     );
   });
 
-  it('unsigned non-imported file loads with warning (not rejection)', async () => {
+  it('unsigned non-imported file is rejected by default', async () => {
     const skill = makeSkill({ provenance: 'unsigned' });
     await writeSkillFile(skill, testDir);
-    // Phase 2: unsigned files should load (with warning), not throw
-    const loaded = await readSkillFile('example.com', testDir, { verifySignature: true, signingKey });
-    assert.ok(loaded, 'Unsigned file should load in Phase 2');
+    // H1 fix: unsigned files throw by default
+    await assert.rejects(
+      () => readSkillFile('example.com', testDir, { verifySignature: true, signingKey }),
+      /unsigned/i,
+    );
+  });
+
+  it('unsigned file loads with trustUnsigned option', async () => {
+    const skill = makeSkill({ provenance: 'unsigned' });
+    await writeSkillFile(skill, testDir);
+    const loaded = await readSkillFile('example.com', testDir, { verifySignature: true, signingKey, trustUnsigned: true });
+    assert.ok(loaded, 'Unsigned file should load with trustUnsigned');
   });
 
   it('imported file skips verification', async () => {

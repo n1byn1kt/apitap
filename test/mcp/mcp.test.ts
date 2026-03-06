@@ -9,6 +9,9 @@ import type { AddressInfo } from 'node:net';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { writeSkillFile } from '../../src/skill/store.js';
+import { signSkillFile } from '../../src/skill/signing.js';
+import { deriveSigningKey } from '../../src/auth/crypto.js';
+import { getMachineId } from '../../src/auth/manager.js';
 import type { SkillFile } from '../../src/types.js';
 import { createMcpServer } from '../../src/mcp.js';
 
@@ -217,9 +220,11 @@ describe('apitap_replay via MCP', () => {
     const port = (httpServer.address() as AddressInfo).port;
     const baseUrl = `http://localhost:${port}`;
 
-    await writeSkillFile(makeSkill('test-api.example.com', baseUrl, [
+    const machineId = await getMachineId();
+    const sigKey = deriveSigningKey(machineId);
+    await writeSkillFile(signSkillFile(makeSkill('localhost', baseUrl, [
       { id: 'get-events', method: 'GET', path: '/events', tier: 'green' },
-    ]), testDir);
+    ]), sigKey), testDir);
 
     const server = createMcpServer({ skillsDir: testDir, _skipSsrfCheck: true });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
@@ -241,7 +246,7 @@ describe('apitap_replay via MCP', () => {
   it('replays green endpoint and returns data', async () => {
     const result = await client.callTool({
       name: 'apitap_replay',
-      arguments: { domain: 'test-api.example.com', endpointId: 'get-events' },
+      arguments: { domain: 'localhost', endpointId: 'get-events' },
     });
     assert.equal(result.isError, undefined);
     const data = JSON.parse((result.content as any)[0].text);
@@ -263,12 +268,12 @@ describe('apitap_replay via MCP', () => {
   it('returns enriched metadata in replay response', async () => {
     const result = await client.callTool({
       name: 'apitap_replay',
-      arguments: { domain: 'test-api.example.com', endpointId: 'get-events' },
+      arguments: { domain: 'localhost', endpointId: 'get-events' },
     });
     assert.equal(result.isError, undefined);
     const data = JSON.parse((result.content as any)[0].text);
     assert.equal(data.status, 200);
-    assert.equal(data.domain, 'test-api.example.com');
+    assert.equal(data.domain, 'localhost');
     assert.equal(data.endpointId, 'get-events');
     assert.equal(data.tier, 'green');
     assert.ok(data.capturedAt);
@@ -278,7 +283,7 @@ describe('apitap_replay via MCP', () => {
   it('marks replay response as untrusted external content', async () => {
     const result = await client.callTool({
       name: 'apitap_replay',
-      arguments: { domain: 'test-api.example.com', endpointId: 'get-events' },
+      arguments: { domain: 'localhost', endpointId: 'get-events' },
     });
     assert.equal(result.isError, undefined);
     assert.equal((result as any)._meta?.externalContent?.untrusted, true);
@@ -288,7 +293,7 @@ describe('apitap_replay via MCP', () => {
   it('returns error content for unknown endpoint', async () => {
     const result = await client.callTool({
       name: 'apitap_replay',
-      arguments: { domain: 'test-api.example.com', endpointId: 'nonexistent' },
+      arguments: { domain: 'localhost', endpointId: 'nonexistent' },
     });
     assert.equal(result.isError, true);
     const text = (result.content as any)[0].text;

@@ -47,7 +47,12 @@ export async function writeSkillFile(
 export async function readSkillFile(
   domain: string,
   skillsDir: string = DEFAULT_SKILLS_DIR,
-  options?: { verifySignature?: boolean; signingKey?: Buffer }
+  options?: {
+    verifySignature?: boolean;
+    signingKey?: Buffer;
+    /** Allow loading unsigned files without throwing. Tampered signed files still reject. */
+    trustUnsigned?: boolean;
+  }
 ): Promise<SkillFile | null> {
   // Validate domain before file I/O — path traversal should throw, not return null
   const path = skillPath(domain, skillsDir);
@@ -56,18 +61,31 @@ export async function readSkillFile(
     const raw = JSON.parse(content);
     const skill = validateSkillFile(raw);
 
-    // If verification requested, check signature
-    if (options?.verifySignature && options.signingKey) {
+    // Signature verification is ON by default (H1 fix)
+    const shouldVerify = options?.verifySignature !== false;
+    if (shouldVerify) {
+      // Auto-derive signing key if not provided
+      let signingKey = options?.signingKey;
+      if (!signingKey) {
+        const { deriveSigningKey } = await import('../auth/crypto.js');
+        const { getMachineId } = await import('../auth/manager.js');
+        const machineId = await getMachineId();
+        signingKey = deriveSigningKey(machineId);
+      }
+
       if (skill.provenance === 'imported') {
-        // Imported files had foreign signature stripped — can't verify, warn only
-        // Future: re-sign on import with local key
+        // Imported files had foreign signature stripped — can't verify
       } else if (!skill.signature) {
-        // Phase 2: warn for unsigned files, don't reject
-        // (user-created or pre-signing files are legitimately unsigned)
-        console.error(`[apitap] Warning: skill file for ${domain} is unsigned`);
+        // Unsigned files are rejected unless trustUnsigned is set
+        if (!options?.trustUnsigned) {
+          throw new Error(
+            `Skill file for ${domain} is unsigned and cannot be verified. ` +
+            `Re-capture or re-import the skill file, or use --trust-unsigned to load it.`
+          );
+        }
       } else {
         const { verifySignature } = await import('./signing.js');
-        if (!verifySignature(skill, options.signingKey)) {
+        if (!verifySignature(skill, signingKey)) {
           throw new Error(`Skill file signature verification failed for ${domain} — file may be tampered`);
         }
       }
@@ -96,7 +114,7 @@ export async function listSkillFiles(
     if (!file.endsWith('.json')) continue;
     const domain = file.replace(/\.json$/, '');
     if (!DOMAIN_RE.test(domain)) continue; // skip non-conforming filenames
-    const skill = await readSkillFile(domain, skillsDir);
+    const skill = await readSkillFile(domain, skillsDir, { trustUnsigned: true });
     if (skill) {
       summaries.push({
         domain: skill.domain,

@@ -17,6 +17,7 @@ export interface CompletedRequestDetails {
   responseContentType: string;
   requestHeaders: Record<string, string>;
   responseHeaders: Record<string, string>;
+  authTypeOverride?: string;  // pre-detected, avoids storing raw headers
 }
 
 /** Content types that indicate API responses */
@@ -28,7 +29,7 @@ function isApiContentType(contentType: string): boolean {
 }
 
 /** Detect auth type from request headers (type only, never the value) */
-function detectAuthType(headers: Record<string, string>): string | undefined {
+export function detectAuthType(headers: Record<string, string>): string | undefined {
   const auth = headers['authorization'] || headers['Authorization'];
   if (auth) {
     if (auth.startsWith('Bearer ')) return 'Bearer';
@@ -105,7 +106,7 @@ export function processCompletedRequest(details: CompletedRequestDetails): Obser
   const isGraphQL = parsed.pathname.endsWith('/graphql') || parsed.pathname.endsWith('/gql');
   const type = isGraphQL ? 'graphql' as const : undefined;
 
-  const authType = detectAuthType(requestHeaders);
+  const authType = details.authTypeOverride ?? detectAuthType(requestHeaders);
   const pagination = detectPagination(responseHeaders, queryParamNames);
 
   const now = new Date().toISOString();

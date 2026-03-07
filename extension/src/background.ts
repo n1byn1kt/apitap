@@ -7,7 +7,7 @@ import type { CaptureState, CaptureMessage, CaptureResponse, AgentRequest, Agent
 import { extractDomain, pickPrimaryDomain } from './domain-utils.js';
 import { DomainGeneratorMap } from './multi-domain.js';
 import { isAllowedUrl, scrubAuthFromSkillJson } from './security.js';
-import { processCompletedRequest } from './observer.js';
+import { processCompletedRequest, detectAuthType } from './observer.js';
 import { mergeObservation, createEmptyIndex } from './index-store.js';
 import { markPromoted } from './promotion.js';
 import { applyLifecycle } from './lifecycle.js';
@@ -561,8 +561,8 @@ chrome.storage.session.get(['captureState', 'lastSkillJson'], (result) => {
 let passiveIndex: IndexFile = createEmptyIndex();
 let indexDirty = false; // tracks whether index has unsaved changes
 
-// Pending request headers for auth detection (webRequest doesn't give both in one event)
-const pendingObserverHeaders = new Map<string, Record<string, string>>();
+// Pending auth types for auth detection (store only type, never raw header values)
+const pendingObserverAuthTypes = new Map<string, string | undefined>();
 
 // Load index from chrome.storage.local on startup
 chrome.storage.local.get(['passiveIndex'], (result) => {
@@ -581,11 +581,11 @@ chrome.webRequest.onSendHeaders.addListener(
     for (const h of details.requestHeaders ?? []) {
       if (h.name && h.value) headers[h.name.toLowerCase()] = h.value;
     }
-    pendingObserverHeaders.set(String(details.requestId), headers);
+    pendingObserverAuthTypes.set(String(details.requestId), detectAuthType(headers));
     // Clean up if map grows too large (prevent memory leak)
-    if (pendingObserverHeaders.size > 1000) {
-      const keys = [...pendingObserverHeaders.keys()];
-      for (const k of keys.slice(0, 500)) pendingObserverHeaders.delete(k);
+    if (pendingObserverAuthTypes.size > 1000) {
+      const keys = [...pendingObserverAuthTypes.keys()];
+      for (const k of keys.slice(0, 500)) pendingObserverAuthTypes.delete(k);
     }
   },
   { urls: ['<all_urls>'] },
@@ -597,8 +597,8 @@ chrome.webRequest.onCompleted.addListener(
   (details) => {
     if (details.tabId < 0) return; // ignore non-tab requests
 
-    const reqHeaders = pendingObserverHeaders.get(String(details.requestId)) ?? {};
-    pendingObserverHeaders.delete(String(details.requestId));
+    const authTypeOverride = pendingObserverAuthTypes.get(String(details.requestId));
+    pendingObserverAuthTypes.delete(String(details.requestId));
 
     // Build response headers record
     const responseHeaders: Record<string, string> = {};
@@ -613,8 +613,9 @@ chrome.webRequest.onCompleted.addListener(
       method: details.method,
       statusCode: details.statusCode,
       responseContentType: contentType,
-      requestHeaders: reqHeaders,
+      requestHeaders: {},
       responseHeaders,
+      authTypeOverride,
     });
 
     if (obs) {
@@ -673,31 +674,40 @@ chrome.runtime.onSuspend.addListener(() => {
 
 // --- Auto-learn ---
 
+let autoLearnInProgress = false;
+
 async function checkAutoLearn(domain: string): Promise<void> {
+  if (autoLearnInProgress) return;  // prevent concurrent auto-learn captures
+
   const settings = await chrome.storage.local.get(['autoLearn', 'revisitThreshold']);
   if (!settings.autoLearn) return;
 
-  const threshold = settings.revisitThreshold ?? 3;
+  const threshold = Math.max(2, Math.min(20, settings.revisitThreshold ?? 3));
   const entry = passiveIndex.entries.find(e => e.domain === domain);
   if (!entry || entry.promoted) return;
 
   // Use totalHits as a proxy for revisit frequency
   if (entry.totalHits >= threshold && !state.active) {
-    const tab = await findOrOpenTab(domain);
-    if (!tab.id) return;
-    const skillFiles = await captureWithPlateau(tab.id, {
-      idleTimeout: 10_000,
-      maxDuration: 120_000,
-    });
-    if (skillFiles.length > 0 && bridgeAvailable && nativePort) {
-      const skills = skillFiles.map(json => {
-        const parsed = JSON.parse(json);
-        return { domain: parsed.domain, skillJson: json };
+    autoLearnInProgress = true;
+    try {
+      const tab = await findOrOpenTab(domain);
+      if (!tab.id) return;
+      const skillFiles = await captureWithPlateau(tab.id, {
+        idleTimeout: 10_000,
+        maxDuration: 120_000,
       });
-      await saveViaBridge(skills);
-      passiveIndex = markPromoted(passiveIndex, domain, 'extension');
-      indexDirty = true;
-      await flushIndex();
+      if (skillFiles.length > 0 && bridgeAvailable && nativePort) {
+        const skills = skillFiles.map(json => {
+          const parsed = JSON.parse(json);
+          return { domain: parsed.domain, skillJson: json };
+        });
+        await saveViaBridge(skills);
+        passiveIndex = markPromoted(passiveIndex, domain, 'extension');
+        indexDirty = true;
+        await flushIndex();
+      }
+    } finally {
+      autoLearnInProgress = false;
     }
   }
 }

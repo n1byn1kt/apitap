@@ -64,6 +64,16 @@ describe('native host save_index', () => {
     assert.equal(result.success, false);
   });
 
+  it('rejects oversized indexJson (>5MB)', async () => {
+    const oversized = 'x'.repeat(5 * 1024 * 1024 + 1);
+    const result = await handleNativeMessage(
+      { action: 'save_index' as any, indexJson: oversized } as any,
+      skillsDir,
+    );
+    assert.equal(result.success, false);
+    assert.ok(result.error?.includes('too large'));
+  });
+
   it('overwrites existing index.json', async () => {
     const indexPath = path.join(tmpDir, 'index.json');
     await fs.writeFile(indexPath, '{"v":1,"entries":[]}');

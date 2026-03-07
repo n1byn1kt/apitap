@@ -156,6 +156,19 @@ describe('observer processCompletedRequest', () => {
     assert.equal(result!.endpoint.type, 'graphql');
   });
 
+  it('uses authTypeOverride when provided, ignoring requestHeaders', () => {
+    const result = processCompletedRequest({
+      url: 'https://api.example.com/data',
+      method: 'GET',
+      statusCode: 200,
+      responseContentType: 'application/json',
+      requestHeaders: { authorization: 'Bearer should-be-ignored' },
+      responseHeaders: {},
+      authTypeOverride: 'API Key',
+    });
+    assert.equal(result!.endpoint.authType, 'API Key');
+  });
+
   it('detects hasBody from content-length > 0', () => {
     const result = processCompletedRequest({
       url: 'https://api.example.com/data',

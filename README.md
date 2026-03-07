@@ -245,7 +245,7 @@ ApiTap includes a Chrome extension that captures API traffic directly from your 
 **Why use the extension?**
 - You're already logged into Spotify, Discord, Reddit — the extension captures from your live session
 - No `apitap auth request` needed — real tokens are captured automatically
-- Browse naturally while it records in the background
+- Passively builds a map of every API you visit, so your agents know what's available before asking
 
 ### Setup
 
@@ -262,11 +262,47 @@ apitap extension install --extension-id <your-extension-id>
 ```
 Find your extension ID at `chrome://extensions` (enable Developer mode).
 
-### Usage
+### Passive Index (always-on)
 
-1. Click the ApiTap icon in Chrome → **Start Capture**
-2. Browse normally — extension records all API traffic
-3. Click **Stop** → skill files auto-save to `~/.apitap/skills/`
+Once installed, the extension silently observes API traffic as you browse — no infobar, no CDP, no performance impact. It builds a lightweight index of every domain's API shape: endpoints, HTTP methods, auth type, pagination patterns.
+
+```bash
+# See everything the extension has discovered
+apitap index
+
+# Filter to a specific domain
+apitap index discord.com
+```
+
+The index lives at `~/.apitap/index.json` and is automatically read by the `apitap_discover` MCP tool — so your agents can ask "what do you know about Discord's API?" and get a useful answer without triggering a full capture.
+
+Agents see something like:
+
+```
+discord.com — 8 endpoints mapped, Bearer auth, last seen 2h ago
+  GET /api/v10/channels/:id  (hits: 47, JSON, paginated)
+  GET /api/v10/guilds/:id/members  (hits: 12, JSON)
+  POST /api/v10/channels/:id/messages  (hits: 8, JSON)
+  ...
+```
+
+### Promoting to a Full Skill File
+
+The index is a map — it knows what endpoints exist but not their response shapes. To get a full replayable skill file, promote a domain:
+
+**From the popup:** Click the ApiTap icon → find the domain → **Generate skill file**
+
+**Via agent:** Your agent can request a capture automatically. You'll get a notification to approve, the extension briefly attaches CDP, captures response shapes, then detaches. The full skill file saves to `~/.apitap/skills/`.
+
+**Auto-learn (opt-in):** In the extension popup → Settings → enable **Auto-learn**. The extension will automatically promote domains you visit frequently. Off by default.
+
+### Manual Capture
+
+For one-off captures without the passive index:
+
+1. Click the ApiTap icon → **Start Capture**
+2. Browse the site — extension records API traffic
+3. Click **Stop** → skill file auto-saves to `~/.apitap/skills/`
 
 The popup shows CLI connection status and live capture stats. Auth tokens are automatically stored to `~/.apitap/auth.enc` with `[stored]` placeholders in the exported skill files.
 

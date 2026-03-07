@@ -36,3 +36,34 @@ export interface AgentResponse {
   error?: string;
   _relayId?: string;
 }
+
+// --- Passive Index types (v2) ---
+
+export interface IndexFile {
+  v: 1;
+  updatedAt: string;           // ISO timestamp of last write
+  entries: IndexEntry[];
+}
+
+export interface IndexEntry {
+  domain: string;
+  firstSeen: string;           // ISO timestamp
+  lastSeen: string;            // ISO timestamp
+  totalHits: number;           // all observed requests (including filtered)
+  promoted: boolean;           // full skill file exists
+  lastPromoted?: string;       // ISO timestamp of last CDP capture
+  skillFileSource?: 'extension' | 'cli';
+  endpoints: IndexEndpoint[];
+}
+
+export interface IndexEndpoint {
+  path: string;                // parameterized: /api/v10/channels/:id
+  methods: string[];           // ["GET", "PATCH", "DELETE"]
+  authType?: string;           // "Bearer" | "API Key" | "Cookie" -- never the value
+  hasBody: boolean;            // content-length > 0
+  hits: number;                // per-endpoint count
+  lastSeen: string;            // ISO timestamp
+  pagination?: string;         // "cursor" | "offset" | "page"
+  type?: 'graphql';            // flagged for special handling
+  queryParamNames?: string[];  // names only, never values
+}

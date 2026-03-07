@@ -10,6 +10,7 @@ import { isAllowedUrl, scrubAuthFromSkillJson } from './security.js';
 import { processCompletedRequest } from './observer.js';
 import { mergeObservation, createEmptyIndex } from './index-store.js';
 import { markPromoted } from './promotion.js';
+import { applyLifecycle } from './lifecycle.js';
 import type { IndexFile } from './types.js';
 
 // --- Native messaging bridge (persistent port) ---
@@ -619,6 +620,9 @@ chrome.webRequest.onCompleted.addListener(
     if (obs) {
       passiveIndex = mergeObservation(passiveIndex, obs);
       indexDirty = true;
+
+      // Auto-learn check
+      void checkAutoLearn(obs.domain);
     }
   },
   { urls: ['<all_urls>'] },
@@ -631,6 +635,10 @@ const INDEX_FLUSH_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 async function flushIndex(): Promise<void> {
   if (!indexDirty) return;
+
+  // Apply lifecycle rules before flushing
+  const { index: cleaned } = applyLifecycle(passiveIndex);
+  passiveIndex = cleaned;
 
   // Persist to chrome.storage.local first (survives service worker restart)
   await chrome.storage.local.set({ passiveIndex });
@@ -662,6 +670,37 @@ chrome.runtime.onSuspend.addListener(() => {
   // Synchronous chrome.storage.local.set as last resort
   chrome.storage.local.set({ passiveIndex });
 });
+
+// --- Auto-learn ---
+
+async function checkAutoLearn(domain: string): Promise<void> {
+  const settings = await chrome.storage.local.get(['autoLearn', 'revisitThreshold']);
+  if (!settings.autoLearn) return;
+
+  const threshold = settings.revisitThreshold ?? 3;
+  const entry = passiveIndex.entries.find(e => e.domain === domain);
+  if (!entry || entry.promoted) return;
+
+  // Use totalHits as a proxy for revisit frequency
+  if (entry.totalHits >= threshold && !state.active) {
+    const tab = await findOrOpenTab(domain);
+    if (!tab.id) return;
+    const skillFiles = await captureWithPlateau(tab.id, {
+      idleTimeout: 10_000,
+      maxDuration: 120_000,
+    });
+    if (skillFiles.length > 0 && bridgeAvailable && nativePort) {
+      const skills = skillFiles.map(json => {
+        const parsed = JSON.parse(json);
+        return { domain: parsed.domain, skillJson: json };
+      });
+      await saveViaBridge(skills);
+      passiveIndex = markPromoted(passiveIndex, domain, 'extension');
+      indexDirty = true;
+      await flushIndex();
+    }
+  }
+}
 
 // --- Start / Stop ---
 

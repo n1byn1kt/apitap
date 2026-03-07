@@ -101,3 +101,5 @@ button#btn-stop {
 .badge.promoted { font-size: 11px; color: #4a9; }
 .setting-row { margin-bottom: 12px; }
 .setting-desc { font-size: 11px; color: #888; margin: 2px 0 0; }
+
+.hidden { display: none; }

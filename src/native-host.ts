@@ -27,10 +27,11 @@ async function signSkillJson(skillJson: string): Promise<string> {
 }
 
 export interface NativeRequest {
-  action: 'save_skill' | 'save_batch' | 'ping' | 'capture_request';
+  action: 'save_skill' | 'save_batch' | 'ping' | 'capture_request' | 'save_index';
   domain?: string;
   skillJson?: string;
   skills?: Array<{ domain: string; skillJson: string }>;
+  indexJson?: string;
 }
 
 export interface NativeResponse {
@@ -115,6 +116,29 @@ export async function handleNativeMessage(
       return { success: true, paths };
     }
 
+    if (request.action === 'save_index') {
+      if (!request.indexJson) {
+        return { success: false, error: 'Missing indexJson' };
+      }
+      try {
+        JSON.parse(request.indexJson);
+      } catch {
+        return { success: false, error: 'Invalid JSON in indexJson' };
+      }
+
+      // index.json lives in ~/.apitap/ (parent of skills dir)
+      const apitapDir = path.dirname(skillsDir);
+      await fs.mkdir(apitapDir, { recursive: true });
+      const indexPath = path.join(apitapDir, 'index.json');
+
+      // Atomic write: temp file + rename
+      const tmpPath = indexPath + '.tmp.' + process.pid;
+      await fs.writeFile(tmpPath, request.indexJson, { mode: 0o600 });
+      await fs.rename(tmpPath, indexPath);
+
+      return { success: true, path: indexPath };
+    }
+
     return { success: false, error: `Unknown action: ${request.action}` };
   } catch (err) {
     return { success: false, error: String(err) };
@@ -124,7 +148,7 @@ export async function handleNativeMessage(
 // --- Relay handler ---
 
 // Actions handled locally by the native host (filesystem operations)
-const LOCAL_ACTIONS = new Set(['save_skill', 'save_batch', 'ping']);
+const LOCAL_ACTIONS = new Set(['save_skill', 'save_batch', 'ping', 'save_index']);
 
 // Actions relayed to the extension (browser operations)
 const EXTENSION_ACTIONS = new Set(['capture_request']);

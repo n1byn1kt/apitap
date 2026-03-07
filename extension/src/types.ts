@@ -11,7 +11,9 @@ export interface CaptureState {
 
 // Messages from popup → background
 export interface CaptureMessage {
-  type: 'START_CAPTURE' | 'STOP_CAPTURE' | 'GET_STATE' | 'DOWNLOAD_SKILL';
+  type: 'START_CAPTURE' | 'STOP_CAPTURE' | 'GET_STATE' | 'DOWNLOAD_SKILL'
+    | 'PROMOTE_DOMAIN' | 'GET_INDEX';
+  domain?: string; // for PROMOTE_DOMAIN
 }
 
 // Responses from background → popup

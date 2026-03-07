@@ -393,6 +393,8 @@ All commands support `--json` for machine-readable output.
 | `apitap serve <domain>` | Serve a skill file as an MCP server |
 | `apitap inspect <url>` | Discover APIs without saving |
 | `apitap stats` | Show token savings report |
+| `apitap audit` | Audit stored skill files and credentials |
+| `apitap forget <domain>` | Remove skill file and credentials for a domain |
 | `apitap --version` | Print version |
 
 ### Capture flags

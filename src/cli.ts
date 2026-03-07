@@ -17,6 +17,7 @@ import { buildInspectReport, formatInspectHuman } from './inspect/report.js';
 import { generateStatsReport, formatStatsHuman } from './stats/report.js';
 import { detectAntiBot, type AntiBotSignal } from './capture/anti-bot.js';
 import { discover } from './discovery/index.js';
+import { readIndexEntry } from './index/reader.js';
 import { peek } from './read/peek.js';
 import { read } from './read/index.js';
 import { homedir } from 'node:os';
@@ -850,8 +851,17 @@ async function handleDiscover(positional: string[], flags: Record<string, string
 
   const result = await discover(url);
 
+  // Look up passive index data for this domain
+  let domain: string;
+  try {
+    domain = new URL(fullDiscoverUrl).hostname;
+  } catch {
+    domain = url;
+  }
+  const indexEntry = await readIndexEntry(domain);
+
   if (json) {
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify({ ...result, indexEntry: indexEntry ?? undefined }, null, 2));
   } else {
     // Confidence summary
     const confidenceLabels: Record<string, string> = {
@@ -896,6 +906,24 @@ async function handleDiscover(positional: string[], flags: Record<string, string
 
     if (result.skillFile) {
       console.log(`\n  Skill file: ${result.skillFile.endpoints.length} endpoints predicted`);
+    }
+
+    if (indexEntry) {
+      console.log(`\n  Passive Index (from browser extension):`);
+      console.log(`    Domain:     ${indexEntry.domain}`);
+      console.log(`    Total hits: ${indexEntry.totalHits}`);
+      console.log(`    Endpoints:  ${indexEntry.endpoints.length}`);
+      console.log(`    Promoted:   ${indexEntry.promoted ? 'yes' : 'no'}`);
+      if (indexEntry.endpoints.length > 0) {
+        console.log(`    Observed endpoints:`);
+        for (const ep of indexEntry.endpoints) {
+          const methods = ep.methods.join(', ');
+          const auth = ep.authType ? ` [${ep.authType}]` : '';
+          const pagination = ep.pagination ? ` (${ep.pagination})` : '';
+          const gql = ep.type === 'graphql' ? ' [GraphQL]' : '';
+          console.log(`      ${methods} ${ep.path} \u2014 ${ep.hits} hits${auth}${pagination}${gql}`);
+        }
+      }
     }
 
     if (result.confidence === 'none') {

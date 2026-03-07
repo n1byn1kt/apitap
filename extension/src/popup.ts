@@ -127,6 +127,99 @@ chrome.runtime.onMessage.addListener((message: CaptureResponse) => {
   }
 });
 
+// --- Tab switching ---
+
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => (c as HTMLElement).style.display = 'none');
+    tab.classList.add('active');
+    const target = tab.getAttribute('data-tab')!;
+    document.getElementById('tab-' + target)!.style.display = 'block';
+    if (target === 'index') loadIndex();
+  });
+});
+
+// --- Index tab ---
+
+function loadIndex() {
+  chrome.runtime.sendMessage({ type: 'GET_INDEX' }, (response: any) => {
+    const index = response?.index;
+    const list = document.getElementById('index-list')!;
+    const empty = document.getElementById('index-empty')!;
+
+    // Clear previous entries
+    while (list.firstChild) list.removeChild(list.firstChild);
+
+    if (!index || index.entries.length === 0) {
+      empty.style.display = 'block';
+      return;
+    }
+
+    empty.style.display = 'none';
+    // Sort by totalHits descending
+    const sorted = [...index.entries].sort((a: any, b: any) => b.totalHits - a.totalHits);
+
+    for (const entry of sorted) {
+      const card = document.createElement('div');
+      card.className = 'index-entry';
+
+      const header = document.createElement('div');
+      header.className = 'index-header';
+      const domainEl = document.createElement('strong');
+      domainEl.textContent = entry.domain;
+      const hitsEl = document.createElement('span');
+      hitsEl.className = 'hit-count';
+      hitsEl.textContent = entry.totalHits + ' hits';
+      header.appendChild(domainEl);
+      header.appendChild(hitsEl);
+
+      const meta = document.createElement('div');
+      meta.className = 'index-meta';
+      const authBadge = entry.endpoints.find((ep: any) => ep.authType)?.authType ?? '';
+      meta.textContent = entry.endpoints.length + ' endpoints' + (authBadge ? ' | ' + authBadge : '');
+
+      const actions = document.createElement('div');
+      actions.className = 'index-actions';
+      if (entry.promoted) {
+        const badge = document.createElement('span');
+        badge.className = 'badge promoted';
+        badge.textContent = 'Skill file exists';
+        actions.appendChild(badge);
+      } else {
+        const btn = document.createElement('button');
+        btn.className = 'btn-promote';
+        btn.textContent = 'Generate skill file';
+        btn.addEventListener('click', () => {
+          btn.textContent = 'Capturing...';
+          btn.disabled = true;
+          chrome.runtime.sendMessage({ type: 'PROMOTE_DOMAIN', domain: entry.domain });
+        });
+        actions.appendChild(btn);
+      }
+
+      card.appendChild(header);
+      card.appendChild(meta);
+      card.appendChild(actions);
+      list.appendChild(card);
+    }
+  });
+}
+
+// --- Settings tab ---
+
+chrome.storage.local.get(['autoLearn', 'revisitThreshold'], (result) => {
+  (document.getElementById('auto-learn-toggle') as HTMLInputElement).checked = result.autoLearn ?? false;
+  (document.getElementById('revisit-threshold') as HTMLInputElement).value = String(result.revisitThreshold ?? 3);
+});
+
+document.getElementById('auto-learn-toggle')!.addEventListener('change', (e) => {
+  chrome.storage.local.set({ autoLearn: (e.target as HTMLInputElement).checked });
+});
+document.getElementById('revisit-threshold')!.addEventListener('change', (e) => {
+  chrome.storage.local.set({ revisitThreshold: parseInt((e.target as HTMLInputElement).value, 10) });
+});
+
 // --- Init: restore state from session storage, then sync with background ---
 
 (async () => {

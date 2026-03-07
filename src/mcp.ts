@@ -11,6 +11,7 @@ import { deriveSigningKey } from './auth/crypto.js';
 import { requestAuth } from './auth/handoff.js';
 import { CaptureSession } from './capture/session.js';
 import { discover } from './discovery/index.js';
+import { readIndexEntry } from './index/reader.js';
 import { SessionCache } from './orchestration/cache.js';
 import { peek } from './read/peek.js';
 import { read } from './read/index.js';
@@ -139,6 +140,11 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
         }
         const result = await discover(url);
 
+        // Look up passive index data for this domain
+        let domain: string;
+        try { domain = new URL(url).hostname; } catch { domain = url; }
+        const indexEntry = await readIndexEntry(domain);
+
         // If we got a skill file, sign and save it automatically
         if (result.skillFile && (result.confidence === 'high' || result.confidence === 'medium')) {
           const { writeSkillFile } = await import('./skill/store.js');
@@ -147,10 +153,10 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
           const sigKey = deriveSigningKey(machineId);
           result.skillFile = signSkillFile(result.skillFile, sigKey);
           const path = await writeSkillFile(result.skillFile, skillsDir);
-          return wrapExternalContent({ ...result, savedTo: path }, 'apitap_discover');
+          return wrapExternalContent({ ...result, savedTo: path, indexEntry: indexEntry ?? undefined }, 'apitap_discover');
         }
 
-        return wrapExternalContent(result, 'apitap_discover');
+        return wrapExternalContent({ ...result, indexEntry: indexEntry ?? undefined }, 'apitap_discover');
       } catch (err: any) {
         return {
           content: [{ type: 'text' as const, text: `Discovery failed: ${err.message}` }],

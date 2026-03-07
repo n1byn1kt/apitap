@@ -3,7 +3,7 @@
   "name": "ApiTap — API Capture",
   "version": "0.1.0",
   "description": "Capture API traffic and generate replayable skill files",
-  "permissions": ["debugger", "activeTab", "tabs", "storage", "downloads", "nativeMessaging", "notifications"],
+  "permissions": ["debugger", "activeTab", "tabs", "storage", "downloads", "nativeMessaging", "notifications", "webRequest"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "dist/background.js",

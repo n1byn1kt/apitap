@@ -7,6 +7,11 @@ import type { CaptureState, CaptureMessage, CaptureResponse, AgentRequest, Agent
 import { extractDomain, pickPrimaryDomain } from './domain-utils.js';
 import { DomainGeneratorMap } from './multi-domain.js';
 import { isAllowedUrl, scrubAuthFromSkillJson } from './security.js';
+import { processCompletedRequest } from './observer.js';
+import { mergeObservation, createEmptyIndex } from './index-store.js';
+import { markPromoted } from './promotion.js';
+import { applyLifecycle } from './lifecycle.js';
+import type { IndexFile } from './types.js';
 
 // --- Native messaging bridge (persistent port) ---
 
@@ -551,6 +556,152 @@ chrome.storage.session.get(['captureState', 'lastSkillJson'], (result) => {
   if (result.lastSkillJson) lastSkillJson = result.lastSkillJson;
 });
 
+// --- Passive Index state ---
+
+let passiveIndex: IndexFile = createEmptyIndex();
+let indexDirty = false; // tracks whether index has unsaved changes
+
+// Pending request headers for auth detection (webRequest doesn't give both in one event)
+const pendingObserverHeaders = new Map<string, Record<string, string>>();
+
+// Load index from chrome.storage.local on startup
+chrome.storage.local.get(['passiveIndex'], (result) => {
+  if (result.passiveIndex) {
+    passiveIndex = result.passiveIndex;
+  }
+});
+
+// --- webRequest listeners for passive indexing ---
+
+// Capture request headers (for auth detection) — fires before request is sent
+chrome.webRequest.onSendHeaders.addListener(
+  (details) => {
+    if (details.tabId < 0) return; // ignore non-tab requests
+    const headers: Record<string, string> = {};
+    for (const h of details.requestHeaders ?? []) {
+      if (h.name && h.value) headers[h.name.toLowerCase()] = h.value;
+    }
+    pendingObserverHeaders.set(String(details.requestId), headers);
+    // Clean up if map grows too large (prevent memory leak)
+    if (pendingObserverHeaders.size > 1000) {
+      const keys = [...pendingObserverHeaders.keys()];
+      for (const k of keys.slice(0, 500)) pendingObserverHeaders.delete(k);
+    }
+  },
+  { urls: ['<all_urls>'] },
+  ['requestHeaders', 'extraHeaders'],
+);
+
+// Process completed requests — this is the main observation point
+chrome.webRequest.onCompleted.addListener(
+  (details) => {
+    if (details.tabId < 0) return; // ignore non-tab requests
+
+    const reqHeaders = pendingObserverHeaders.get(String(details.requestId)) ?? {};
+    pendingObserverHeaders.delete(String(details.requestId));
+
+    // Build response headers record
+    const responseHeaders: Record<string, string> = {};
+    for (const h of details.responseHeaders ?? []) {
+      if (h.name && h.value) responseHeaders[h.name.toLowerCase()] = h.value;
+    }
+
+    const contentType = responseHeaders['content-type'] ?? '';
+
+    const obs = processCompletedRequest({
+      url: details.url,
+      method: details.method,
+      statusCode: details.statusCode,
+      responseContentType: contentType,
+      requestHeaders: reqHeaders,
+      responseHeaders,
+    });
+
+    if (obs) {
+      passiveIndex = mergeObservation(passiveIndex, obs);
+      indexDirty = true;
+
+      // Auto-learn check
+      void checkAutoLearn(obs.domain);
+    }
+  },
+  { urls: ['<all_urls>'] },
+  ['responseHeaders', 'extraHeaders'],
+);
+
+// --- Index flush scheduling ---
+
+const INDEX_FLUSH_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+async function flushIndex(): Promise<void> {
+  if (!indexDirty) return;
+
+  // Apply lifecycle rules before flushing
+  const { index: cleaned } = applyLifecycle(passiveIndex);
+  passiveIndex = cleaned;
+
+  // Persist to chrome.storage.local first (survives service worker restart)
+  await chrome.storage.local.set({ passiveIndex });
+  indexDirty = false;
+
+  // Send to native host for disk persistence (if bridge connected)
+  if (nativePort && bridgeAvailable) {
+    try {
+      await sendNativePortMessage({
+        action: 'save_index',
+        indexJson: JSON.stringify(passiveIndex),
+      }, 15_000);
+    } catch {
+      // Native host not available — index stays in chrome.storage.local
+    }
+  }
+}
+
+// Periodic flush timer
+setInterval(flushIndex, INDEX_FLUSH_INTERVAL_MS);
+
+// Flush on tab close
+chrome.tabs.onRemoved.addListener(() => {
+  void flushIndex();
+});
+
+// Best-effort flush on service worker suspend (MV3)
+chrome.runtime.onSuspend.addListener(() => {
+  // Synchronous chrome.storage.local.set as last resort
+  chrome.storage.local.set({ passiveIndex });
+});
+
+// --- Auto-learn ---
+
+async function checkAutoLearn(domain: string): Promise<void> {
+  const settings = await chrome.storage.local.get(['autoLearn', 'revisitThreshold']);
+  if (!settings.autoLearn) return;
+
+  const threshold = settings.revisitThreshold ?? 3;
+  const entry = passiveIndex.entries.find(e => e.domain === domain);
+  if (!entry || entry.promoted) return;
+
+  // Use totalHits as a proxy for revisit frequency
+  if (entry.totalHits >= threshold && !state.active) {
+    const tab = await findOrOpenTab(domain);
+    if (!tab.id) return;
+    const skillFiles = await captureWithPlateau(tab.id, {
+      idleTimeout: 10_000,
+      maxDuration: 120_000,
+    });
+    if (skillFiles.length > 0 && bridgeAvailable && nativePort) {
+      const skills = skillFiles.map(json => {
+        const parsed = JSON.parse(json);
+        return { domain: parsed.domain, skillJson: json };
+      });
+      await saveViaBridge(skills);
+      passiveIndex = markPromoted(passiveIndex, domain, 'extension');
+      indexDirty = true;
+      await flushIndex();
+    }
+  }
+}
+
 // --- Start / Stop ---
 
 function startCapture(tabId: number) {
@@ -712,6 +863,58 @@ chrome.runtime.onMessage.addListener(
         } else {
           sendResponse({ type: 'ERROR', error: 'No skill file available' } as CaptureResponse);
         }
+        break;
+      }
+
+      case 'PROMOTE_DOMAIN': {
+        const promoteDomain = message.domain;
+        if (!promoteDomain || !isValidDomain(promoteDomain)) {
+          sendResponse({ type: 'ERROR', error: 'Invalid domain' } as CaptureResponse);
+          break;
+        }
+        if (state.active) {
+          sendResponse({ type: 'ERROR', error: 'Capture already in progress' } as CaptureResponse);
+          break;
+        }
+
+        findOrOpenTab(promoteDomain).then(async (tab) => {
+          if (!tab.id) {
+            sendResponse({ type: 'ERROR', error: 'No tab available' } as CaptureResponse);
+            return;
+          }
+
+          const skillFiles = await captureWithPlateau(tab.id, {
+            idleTimeout: 10_000,
+            maxDuration: 120_000,
+          });
+
+          if (skillFiles.length > 0) {
+            // Save via bridge
+            if (bridgeAvailable && nativePort) {
+              const skills = skillFiles.map(json => {
+                const parsed = JSON.parse(json);
+                return { domain: parsed.domain, skillJson: json };
+              });
+              await saveViaBridge(skills);
+            }
+
+            // Mark promoted in index
+            passiveIndex = markPromoted(passiveIndex, promoteDomain, 'extension');
+            indexDirty = true;
+            await flushIndex();
+          }
+
+          sendResponse({
+            type: 'CAPTURE_COMPLETE',
+            state: { ...state },
+            skillJson: lastSkillJson ?? undefined,
+          } as CaptureResponse);
+        });
+        return true; // async sendResponse
+      }
+
+      case 'GET_INDEX': {
+        sendResponse({ type: 'STATE_UPDATE', index: passiveIndex } as any);
         break;
       }
     }

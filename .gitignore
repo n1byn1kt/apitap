@@ -58,3 +58,10 @@ traction-log.md
 *.co.json
 *.xyz.json
 reddit.json
+
+# Traction monitoring (internal ops data, not for repo)
+TRACTION.md
+launch-*.md
+launch-traction-baseline.json
+monitoring/
+.traction-baseline

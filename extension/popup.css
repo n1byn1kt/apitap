@@ -88,3 +88,16 @@ button#btn-stop {
   background: #fff3e0;
   color: #e65100;
 }
+.tabs { display: flex; border-bottom: 1px solid #ccc; margin-bottom: 8px; }
+.tab { flex: 1; padding: 6px 8px; border: none; background: none; cursor: pointer; font-size: 13px; width: auto; display: inline-block; margin-top: 0; }
+.tab.active { border-bottom: 2px solid #4a9eff; font-weight: bold; }
+.tab-content { padding: 4px 0; }
+.index-entry { padding: 8px 0; border-bottom: 1px solid #eee; }
+.index-header { display: flex; justify-content: space-between; }
+.hit-count { color: #666; font-size: 12px; }
+.index-meta { font-size: 12px; color: #888; margin: 2px 0; }
+.index-actions { margin-top: 4px; }
+.btn-promote { font-size: 11px; padding: 2px 8px; cursor: pointer; width: auto; display: inline-block; }
+.badge.promoted { font-size: 11px; color: #4a9; }
+.setting-row { margin-bottom: 12px; }
+.setting-desc { font-size: 11px; color: #888; margin: 2px 0 0; }

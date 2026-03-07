@@ -132,10 +132,10 @@ chrome.runtime.onMessage.addListener((message: CaptureResponse) => {
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(c => (c as HTMLElement).style.display = 'none');
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
     tab.classList.add('active');
     const target = tab.getAttribute('data-tab')!;
-    document.getElementById('tab-' + target)!.style.display = 'block';
+    document.getElementById('tab-' + target)!.classList.remove('hidden');
     if (target === 'index') loadIndex();
   });
 });
@@ -152,11 +152,11 @@ function loadIndex() {
     while (list.firstChild) list.removeChild(list.firstChild);
 
     if (!index || index.entries.length === 0) {
-      empty.style.display = 'block';
+      empty.classList.remove('hidden');
       return;
     }
 
-    empty.style.display = 'none';
+    empty.classList.add('hidden');
     // Sort by totalHits descending
     const sorted = [...index.entries].sort((a: any, b: any) => b.totalHits - a.totalHits);
 

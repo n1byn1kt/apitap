@@ -103,3 +103,4 @@ button#btn-stop {
 .setting-desc { font-size: 11px; color: #888; margin: 2px 0 0; }
 
 .hidden { display: none; }
+.input-narrow { width: 40px; }

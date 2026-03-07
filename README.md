@@ -240,7 +240,9 @@ You can also serve a single skill file as a dedicated MCP server with `apitap se
 
 ## Chrome Extension
 
-ApiTap includes a Chrome extension that captures API traffic directly from your already-logged-in browser — no Playwright, no auth dance, no browser popups.
+> **Optional.** ApiTap works fully without the extension. Install it if you want passive API discovery or want to capture from your already-logged-in browser sessions.
+
+The extension captures API traffic directly from your browser — no Playwright, no auth dance, no browser popups. It also silently builds a map of every API you visit in the background.
 
 **Why use the extension?**
 - You're already logged into Spotify, Discord, Reddit — the extension captures from your live session
@@ -249,18 +251,39 @@ ApiTap includes a Chrome extension that captures API traffic directly from your 
 
 ### Setup
 
-1. Build the extension:
+**Step 1 — Install ApiTap CLI** (if you haven't already):
+```bash
+npm install -g @apitap/core
+```
+
+**Step 2 — Get the extension source:**
+```bash
+git clone https://github.com/n1byn1kt/apitap.git
+cd apitap
+```
+
+**Step 3 — Build the extension:**
 ```bash
 cd extension && npm install && npm run build
 ```
 
-2. Load in Chrome: `chrome://extensions` → Enable Developer mode → Load unpacked → select the `extension/` folder
+**Step 4 — Load into Chrome:**
+1. Open `chrome://extensions`
+2. Enable **Developer mode** (toggle, top right)
+3. Click **Load unpacked**
+4. Select the `extension/` folder inside the cloned repo
 
-3. Wire up auto-save (one-time):
+You should see the ApiTap icon appear in your toolbar.
+
+**Step 5 — Wire up native messaging (one-time):**
 ```bash
 apitap extension install --extension-id <your-extension-id>
 ```
-Find your extension ID at `chrome://extensions` (enable Developer mode).
+Find your extension ID on the `chrome://extensions` page (shown under the extension name after loading).
+
+**Step 6 — Verify the connection:**
+
+Click the ApiTap icon in Chrome. The popup should show **"CLI: Connected"**. If it shows disconnected, re-run Step 5 with the correct extension ID.
 
 ### Passive Index (always-on)
 

@@ -9,6 +9,7 @@ import { DomainGeneratorMap } from './multi-domain.js';
 import { isAllowedUrl, scrubAuthFromSkillJson } from './security.js';
 import { processCompletedRequest } from './observer.js';
 import { mergeObservation, createEmptyIndex } from './index-store.js';
+import { markPromoted } from './promotion.js';
 import type { IndexFile } from './types.js';
 
 // --- Native messaging bridge (persistent port) ---
@@ -823,6 +824,58 @@ chrome.runtime.onMessage.addListener(
         } else {
           sendResponse({ type: 'ERROR', error: 'No skill file available' } as CaptureResponse);
         }
+        break;
+      }
+
+      case 'PROMOTE_DOMAIN': {
+        const promoteDomain = message.domain;
+        if (!promoteDomain || !isValidDomain(promoteDomain)) {
+          sendResponse({ type: 'ERROR', error: 'Invalid domain' } as CaptureResponse);
+          break;
+        }
+        if (state.active) {
+          sendResponse({ type: 'ERROR', error: 'Capture already in progress' } as CaptureResponse);
+          break;
+        }
+
+        findOrOpenTab(promoteDomain).then(async (tab) => {
+          if (!tab.id) {
+            sendResponse({ type: 'ERROR', error: 'No tab available' } as CaptureResponse);
+            return;
+          }
+
+          const skillFiles = await captureWithPlateau(tab.id, {
+            idleTimeout: 10_000,
+            maxDuration: 120_000,
+          });
+
+          if (skillFiles.length > 0) {
+            // Save via bridge
+            if (bridgeAvailable && nativePort) {
+              const skills = skillFiles.map(json => {
+                const parsed = JSON.parse(json);
+                return { domain: parsed.domain, skillJson: json };
+              });
+              await saveViaBridge(skills);
+            }
+
+            // Mark promoted in index
+            passiveIndex = markPromoted(passiveIndex, promoteDomain, 'extension');
+            indexDirty = true;
+            await flushIndex();
+          }
+
+          sendResponse({
+            type: 'CAPTURE_COMPLETE',
+            state: { ...state },
+            skillJson: lastSkillJson ?? undefined,
+          } as CaptureResponse);
+        });
+        return true; // async sendResponse
+      }
+
+      case 'GET_INDEX': {
+        sendResponse({ type: 'STATE_UPDATE', index: passiveIndex } as any);
         break;
       }
     }

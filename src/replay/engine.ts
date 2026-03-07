@@ -628,7 +628,7 @@ export async function replayMultiple(
   const skillCache = new Map<string, SkillFile | null>();
   const uniqueDomains = [...new Set(requests.map(r => r.domain))];
   await Promise.all(uniqueDomains.map(async (domain) => {
-    const skill = await readSkillFile(domain, options.skillsDir, { verifySignature: true, signingKey });
+    const skill = await readSkillFile(domain, options.skillsDir, { verifySignature: true, signingKey, trustUnsigned: true });
     skillCache.set(domain, skill);
   }));
 

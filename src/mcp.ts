@@ -192,7 +192,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
       }
       const machineId = await getMachineId();
       const signingKey = deriveSigningKey(machineId);
-      const skill = await readSkillFile(domain, skillsDir, { verifySignature: true, signingKey });
+      const skill = await readSkillFile(domain, skillsDir, { verifySignature: true, signingKey, trustUnsigned: true });
       if (!skill) {
         return {
           content: [{ type: 'text' as const, text: `No skill file found for "${domain}". Use apitap_capture to capture it first.` }],

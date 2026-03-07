@@ -7,6 +7,9 @@ import type { CaptureState, CaptureMessage, CaptureResponse, AgentRequest, Agent
 import { extractDomain, pickPrimaryDomain } from './domain-utils.js';
 import { DomainGeneratorMap } from './multi-domain.js';
 import { isAllowedUrl, scrubAuthFromSkillJson } from './security.js';
+import { processCompletedRequest } from './observer.js';
+import { mergeObservation, createEmptyIndex } from './index-store.js';
+import type { IndexFile } from './types.js';
 
 // --- Native messaging bridge (persistent port) ---
 
@@ -549,6 +552,114 @@ function persistState() {
 chrome.storage.session.get(['captureState', 'lastSkillJson'], (result) => {
   if (result.captureState) state = result.captureState;
   if (result.lastSkillJson) lastSkillJson = result.lastSkillJson;
+});
+
+// --- Passive Index state ---
+
+let passiveIndex: IndexFile = createEmptyIndex();
+let indexDirty = false; // tracks whether index has unsaved changes
+
+// Pending request headers for auth detection (webRequest doesn't give both in one event)
+const pendingObserverHeaders = new Map<string, Record<string, string>>();
+
+// Load index from chrome.storage.local on startup
+chrome.storage.local.get(['passiveIndex'], (result) => {
+  if (result.passiveIndex) {
+    passiveIndex = result.passiveIndex;
+  }
+});
+
+// --- webRequest listeners for passive indexing ---
+
+// Capture request headers (for auth detection) — fires before request is sent
+chrome.webRequest.onSendHeaders.addListener(
+  (details) => {
+    if (details.tabId < 0) return; // ignore non-tab requests
+    const headers: Record<string, string> = {};
+    for (const h of details.requestHeaders ?? []) {
+      if (h.name && h.value) headers[h.name.toLowerCase()] = h.value;
+    }
+    pendingObserverHeaders.set(String(details.requestId), headers);
+    // Clean up if map grows too large (prevent memory leak)
+    if (pendingObserverHeaders.size > 1000) {
+      const keys = [...pendingObserverHeaders.keys()];
+      for (const k of keys.slice(0, 500)) pendingObserverHeaders.delete(k);
+    }
+  },
+  { urls: ['<all_urls>'] },
+  ['requestHeaders', 'extraHeaders'],
+);
+
+// Process completed requests — this is the main observation point
+chrome.webRequest.onCompleted.addListener(
+  (details) => {
+    if (details.tabId < 0) return; // ignore non-tab requests
+
+    const reqHeaders = pendingObserverHeaders.get(String(details.requestId)) ?? {};
+    pendingObserverHeaders.delete(String(details.requestId));
+
+    // Build response headers record
+    const responseHeaders: Record<string, string> = {};
+    for (const h of details.responseHeaders ?? []) {
+      if (h.name && h.value) responseHeaders[h.name.toLowerCase()] = h.value;
+    }
+
+    const contentType = responseHeaders['content-type'] ?? '';
+
+    const obs = processCompletedRequest({
+      url: details.url,
+      method: details.method,
+      statusCode: details.statusCode,
+      responseContentType: contentType,
+      requestHeaders: reqHeaders,
+      responseHeaders,
+    });
+
+    if (obs) {
+      passiveIndex = mergeObservation(passiveIndex, obs);
+      indexDirty = true;
+    }
+  },
+  { urls: ['<all_urls>'] },
+  ['responseHeaders', 'extraHeaders'],
+);
+
+// --- Index flush scheduling ---
+
+const INDEX_FLUSH_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+async function flushIndex(): Promise<void> {
+  if (!indexDirty) return;
+
+  // Persist to chrome.storage.local first (survives service worker restart)
+  await chrome.storage.local.set({ passiveIndex });
+  indexDirty = false;
+
+  // Send to native host for disk persistence (if bridge connected)
+  if (nativePort && bridgeAvailable) {
+    try {
+      await sendNativePortMessage({
+        action: 'save_index',
+        indexJson: JSON.stringify(passiveIndex),
+      }, 15_000);
+    } catch {
+      // Native host not available — index stays in chrome.storage.local
+    }
+  }
+}
+
+// Periodic flush timer
+setInterval(flushIndex, INDEX_FLUSH_INTERVAL_MS);
+
+// Flush on tab close
+chrome.tabs.onRemoved.addListener(() => {
+  void flushIndex();
+});
+
+// Best-effort flush on service worker suspend (MV3)
+chrome.runtime.onSuspend.addListener(() => {
+  // Synchronous chrome.storage.local.set as last resort
+  chrome.storage.local.set({ passiveIndex });
 });
 
 // --- Start / Stop ---

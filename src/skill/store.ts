@@ -85,7 +85,17 @@ export async function readSkillFile(
         }
       } else {
         const { verifySignature } = await import('./signing.js');
-        if (!verifySignature(skill, signingKey)) {
+        let verified = verifySignature(skill, signingKey);
+        if (!verified) {
+          // Fallback: try pre-v1.4.0 legacy key (before HKDF signing key separation)
+          // Files signed with deriveKey() directly (not deriveSigningKey()) will match here
+          const { deriveKey } = await import('../auth/crypto.js');
+          const { getMachineId } = await import('../auth/manager.js');
+          const machineId = await getMachineId();
+          const legacyKey = deriveKey(machineId);
+          verified = verifySignature(skill, legacyKey);
+        }
+        if (!verified) {
           throw new Error(`Skill file signature verification failed for ${domain} — file may be tampered`);
         }
       }

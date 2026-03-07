@@ -118,6 +118,18 @@ describe('CLI forget command', () => {
     assert.ok(stderr.includes('Domain required'));
   });
 
+  it('should reject path traversal attempts', async () => {
+    const traversalDomains = ['../../etc/passwd', '../foo', 'foo/bar', '../../../tmp/evil'];
+    for (const domain of traversalDomains) {
+      const { stderr } = await runCli(['forget', domain], {
+        APITAP_DIR: testDir,
+        APITAP_SKILLS_DIR: skillsDir,
+        APITAP_MACHINE_ID: 'test-machine-id',
+      });
+      assert.ok(stderr.includes('Invalid domain name'), `expected rejection for ${domain}`);
+    }
+  });
+
   it('should remove only auth when no skill file exists', async () => {
     const domain = 'authonly.com';
     const authManager = new AuthManager(testDir, 'test-machine-id');

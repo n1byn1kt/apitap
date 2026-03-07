@@ -1141,6 +1141,11 @@ async function handleForget(positional: string[]): Promise<void> {
     process.exit(1);
   }
 
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(domain) || domain.includes('..')) {
+    console.error('Error: Invalid domain name');
+    process.exit(1);
+  }
+
   const skillsDir = SKILLS_DIR || join(APITAP_DIR, 'skills');
   let skillRemoved = false;
   let authRemoved = false;

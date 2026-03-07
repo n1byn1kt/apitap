@@ -28,6 +28,20 @@ describe('sensitive path blocklist', () => {
     '/OAuth/Token',
     '/API/LOGIN',
     '/Auth/Callback',
+    // SSO/SAML/OIDC
+    '/sso/callback',
+    '/saml/acs',
+    '/oidc/authorize',
+    '/connect/token',
+    '/.well-known/openid-configuration',
+    // Payment/billing
+    '/checkout/complete',
+    '/payment/process',
+    '/billing/subscribe',
+    // Infrastructure
+    '/health',
+    '/metrics',
+    '/debug/vars',
   ];
 
   for (const path of blocked) {
@@ -45,6 +59,9 @@ describe('sensitive path blocklist', () => {
     '/graphql',
     '/api/v10/guilds/123/members',
     '/wp-json/wp/v2/posts',
+    '/healthcheck-results',  // /health uses word boundary
+    '/ssomething',           // /sso uses word boundary
+    '/debugger-info',        // /debug uses word boundary
   ];
 
   for (const path of allowed) {

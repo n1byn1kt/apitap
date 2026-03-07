@@ -23,6 +23,17 @@ const SENSITIVE_PATH_PATTERNS: RegExp[] = [
   /\/account\/security/i,
   /\/api-key/i,
   /\/credentials/i,
+  /\/sso\b/i,
+  /\/saml\b/i,
+  /\/oidc\b/i,
+  /\/connect\/token/i,
+  /\/checkout/i,
+  /\/payment/i,
+  /\/billing/i,
+  /\/\.well-known\/openid/i,
+  /\/health\b/i,
+  /\/metrics\b/i,
+  /\/debug\b/i,
 ];
 
 /**

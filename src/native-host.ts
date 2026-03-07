@@ -120,6 +120,9 @@ export async function handleNativeMessage(
       if (!request.indexJson) {
         return { success: false, error: 'Missing indexJson' };
       }
+      if (request.indexJson.length > 5 * 1024 * 1024) {
+        return { success: false, error: 'Index too large (max 5MB)' };
+      }
       try {
         JSON.parse(request.indexJson);
       } catch {

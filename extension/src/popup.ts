@@ -220,6 +220,67 @@ document.getElementById('revisit-threshold')!.addEventListener('change', (e) => 
   chrome.storage.local.set({ revisitThreshold: parseInt((e.target as HTMLInputElement).value, 10) });
 });
 
+// --- Exclusion list ---
+
+function renderExcludedDomains(domains: string[]) {
+  const list = document.getElementById('excluded-domains-list')!;
+  while (list.firstChild) list.removeChild(list.firstChild);
+  for (const domain of domains) {
+    const item = document.createElement('div');
+    item.className = 'excluded-item';
+    const name = document.createElement('span');
+    name.textContent = domain;
+    const btn = document.createElement('button');
+    btn.className = 'btn-remove';
+    btn.textContent = '\u00d7';
+    btn.addEventListener('click', () => {
+      chrome.storage.local.get(['excludedDomains'], (result) => {
+        const list = (result.excludedDomains ?? []).filter((d: string) => d !== domain);
+        chrome.storage.local.set({ excludedDomains: list }, () => renderExcludedDomains(list));
+      });
+    });
+    item.appendChild(name);
+    item.appendChild(btn);
+    list.appendChild(item);
+  }
+}
+
+chrome.storage.local.get(['excludedDomains'], (result) => {
+  renderExcludedDomains(result.excludedDomains ?? []);
+});
+
+document.getElementById('btn-exclude-domain')!.addEventListener('click', () => {
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    const tab = tabs[0];
+    if (!tab?.url) return;
+    try {
+      const domain = new URL(tab.url).hostname;
+      if (!domain) return;
+      chrome.storage.local.get(['excludedDomains'], (result) => {
+        const list: string[] = result.excludedDomains ?? [];
+        if (!list.includes(domain)) {
+          list.push(domain);
+          chrome.storage.local.set({ excludedDomains: list }, () => renderExcludedDomains(list));
+        }
+      });
+    } catch { /* invalid URL */ }
+  });
+});
+
+// --- Native host banner ---
+
+chrome.storage.local.get(['nativeHostConnected', 'bannerDismissed'], (result) => {
+  const banner = document.getElementById('native-banner')!;
+  if (result.nativeHostConnected === false && !result.bannerDismissed) {
+    banner.classList.remove('hidden');
+  }
+});
+
+document.getElementById('dismiss-banner')!.addEventListener('click', () => {
+  document.getElementById('native-banner')!.classList.add('hidden');
+  chrome.storage.local.set({ bannerDismissed: true });
+});
+
 // --- Init: restore state from session storage, then sync with background ---
 
 (async () => {

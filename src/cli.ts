@@ -446,7 +446,11 @@ async function handleReplay(positional: string[], flags: Record<string, string |
   });
 
   if (json) {
-    console.log(JSON.stringify({ status: result.status, data: result.data }, null, 2));
+    console.log(JSON.stringify({
+      status: result.status,
+      data: result.data,
+      ...(result.contractWarnings?.length ? { contractWarnings: result.contractWarnings } : {}),
+    }, null, 2));
   } else {
     console.log(`\n  Status: ${result.status}\n`);
     console.log(JSON.stringify(result.data, null, 2));

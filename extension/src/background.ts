@@ -7,7 +7,7 @@ import type { CaptureState, CaptureMessage, CaptureResponse, AgentRequest, Agent
 import { extractDomain, pickPrimaryDomain } from './domain-utils.js';
 import { DomainGeneratorMap } from './multi-domain.js';
 import { isAllowedUrl, scrubAuthFromSkillJson } from './security.js';
-import { processCompletedRequest, detectAuthType } from './observer.js';
+import { processCompletedRequest, detectAuthType, extractAuthToken } from './observer.js';
 import { mergeObservation, createEmptyIndex } from './index-store.js';
 import { markPromoted } from './promotion.js';
 import { applyLifecycle } from './lifecycle.js';
@@ -61,6 +61,9 @@ function connectNativePort(): void {
         pending.resolve({ success: false, error: 'native host disconnected' });
       }
       pendingPortMessages.clear();
+
+      // Update banner status
+      void chrome.storage.local.set({ nativeHostConnected: false });
 
       // Reconnect after a delay
       setTimeout(connectNativePort, 5000);
@@ -174,8 +177,10 @@ chrome.notifications.onClosed.addListener((notifId, byUser) => {
 async function findOrOpenTab(domain: string): Promise<chrome.tabs.Tab> {
   return new Promise((resolve) => {
     chrome.tabs.query({ url: `*://${domain}/*` }, (tabs) => {
-      if (tabs.length > 0) {
-        const active = tabs.find(t => t.active) ?? tabs[0];
+      // Filter out phantom tabs (about:blank, chrome://)
+      const valid = tabs.filter(t => t.url && t.url !== 'about:blank' && !t.url.startsWith('chrome://'));
+      if (valid.length > 0) {
+        const active = valid.find(t => t.active) ?? valid[0];
         resolve(active);
       } else {
         chrome.tabs.create({ url: `https://${domain}`, active: false }, (tab) => {
@@ -561,8 +566,23 @@ chrome.storage.session.get(['captureState', 'lastSkillJson'], (result) => {
 let passiveIndex: IndexFile = createEmptyIndex();
 let indexDirty = false; // tracks whether index has unsaved changes
 
+// --- Excluded domains (cached in memory, synced from chrome.storage.local) ---
+let excludedDomains: Set<string> = new Set();
+
+chrome.storage.local.get(['excludedDomains'], (result) => {
+  excludedDomains = new Set(result.excludedDomains ?? []);
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.excludedDomains) {
+    excludedDomains = new Set(changes.excludedDomains.newValue ?? []);
+  }
+});
+
 // Pending auth types for auth detection (store only type, never raw header values)
 const pendingObserverAuthTypes = new Map<string, string | undefined>();
+// Pending auth tokens for auth capture (raw header+value, stored in session storage)
+const pendingObserverAuthTokens = new Map<string, { header: string; value: string } | undefined>();
 
 // Load index from chrome.storage.local on startup
 chrome.storage.local.get(['passiveIndex'], (result) => {
@@ -581,11 +601,16 @@ chrome.webRequest.onSendHeaders.addListener(
     for (const h of details.requestHeaders ?? []) {
       if (h.name && h.value) headers[h.name.toLowerCase()] = h.value;
     }
-    pendingObserverAuthTypes.set(String(details.requestId), detectAuthType(headers));
-    // Clean up if map grows too large (prevent memory leak)
+    const reqId = String(details.requestId);
+    pendingObserverAuthTypes.set(reqId, detectAuthType(headers));
+    pendingObserverAuthTokens.set(reqId, extractAuthToken(headers));
+    // Clean up if maps grow too large (prevent memory leak)
     if (pendingObserverAuthTypes.size > 1000) {
       const keys = [...pendingObserverAuthTypes.keys()];
-      for (const k of keys.slice(0, 500)) pendingObserverAuthTypes.delete(k);
+      for (const k of keys.slice(0, 500)) {
+        pendingObserverAuthTypes.delete(k);
+        pendingObserverAuthTokens.delete(k);
+      }
     }
   },
   { urls: ['<all_urls>'] },
@@ -597,8 +622,17 @@ chrome.webRequest.onCompleted.addListener(
   (details) => {
     if (details.tabId < 0) return; // ignore non-tab requests
 
-    const authTypeOverride = pendingObserverAuthTypes.get(String(details.requestId));
-    pendingObserverAuthTypes.delete(String(details.requestId));
+    // Check exclusion list
+    try {
+      const urlDomain = new URL(details.url).hostname;
+      if (excludedDomains.has(urlDomain)) return;
+    } catch { /* invalid URL, let observer filter it */ }
+
+    const reqId = String(details.requestId);
+    const authTypeOverride = pendingObserverAuthTypes.get(reqId);
+    const authTokenOverride = pendingObserverAuthTokens.get(reqId);
+    pendingObserverAuthTypes.delete(reqId);
+    pendingObserverAuthTokens.delete(reqId);
 
     // Build response headers record
     const responseHeaders: Record<string, string> = {};
@@ -616,11 +650,18 @@ chrome.webRequest.onCompleted.addListener(
       requestHeaders: {},
       responseHeaders,
       authTypeOverride,
+      authTokenOverride,
     });
 
     if (obs) {
       passiveIndex = mergeObservation(passiveIndex, obs);
       indexDirty = true;
+
+      // Store auth token in session storage (cleared on browser close)
+      // TODO: encrypt with AES-GCM via HKDF-derived key
+      if (obs.authToken) {
+        void storeAuthToken(obs.domain, obs.authToken);
+      }
 
       // Auto-learn check
       void checkAutoLearn(obs.domain);
@@ -672,6 +713,26 @@ chrome.runtime.onSuspend.addListener(() => {
   chrome.storage.local.set({ passiveIndex });
 });
 
+// --- Auth token session storage ---
+// Auth tokens are stored in chrome.storage.session (cleared on browser close).
+// TODO: encrypt with AES-GCM via HKDF-derived key for defense-in-depth.
+
+async function storeAuthToken(domain: string, token: { header: string; value: string }): Promise<void> {
+  const result = await chrome.storage.session.get(['authTokens']);
+  const tokens: Record<string, { header: string; value: string }> = result.authTokens ?? {};
+  // Only store first token per domain (most likely the primary auth)
+  if (!tokens[domain]) {
+    tokens[domain] = token;
+    await chrome.storage.session.set({ authTokens: tokens });
+  }
+}
+
+async function getAuthToken(domain: string): Promise<{ header: string; value: string } | undefined> {
+  const result = await chrome.storage.session.get(['authTokens']);
+  const tokens: Record<string, { header: string; value: string }> = result.authTokens ?? {};
+  return tokens[domain];
+}
+
 // --- Auto-learn ---
 
 let autoLearnInProgress = false;
@@ -702,6 +763,16 @@ async function checkAutoLearn(domain: string): Promise<void> {
           return { domain: parsed.domain, skillJson: json };
         });
         await saveViaBridge(skills);
+        // Save stored auth token to native host encrypted storage
+        const token = await getAuthToken(domain);
+        if (token) {
+          await sendNativePortMessage({
+            action: 'save_auth',
+            domain,
+            authHeader: token.header,
+            authValue: token.value,
+          });
+        }
         passiveIndex = markPromoted(passiveIndex, domain, 'extension');
         indexDirty = true;
         await flushIndex();
@@ -830,7 +901,7 @@ chrome.runtime.onMessage.addListener(
       case 'START_CAPTURE': {
         chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
           const tab = tabs[0];
-          if (!tab?.id || !tab.url) {
+          if (!tab?.id || !tab.url || tab.url === 'about:blank' || tab.url.startsWith('chrome://')) {
             sendResponse({ type: 'ERROR', error: 'No active tab' } as CaptureResponse);
             return;
           }
@@ -906,6 +977,17 @@ chrome.runtime.onMessage.addListener(
                 return { domain: parsed.domain, skillJson: json };
               });
               await saveViaBridge(skills);
+
+              // Save stored auth token to native host encrypted storage
+              const token = await getAuthToken(promoteDomain);
+              if (token) {
+                await sendNativePortMessage({
+                  action: 'save_auth',
+                  domain: promoteDomain,
+                  authHeader: token.header,
+                  authValue: token.value,
+                });
+              }
             }
 
             // Mark promoted in index
@@ -931,7 +1013,13 @@ chrome.runtime.onMessage.addListener(
   },
 );
 
-// Connect to native messaging host on startup
+// Connect to native messaging host on startup and ping
 connectNativePort();
 state.bridgeConnected = bridgeAvailable;
 persistState();
+
+// Ping native host and store connection status for popup banner
+(async () => {
+  const connected = await checkBridge();
+  await chrome.storage.local.set({ nativeHostConnected: connected });
+})();

@@ -8,7 +8,7 @@ import os from 'node:os';
 import net from 'node:net';
 import { signSkillFile } from './skill/signing.js';
 import { deriveSigningKey } from './auth/crypto.js';
-import { getMachineId } from './auth/manager.js';
+import { getMachineId, AuthManager } from './auth/manager.js';
 
 const SKILLS_DIR = path.join(os.homedir(), '.apitap', 'skills');
 const VERSION = '1.0.0';
@@ -27,11 +27,13 @@ async function signSkillJson(skillJson: string): Promise<string> {
 }
 
 export interface NativeRequest {
-  action: 'save_skill' | 'save_batch' | 'ping' | 'capture_request' | 'save_index';
+  action: 'save_skill' | 'save_batch' | 'ping' | 'capture_request' | 'save_index' | 'save_auth';
   domain?: string;
   skillJson?: string;
   skills?: Array<{ domain: string; skillJson: string }>;
   indexJson?: string;
+  authHeader?: string;
+  authValue?: string;
 }
 
 export interface NativeResponse {
@@ -142,6 +144,31 @@ export async function handleNativeMessage(
       return { success: true, path: indexPath };
     }
 
+    if (request.action === 'save_auth') {
+      if (!request.domain || !isValidDomain(request.domain)) {
+        return { success: false, error: `Invalid domain: ${request.domain}` };
+      }
+      if (!request.authHeader || !request.authValue) {
+        return { success: false, error: 'Missing authHeader or authValue' };
+      }
+      const headerLower = request.authHeader.toLowerCase();
+      const type = headerLower === 'authorization'
+        ? (request.authValue.startsWith('Bearer ') ? 'bearer' : 'api-key')
+        : headerLower === 'x-api-key' ? 'api-key'
+        : headerLower === 'cookie' ? 'cookie'
+        : 'custom';
+
+      const machineId = await getMachineId();
+      const apitapDir = path.dirname(skillsDir);
+      const authManager = new AuthManager(apitapDir, machineId);
+      await authManager.store(request.domain, {
+        type: type as 'bearer' | 'api-key' | 'cookie' | 'custom',
+        header: request.authHeader,
+        value: request.authValue,
+      });
+      return { success: true };
+    }
+
     return { success: false, error: `Unknown action: ${request.action}` };
   } catch (err) {
     return { success: false, error: String(err) };
@@ -151,7 +178,7 @@ export async function handleNativeMessage(
 // --- Relay handler ---
 
 // Actions handled locally by the native host (filesystem operations)
-const LOCAL_ACTIONS = new Set(['save_skill', 'save_batch', 'ping', 'save_index']);
+const LOCAL_ACTIONS = new Set(['save_skill', 'save_batch', 'ping', 'save_index', 'save_auth']);
 
 // Actions relayed to the extension (browser operations)
 const EXTENSION_ACTIONS = new Set(['capture_request']);

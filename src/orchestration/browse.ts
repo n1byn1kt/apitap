@@ -315,6 +315,8 @@ export async function browse(
     // Check content-type: HTML responses are not usable API data
     const contentType = result.headers['content-type'] ?? '';
     if (contentType.includes('text/html')) {
+      // Invalidate stale cache so next call reads fresh skill file from disk
+      cache?.invalidate(domain);
       return {
         success: false,
         reason: 'non_api_response',

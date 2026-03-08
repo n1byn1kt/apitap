@@ -58,6 +58,10 @@ npm version "$BUMP"
 
 VERSION=$(node -p "require('./package.json').version")
 
+# Build dist/ so published package is up to date
+echo "🔨 Building dist/..."
+npm run build
+
 # Publish to npm
 echo "🚀 Publishing to npm..."
 npm publish --ignore-scripts

@@ -29,7 +29,7 @@ TEST_OUTPUT=$(npm test 2>&1)
 set -e
 ACTUAL_TESTS=$(echo "$TEST_OUTPUT" | grep "^# tests" | awk '{print $3}')
 WEBSITE_TESTS=$(grep -o 'APITAP_TESTS = [0-9]*' ../apitap-website/index.html 2>/dev/null | awk '{print $3}' || echo "?")
-README_TESTS=$(grep -o 'tests-[0-9]*%20passing' README.md | grep -o '[0-9]*' || echo "?")
+README_TESTS=$(grep -oP 'tests-\K[0-9]+(?=%20passing)' README.md || echo "?")
 
 if [[ "$ACTUAL_TESTS" != "$WEBSITE_TESTS" || "$ACTUAL_TESTS" != "$README_TESTS" ]]; then
   echo ""

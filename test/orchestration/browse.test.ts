@@ -215,6 +215,54 @@ describe('browse orchestration', () => {
 
     await new Promise<void>(r => htmlServer.close(() => r()));
   });
+
+  it('invalidates cache after non_api_response so next call reads from disk', async () => {
+    // Server 1: returns HTML (stale skeleton will hit this)
+    const htmlServer = createServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end('<html><body>Stale</body></html>');
+    });
+    await new Promise<void>(r => htmlServer.listen(0, r));
+    const htmlBaseUrl = `http://localhost:${(htmlServer.address() as AddressInfo).port}`;
+
+    const machineId = await getMachineId();
+    const sigKey = deriveSigningKey(machineId);
+
+    // Write a skeleton skill pointing at the HTML server
+    await writeSkillFile(signSkillFile(makeSkill('localhost', htmlBaseUrl, [
+      { id: 'get-api-data', method: 'GET', path: '/api/data' },
+    ]), sigKey), testDir);
+
+    const cache = new SessionCache();
+
+    // First browse: populates cache, gets HTML → non_api_response
+    const r1 = await browse('http://localhost/api/data', {
+      skillsDir: testDir,
+      cache,
+      _skipSsrfCheck: true,
+    });
+    assert.equal(r1.success, false);
+    assert.equal(!r1.success && r1.reason, 'non_api_response');
+
+    // Cache should be invalidated after non_api_response
+    assert.equal(cache.has('localhost'), false);
+
+    // Now write a real skill file pointing at the JSON server
+    await writeSkillFile(signSkillFile(makeSkill('localhost', baseUrl, [
+      { id: 'get-api-items', method: 'GET', path: '/api/items' },
+    ]), sigKey), testDir);
+
+    // Second browse: cache is empty, reads fresh skill from disk → success
+    const r2 = await browse('http://localhost/api/items', {
+      skillsDir: testDir,
+      cache,
+      _skipSsrfCheck: true,
+    });
+    assert.equal(r2.success, true);
+    assert.equal(r2.success && r2.skillSource, 'disk');
+
+    await new Promise<void>(r => htmlServer.close(() => r()));
+  });
 });
 
 describe('browse with bridge escalation', () => {

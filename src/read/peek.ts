@@ -48,6 +48,22 @@ export async function peek(url: string, options: PeekOptions = {}): Promise<Peek
   const contentType = headers['content-type'] || null;
   const server = headers['server'] || null;
 
+  // JSON API responses with HTTP 200 are always accessible, regardless of CDN headers
+  if (status === 200 && contentType && contentType.includes('application/json')) {
+    const framework = detectFramework(headers, signals);
+    return {
+      url,
+      status,
+      accessible: true,
+      contentType,
+      server,
+      framework,
+      botProtection: null,
+      signals,
+      recommendation: 'read',
+    };
+  }
+
   // Detect bot protection
   const botProtection = detectBotProtection(headers, signals);
 

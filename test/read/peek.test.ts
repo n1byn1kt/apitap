@@ -150,6 +150,31 @@ describe('peek', () => {
     assert.equal(result.recommendation, 'blocked');
   });
 
+  it('JSON API behind Cloudflare returns accessible=true, not blocked', async () => {
+    responseHeaders = {
+      'Content-Type': 'application/json; charset=utf-8',
+      'cf-ray': '12345-IAD',
+    };
+    responseStatus = 200;
+    const result = await peek(baseUrl, { skipSsrf: true });
+    assert.equal(result.status, 200);
+    assert.equal(result.accessible, true);
+    assert.equal(result.recommendation, 'read');
+    assert.equal(result.botProtection, null);
+  });
+
+  it('HTML behind Cloudflare still returns blocked', async () => {
+    responseHeaders = {
+      'Content-Type': 'text/html',
+      'cf-ray': '12345-IAD',
+    };
+    responseStatus = 200;
+    const result = await peek(baseUrl, { skipSsrf: true });
+    assert.equal(result.accessible, false);
+    assert.equal(result.recommendation, 'blocked');
+    assert.equal(result.botProtection, 'cloudflare');
+  });
+
   it('SSRF blocked URL returns blocked with fetch failed signal', async () => {
     // Without skipSsrf, localhost is blocked by SSRF protection
     const result = await peek('http://127.0.0.1:9999');

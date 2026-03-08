@@ -7,6 +7,8 @@ import type { IndexEndpoint } from './types.js';
 export interface Observation {
   domain: string;
   endpoint: IndexEndpoint;
+  /** Raw auth header + value, if detected */
+  authToken?: { header: string; value: string };
 }
 
 /** Input for processCompletedRequest — abstraction over webRequest details */
@@ -18,6 +20,8 @@ export interface CompletedRequestDetails {
   requestHeaders: Record<string, string>;
   responseHeaders: Record<string, string>;
   authTypeOverride?: string;  // pre-detected, avoids storing raw headers
+  /** Raw auth header+value pair, pre-extracted from onSendHeaders */
+  authTokenOverride?: { header: string; value: string };
 }
 
 /** Content types that indicate API responses */
@@ -26,6 +30,16 @@ function isApiContentType(contentType: string): boolean {
   return ct.includes('application/json') ||
     ct.includes('application/graphql') ||
     ct.includes('application/vnd.api+json');
+}
+
+/** Extract auth header name and raw value from request headers */
+export function extractAuthToken(headers: Record<string, string>): { header: string; value: string } | undefined {
+  const auth = headers['authorization'] || headers['Authorization'];
+  if (auth) return { header: 'authorization', value: auth };
+  const apiKey = headers['x-api-key'] || headers['X-Api-Key'];
+  if (apiKey) return { header: 'x-api-key', value: apiKey };
+  // Skip cookies — too broad and session-specific
+  return undefined;
 }
 
 /** Detect auth type from request headers (type only, never the value) */
@@ -123,5 +137,9 @@ export function processCompletedRequest(details: CompletedRequestDetails): Obser
     ...(queryParamNames.length > 0 && { queryParamNames }),
   };
 
-  return { domain, endpoint };
+  return {
+    domain,
+    endpoint,
+    ...(details.authTokenOverride ? { authToken: details.authTokenOverride } : {}),
+  };
 }

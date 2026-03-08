@@ -6,7 +6,11 @@
 </head>
 <body>
   <div id="app">
-    <h1>ApiTap</h1>
+    <h1 class="logo"><img src="icons/icon32.png" alt="" width="20" height="20">ApiTap</h1>
+    <div id="native-banner" class="banner warning hidden">
+      <span>&#9888;&#65039; ApiTap CLI not running — passive index paused. Run: <code>apitap mcp</code></span>
+      <button id="dismiss-banner" class="btn-dismiss">&times;</button>
+    </div>
     <div class="tabs">
       <button class="tab active" data-tab="capture">Capture</button>
       <button class="tab" data-tab="index">Index</button>
@@ -32,6 +36,9 @@
     </div>
 
     <div id="tab-index" class="tab-content hidden">
+      <div id="index-actions" style="margin-bottom: 6px;">
+        <button id="btn-exclude-domain" class="btn-small">+ Exclude this site</button>
+      </div>
       <div id="index-list"></div>
       <div id="index-empty" class="hidden">
         <p>No API traffic observed yet. Browse the web and endpoints will appear here.</p>
@@ -52,6 +59,11 @@
           <input type="number" id="revisit-threshold" min="2" max="20" value="3" class="input-narrow">
         </label>
         <p class="setting-desc">Number of visits before auto-capture triggers.</p>
+      </div>
+      <div class="setting-row">
+        <label>Excluded domains</label>
+        <p class="setting-desc">These domains are ignored by passive indexing.</p>
+        <div id="excluded-domains-list"></div>
       </div>
     </div>
   </div>

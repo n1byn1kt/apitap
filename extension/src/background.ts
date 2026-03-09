@@ -191,6 +191,20 @@ async function findOrOpenTab(domain: string): Promise<chrome.tabs.Tab> {
   });
 }
 
+// Like findOrOpenTab but NEVER creates a tab — used by auto-learn to avoid phantom tabs
+function findExistingTab(domain: string): Promise<chrome.tabs.Tab | null> {
+  return new Promise((resolve) => {
+    chrome.tabs.query({ url: `*://${domain}/*` }, (tabs) => {
+      const valid = tabs.filter(t => t.url && t.url !== 'about:blank' && !t.url.startsWith('chrome://'));
+      if (valid.length > 0) {
+        resolve(valid.find(t => t.active) ?? valid[0]);
+      } else {
+        resolve(null);
+      }
+    });
+  });
+}
+
 function captureWithPlateau(
   tabId: number,
   options: { idleTimeout: number; maxDuration: number },
@@ -801,12 +815,16 @@ async function checkAutoLearn(domain: string): Promise<void> {
 
     autoLearnInProgress = true;
     try {
-      const tab = await findOrOpenTab(domain);
-      if (!tab.id) return;
-      const skillFiles = await captureWithPlateau(tab.id, {
-        idleTimeout: 10_000,
-        maxDuration: 120_000,
-      });
+      // v1.5.2: use findExistingTab — never open phantom tabs for CDN/tracker domains
+      const tab = await findExistingTab(domain);
+      let skillFiles: string[] = [];
+      if (tab?.id) {
+        skillFiles = await captureWithPlateau(tab.id, {
+          idleTimeout: 10_000,
+          maxDuration: 120_000,
+        });
+      }
+      // No tab → go straight to skeleton fallback (tab = null case)
       if (skillFiles.length > 0 && bridgeAvailable && nativePort) {
         const skills = skillFiles.map(json => {
           const parsed = JSON.parse(json);
@@ -826,7 +844,7 @@ async function checkAutoLearn(domain: string): Promise<void> {
         indexDirty = true;
         await flushIndex();
       } else {
-        // v1.5.1: CDP capture failed — generate skeleton skill file from index entry
+        // v1.5.1: CDP capture failed or no tab — generate skeleton skill file from index entry
         if (bridgeAvailable && nativePort && entry.endpoints.length > 0) {
           const skeleton = generateSkeletonSkillFile(entry);
           const skeletonJson = JSON.stringify(skeleton);

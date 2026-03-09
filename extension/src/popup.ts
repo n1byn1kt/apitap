@@ -307,4 +307,74 @@ document.getElementById('dismiss-banner')!.addEventListener('click', () => {
   // Get live state from background service worker
   const response = await sendMessage({ type: 'GET_STATE' });
   if (response.state) updateUI(response.state);
+
+  // Load current site card in Capture tab
+  await loadCurrentSite();
 })();
+
+// --- Current site card ---
+
+async function loadCurrentSite(): Promise<void> {
+  const container = document.getElementById('current-site');
+  if (!container) return;
+
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.url) return;
+
+  let domain: string;
+  try {
+    domain = new URL(tab.url).hostname;
+  } catch {
+    return;
+  }
+
+  const indexResponse = await sendMessage({ type: 'GET_INDEX' });
+  const entries: Array<{
+    domain: string; promoted: boolean; totalHits: number;
+    endpoints: Array<{ method: string; parameterizedPath: string }>;
+    authType?: string;
+  }> = indexResponse?.index?.entries ?? [];
+
+  const baseDomain = domain.replace(/^www\./, '');
+  const matches = entries.filter(e => {
+    const eBase = e.domain.replace(/^www\./, '');
+    return eBase === baseDomain || eBase.endsWith(`.${baseDomain}`);
+  });
+
+  renderCurrentSite(container, domain, matches);
+}
+
+function renderCurrentSite(
+  container: HTMLElement,
+  _domain: string,
+  matches: Array<{
+    domain: string; promoted: boolean; totalHits: number;
+    endpoints: Array<{ method: string; parameterizedPath: string }>;
+    authType?: string;
+  }>
+): void {
+  if (matches.length === 0) {
+    container.innerHTML = `<div class="current-site-empty">No API traffic for this site yet.</div>`;
+    return;
+  }
+
+  const parts: string[] = [];
+  for (const entry of matches) {
+    const promoted = entry.promoted
+      ? `<span class="current-site-badge">&#10003; Skill file exists</span>`
+      : '';
+    const authLabel = entry.authType ? ` &middot; auth: ${entry.authType}` : '';
+    const endpointRows = entry.endpoints
+      .map(ep => `<div class="current-site-ep"><span class="ep-method">${ep.method}</span> ${ep.parameterizedPath}</div>`)
+      .join('');
+
+    parts.push(`
+      <div class="current-site-card">
+        <div class="current-site-domain">${entry.domain} ${promoted}</div>
+        <div class="current-site-meta">${entry.totalHits} hits &middot; ${entry.endpoints.length} endpoints${authLabel}</div>
+        <div class="current-site-endpoints">${endpointRows}</div>
+      </div>
+    `);
+  }
+  container.innerHTML = parts.join('');
+}

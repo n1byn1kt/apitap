@@ -248,3 +248,69 @@ button#btn-stop {
   .autolearn-section { border-top-color: #333; }
   .toggle-slider { background: #555; }
 }
+
+/* --- Current site card --- */
+.current-site-card {
+  background: #f5f5f5;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+.current-site-domain {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 2px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.current-site-badge {
+  background: #00e5c0;
+  color: #0d0d1a;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.current-site-meta {
+  color: #666;
+  margin-bottom: 4px;
+}
+.current-site-endpoints {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.current-site-ep {
+  font-family: monospace;
+  font-size: 11px;
+  color: #444;
+  display: flex;
+  gap: 6px;
+}
+.ep-method {
+  color: #00897b;
+  font-weight: 600;
+  min-width: 36px;
+}
+.ep-method.POST, .ep-method.PUT { color: #f57c00; }
+.ep-method.DELETE { color: #c62828; }
+.current-site-empty {
+  color: #999;
+  font-size: 12px;
+  font-style: italic;
+  padding: 6px 0 4px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .current-site-card { background: #1a1a2e; border-color: #2a2a3e; }
+  .current-site-meta { color: #777; }
+  .current-site-ep { color: #aaa; }
+  .ep-method { color: #00e5c0; }
+  .ep-method.POST, .ep-method.PUT { color: #ffb74d; }
+  .ep-method.DELETE { color: #ef5350; }
+  .current-site-empty { color: #666; }
+}

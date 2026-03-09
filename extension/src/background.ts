@@ -31,6 +31,7 @@ function connectNativePort(): void {
   try {
     nativePort = chrome.runtime.connectNative(NATIVE_HOST);
     bridgeAvailable = true;
+    console.log('[apitap] native host connected');
 
     nativePort.onMessage.addListener((message: any) => {
       // Check if this is a response to a message we sent
@@ -53,6 +54,8 @@ function connectNativePort(): void {
     });
 
     nativePort.onDisconnect.addListener(() => {
+      const err = chrome.runtime.lastError;
+      console.warn('[apitap] native host disconnected:', err?.message ?? 'no error');
       bridgeAvailable = false;
       nativePort = null;
       // Reject all pending messages
@@ -68,14 +71,15 @@ function connectNativePort(): void {
       // Reconnect after a delay
       setTimeout(connectNativePort, 5000);
     });
-  } catch {
+  } catch (e) {
+    console.warn('[apitap] connectNativePort failed:', e);
     bridgeAvailable = false;
     nativePort = null;
   }
 }
 
 // Send a message to the native host and wait for response
-function sendNativePortMessage(message: any, timeout = 10_000): Promise<any> {
+function sendNativePortMessage(message: any, timeout = 30_000): Promise<any> {
   return new Promise((resolve) => {
     if (!nativePort) {
       resolve({ success: false, error: 'native host not connected' });
@@ -104,14 +108,19 @@ async function checkBridge(): Promise<boolean> {
 }
 
 async function saveViaBridge(skills: Array<{ domain: string; skillJson: string }>): Promise<{ success: boolean; paths?: string[]; error?: string }> {
-  if (skills.length === 1) {
-    return sendNativePortMessage({
+  // Send each skill individually to avoid giant batch messages timing out
+  const paths: string[] = [];
+  for (const skill of skills) {
+    const timeout = Math.max(30_000, Math.ceil(skill.skillJson.length / 50_000) * 5_000);
+    const result = await sendNativePortMessage({
       action: 'save_skill',
-      domain: skills[0].domain,
-      skillJson: skills[0].skillJson,
-    });
+      domain: skill.domain,
+      skillJson: skill.skillJson,
+    }, timeout);
+    if (result.success && result.path) paths.push(result.path);
+    else if (!result.success) console.warn('[apitap] save_skill failed for', skill.domain, ':', result.error);
   }
-  return sendNativePortMessage({ action: 'save_batch', skills });
+  return { success: paths.length > 0, paths };
 }
 
 // --- Agent-initiated capture ---
@@ -815,16 +824,18 @@ async function checkAutoLearn(domain: string): Promise<void> {
 
     autoLearnInProgress = true;
     try {
-      // v1.5.2: use findExistingTab — never open phantom tabs for CDN/tracker domains
-      const tab = await findExistingTab(domain);
+      // Only attempt CDP capture if a tab for this domain is already open.
+      // NEVER open new tabs for auto-learn — causes phantom tabs for CDN/tracker domains.
+      const existingTab = await findExistingTab(domain);
       let skillFiles: string[] = [];
-      if (tab?.id) {
-        skillFiles = await captureWithPlateau(tab.id, {
+
+      if (existingTab?.id) {
+        skillFiles = await captureWithPlateau(existingTab.id, {
           idleTimeout: 10_000,
           maxDuration: 120_000,
         });
       }
-      // No tab → go straight to skeleton fallback (tab = null case)
+
       if (skillFiles.length > 0 && bridgeAvailable && nativePort) {
         const skills = skillFiles.map(json => {
           const parsed = JSON.parse(json);
@@ -844,7 +855,7 @@ async function checkAutoLearn(domain: string): Promise<void> {
         indexDirty = true;
         await flushIndex();
       } else {
-        // v1.5.1: CDP capture failed or no tab — generate skeleton skill file from index entry
+        // No existing tab or CDP capture failed — generate skeleton skill file from index
         if (bridgeAvailable && nativePort && entry.endpoints.length > 0) {
           const skeleton = generateSkeletonSkillFile(entry);
           const skeletonJson = JSON.stringify(skeleton);
@@ -912,6 +923,7 @@ function startCapture(tabId: number) {
 
 async function stopCapture() {
   if (!state.active || state.tabId === null) return;
+  state.active = false; // prevent re-entry while async saves run
 
   // Clear capture timeout
   if (captureTimeout) {
@@ -941,19 +953,33 @@ async function stopCapture() {
 
   // Auto-save via native messaging if bridge is available
   state.autoSaved = null;
-  if (bridgeAvailable && allSkillFiles.length > 0) {
-    const skills = allSkillFiles.map(json => {
-      const parsed = JSON.parse(json);
-      return { domain: parsed.domain, skillJson: json };
-    });
+  const capturedSkills = allSkillFiles.map(json => {
+    const parsed = JSON.parse(json);
+    return { domain: parsed.domain, skillJson: json };
+  });
 
-    const result = await saveViaBridge(skills);
+  if (bridgeAvailable && capturedSkills.length > 0) {
+    const result = await saveViaBridge(capturedSkills);
     if (result.success) {
-      state.autoSaved = result.paths ?? skills.map(s => s.domain);
+      state.autoSaved = result.paths ?? capturedSkills.map(s => s.domain);
     }
   }
 
-  state.active = false;
+  // Save auth tokens — runs even if skill save failed (auth is small)
+  if (bridgeAvailable) {
+    const domains = new Set(capturedSkills.map(s => s.domain));
+    for (const domain of domains) {
+      const tokens = await getAuthTokens(domain);
+      if (tokens.length > 0) {
+        await sendNativePortMessage({
+          action: 'save_auth',
+          domain,
+          headers: tokens,
+        });
+      }
+    }
+  }
+
   state.tabId = null;
 
   // Clear sensitive data (auth headers, POST bodies)
@@ -1022,7 +1048,10 @@ chrome.runtime.onMessage.addListener(
           // Download from background — popup blob URLs die when popup closes
           const skill = JSON.parse(lastSkillJson);
           const filename = `${skill.domain || 'skill'}.json`;
-          const dataUrl = 'data:application/json;base64,' + btoa(String.fromCharCode(...new TextEncoder().encode(lastSkillJson)));
+          const bytes = new TextEncoder().encode(lastSkillJson);
+          let binary = '';
+          for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+          const dataUrl = 'data:application/json;base64,' + btoa(binary);
           chrome.downloads.download({ url: dataUrl, filename, saveAs: true }, () => {
             sendResponse({ type: 'CAPTURE_COMPLETE', skillJson: lastSkillJson! } as CaptureResponse);
           });

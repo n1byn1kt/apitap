@@ -32,18 +32,36 @@ function isApiContentType(contentType: string): boolean {
     ct.includes('application/vnd.api+json');
 }
 
-/** Extract ALL matching auth headers (v1.5.1: multi-header for Twitch etc.) */
+/** Headers that are always auth-related regardless of name pattern */
+const KNOWN_AUTH_HEADERS = new Set([
+  'authorization', 'x-api-key', 'client-id', 'x-auth-token',
+]);
+
+/** Header name patterns that suggest auth (case-insensitive) */
+const AUTH_PATTERNS = /bearer|token|apikey|api-key|auth/i;
+
+/** Headers to never capture (noise, not auth) */
+const SKIP_HEADERS = new Set([
+  'cookie', 'set-cookie', 'content-type', 'accept', 'user-agent',
+  'referer', 'origin', 'cache-control', 'traceparent', 'tracestate',
+  'tracecontext', 'newrelic', 'content-length',
+]);
+
+/** Extract ALL matching auth headers (v1.5.2: pattern-based for custom bearer headers) */
 export function extractAuthTokens(headers: Record<string, string>): Array<{ header: string; value: string }> {
   const tokens: Array<{ header: string; value: string }> = [];
-  const auth = headers['authorization'] || headers['Authorization'];
-  if (auth) tokens.push({ header: 'authorization', value: auth });
-  const apiKey = headers['x-api-key'] || headers['X-Api-Key'];
-  if (apiKey) tokens.push({ header: 'x-api-key', value: apiKey });
-  const clientId = headers['client-id'] || headers['Client-ID'] || headers['Client-Id'];
-  if (clientId) tokens.push({ header: 'client-id', value: clientId });
-  const xAuthToken = headers['x-auth-token'] || headers['X-Auth-Token'];
-  if (xAuthToken) tokens.push({ header: 'x-auth-token', value: xAuthToken });
-  // Skip cookies — too broad and session-specific
+  const seen = new Set<string>();
+  for (const [name, value] of Object.entries(headers)) {
+    const lower = name.toLowerCase();
+    if (SKIP_HEADERS.has(lower)) continue;
+    if (!value || value.length < 8) continue; // too short to be a token
+    if (KNOWN_AUTH_HEADERS.has(lower) || AUTH_PATTERNS.test(lower)) {
+      if (!seen.has(lower)) {
+        seen.add(lower);
+        tokens.push({ header: lower, value });
+      }
+    }
+  }
   return tokens;
 }
 

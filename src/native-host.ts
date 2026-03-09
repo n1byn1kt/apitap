@@ -299,7 +299,7 @@ function readMessage(): Promise<NativeRequest | null> {
       }
 
       const messageLength = headerBuf.readUInt32LE(0);
-      if (messageLength > 1024 * 1024) {
+      if (messageLength > 10 * 1024 * 1024) {
         process.stderr.write(`Message too large: ${messageLength}\n`);
         resolve(null);
         return;
@@ -416,6 +416,10 @@ if (isMainModule) {
 
       // Otherwise, handle as a direct extension message (save_skill, etc.)
       const response = await handleNativeMessage(message);
+      // Echo _portMsgId so extension can match response to request
+      if ((message as any)._portMsgId) {
+        (response as any)._portMsgId = (message as any)._portMsgId;
+      }
       sendMessage(response);
     }
 

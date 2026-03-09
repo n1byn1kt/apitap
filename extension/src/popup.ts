@@ -294,9 +294,107 @@ document.getElementById('dismiss-banner')!.addEventListener('click', () => {
   chrome.storage.local.set({ bannerDismissed: true });
 });
 
+// --- Current site display (Capture tab) ---
+
+function renderCurrentSite(index: any, domain: string) {
+  const container = document.getElementById('current-site')!;
+  container.textContent = '';
+
+  if (!index || !domain) {
+    const empty = document.createElement('div');
+    empty.className = 'current-site-empty';
+    empty.textContent = 'No API traffic for this site yet.';
+    container.appendChild(empty);
+    return;
+  }
+
+  const baseDomain = domain.replace(/^www\./, '');
+  const entry = index.entries?.find((e: any) => e.domain === domain || e.domain === baseDomain);
+  // Also find entries for subdomains (api.example.com when on example.com)
+  const entryDomain = entry?.domain;
+  const related = index.entries?.filter((e: any) =>
+    e.domain !== domain && e.domain !== baseDomain &&
+    (e.domain.endsWith('.' + baseDomain) || baseDomain.endsWith('.' + e.domain))
+  ) ?? [];
+
+  if (!entry && related.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'current-site-empty';
+    empty.textContent = 'No API traffic for this site yet.';
+    container.appendChild(empty);
+    return;
+  }
+
+  const all = entry ? [entry, ...related] : related;
+
+  for (const e of all) {
+    const section = document.createElement('div');
+    section.className = 'current-site-section';
+
+    const header = document.createElement('div');
+    header.className = 'current-site-domain';
+    const statusIcon = e.promoted ? '\u2705 ' : '';
+    header.textContent = statusIcon + e.domain;
+
+    const meta = document.createElement('div');
+    meta.className = 'current-site-meta';
+    const authTypes = [...new Set(e.endpoints.map((ep: any) => ep.authType).filter(Boolean))];
+    meta.textContent = e.endpoints.length + ' endpoint' + (e.endpoints.length !== 1 ? 's' : '')
+      + ' \u00b7 ' + e.totalHits + ' hits'
+      + (authTypes.length > 0 ? ' \u00b7 ' + authTypes.join(', ') : '')
+      + (e.promoted ? ' \u00b7 skill file saved' : '');
+
+    const epList = document.createElement('div');
+    epList.className = 'current-site-endpoints';
+    for (const ep of e.endpoints) {
+      for (const method of (ep.methods ?? ['?'])) {
+        const div = document.createElement('div');
+        div.className = 'endpoint';
+        const m = document.createElement('span');
+        m.className = VALID_METHODS.has(method) ? 'method ' + method : 'method';
+        m.textContent = method;
+        div.appendChild(m);
+        div.appendChild(document.createTextNode(' ' + ep.path));
+        epList.appendChild(div);
+      }
+    }
+
+    section.appendChild(header);
+    section.appendChild(meta);
+    if (e.promoted) {
+      const badge = document.createElement('div');
+      badge.className = 'badge promoted';
+      badge.textContent = 'Skill file exists';
+      section.appendChild(badge);
+    }
+    section.appendChild(epList);
+    container.appendChild(section);
+  }
+}
+
+function loadCurrentSite() {
+  chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    const tab = tabs[0];
+    if (!tab?.url) return;
+    let domain: string;
+    try {
+      domain = new URL(tab.url).hostname;
+    } catch { return; }
+
+    chrome.runtime.sendMessage({ type: 'GET_INDEX' }, (response: any) => {
+      if (response?.index) {
+        renderCurrentSite(response.index, domain);
+      }
+    });
+  });
+}
+
 // --- Init: restore state from session storage, then sync with background ---
 
 (async () => {
+  // Load current site's index data
+  loadCurrentSite();
+
   // Restore skill JSON from session storage (survives popup close/reopen)
   const stored = await chrome.storage.session.get(['lastSkillJson']);
   if (stored.lastSkillJson) {

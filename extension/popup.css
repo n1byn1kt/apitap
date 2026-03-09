@@ -101,7 +101,7 @@ button#btn-stop {
 .index-header { display: flex; justify-content: space-between; }
 .hit-count { color: #666; font-size: 12px; }
 .index-meta { font-size: 12px; color: #888; margin: 2px 0; }
-.index-actions { margin-top: 4px; }
+.index-actions { margin-top: 4px; margin-bottom: 6px; }
 .btn-promote { font-size: 11px; padding: 2px 8px; cursor: pointer; width: auto; display: inline-block; }
 .badge.promoted { font-size: 11px; color: #4a9; }
 .setting-row { margin-bottom: 12px; }
@@ -163,6 +163,15 @@ button#btn-stop {
   color: #d32f2f;
   line-height: 1;
 }
+/* --- Current site card (Capture tab) --- */
+#current-site { margin-bottom: 10px; }
+#current-site:empty { display: none; }
+.current-site-domain { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+.current-site-meta { font-size: 11px; color: #888; margin-bottom: 4px; }
+.current-site-endpoints { font-family: monospace; font-size: 11px; line-height: 1.6; max-height: 140px; overflow-y: auto; }
+.current-site-endpoints .endpoint { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.current-site-section { margin-bottom: 6px; }
+.current-site-empty { font-size: 11px; color: #999; font-style: italic; }
 .hidden { display: none; }
 .input-narrow { width: 40px; }
 
@@ -247,4 +256,6 @@ button#btn-stop {
   input[type="number"], input[type="checkbox"] { accent-color: #00e5c0; }
   .autolearn-section { border-top-color: #333; }
   .toggle-slider { background: #555; }
+  .current-site-meta { color: #777; }
+  .current-site-empty { color: #666; }
 }

@@ -22,6 +22,8 @@ export interface StoredAuth {
   type: 'bearer' | 'api-key' | 'cookie' | 'custom';
   header: string;
   value: string;
+  // v1.5.1: multi-header auth (e.g. Authorization + Client-ID for Twitch)
+  headers?: Array<{ header: string; value: string }>;
   // v0.8: refreshable tokens (body-based, like CSRF)
   tokens?: Record<string, StoredToken>;
   // v0.8: cached browser session for faster refresh

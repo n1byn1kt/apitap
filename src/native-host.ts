@@ -32,6 +32,9 @@ export interface NativeRequest {
   skillJson?: string;
   skills?: Array<{ domain: string; skillJson: string }>;
   indexJson?: string;
+  // v1.5.1: multi-header auth
+  headers?: Array<{ header: string; value: string }>;
+  // Legacy single-header (backwards compat)
   authHeader?: string;
   authValue?: string;
 }
@@ -148,12 +151,22 @@ export async function handleNativeMessage(
       if (!request.domain || !isValidDomain(request.domain)) {
         return { success: false, error: `Invalid domain: ${request.domain}` };
       }
-      if (!request.authHeader || !request.authValue) {
-        return { success: false, error: 'Missing authHeader or authValue' };
+
+      // Normalize: support both multi-header (v1.5.1) and legacy single-header
+      const authHeaders: Array<{ header: string; value: string }> = request.headers
+        ?? (request.authHeader && request.authValue
+          ? [{ header: request.authHeader, value: request.authValue }]
+          : []);
+
+      if (authHeaders.length === 0) {
+        return { success: false, error: 'Missing auth headers' };
       }
-      const headerLower = request.authHeader.toLowerCase();
+
+      // Primary header determines the auth type
+      const primary = authHeaders[0];
+      const headerLower = primary.header.toLowerCase();
       const type = headerLower === 'authorization'
-        ? (request.authValue.startsWith('Bearer ') ? 'bearer' : 'api-key')
+        ? (primary.value.startsWith('Bearer ') ? 'bearer' : 'api-key')
         : headerLower === 'x-api-key' ? 'api-key'
         : headerLower === 'cookie' ? 'cookie'
         : 'custom';
@@ -163,8 +176,9 @@ export async function handleNativeMessage(
       const authManager = new AuthManager(apitapDir, machineId);
       await authManager.store(request.domain, {
         type: type as 'bearer' | 'api-key' | 'cookie' | 'custom',
-        header: request.authHeader,
-        value: request.authValue,
+        header: primary.header,
+        value: primary.value,
+        ...(authHeaders.length > 1 ? { headers: authHeaders } : {}),
       });
       return { success: true };
     }

@@ -56,8 +56,12 @@ export interface IndexEntry {
   lastPromoted?: string;       // ISO timestamp of last CDP capture
   skillFileSource?: 'extension' | 'cli';
   endpoints: IndexEndpoint[];
-  /** Stored auth token (header + value). Kept in chrome.storage.session (cleared on browser close). */
+  /** Stored auth tokens (header + value). Kept in chrome.storage.session (cleared on browser close). */
+  authTokens?: Array<{ header: string; value: string }>;
+  /** @deprecated v1.5.0 single-header compat — use authTokens */
   authToken?: { header: string; value: string };
+  /** v1.5.1: timestamp (ms) of last auto-learn attempt, for backoff */
+  lastAutoLearnAttempt?: number;
 }
 
 export interface IndexEndpoint {

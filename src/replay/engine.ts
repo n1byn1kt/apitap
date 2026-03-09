@@ -174,6 +174,17 @@ function stripAuthForRedirect(
   return redirectHeaders;
 }
 
+/** Inject all auth headers from a StoredAuth into a headers object. */
+function injectAuthHeaders(headers: Record<string, string>, auth: import('../types.js').StoredAuth): void {
+  if (auth.headers && auth.headers.length > 0) {
+    for (const h of auth.headers) {
+      headers[h.header] = h.value;
+    }
+  } else if (auth.header && auth.value) {
+    headers[auth.header] = auth.value;
+  }
+}
+
 /**
  * Wrap a 401/403 response with structured auth guidance.
  */
@@ -285,28 +296,32 @@ export async function replayEndpoint(
     }
   }
 
-  // Inject auth header from auth manager (if available)
+  // Inject auth headers from auth manager (if available)
   if (authManager && domain) {
     const auth = endpoint.isolatedAuth
       ? await authManager.retrieve(domain)
       : await authManager.retrieveWithFallback(domain);
-    if (auth && auth.header && auth.value) {
-      headers[auth.header] = auth.value;
-    }
+    if (auth) injectAuthHeaders(headers, auth);
   }
 
   // Resolve [stored] placeholders in headers
-  const storedHeaders = Object.entries(headers).filter(([_, v]) => v === '[stored]');
-  if (storedHeaders.length > 0) {
+  const storedHeaderEntries = Object.entries(headers).filter(([_, v]) => v === '[stored]');
+  if (storedHeaderEntries.length > 0) {
     if (authManager && domain) {
       const auth = endpoint.isolatedAuth
         ? await authManager.retrieve(domain)
         : await authManager.retrieveWithFallback(domain);
       if (auth) {
-        for (const [key] of storedHeaders) {
-          if (key.toLowerCase() === auth.header.toLowerCase()) {
-            headers[key] = auth.value;
-          }
+        // Build lookup from all stored headers
+        const authMap = new Map<string, string>();
+        if (auth.headers && auth.headers.length > 0) {
+          for (const h of auth.headers) authMap.set(h.header.toLowerCase(), h.value);
+        }
+        if (auth.header && auth.value) authMap.set(auth.header.toLowerCase(), auth.value);
+
+        for (const [key] of storedHeaderEntries) {
+          const val = authMap.get(key.toLowerCase());
+          if (val) headers[key] = val;
         }
       }
     }
@@ -369,9 +384,7 @@ export async function replayEndpoint(
         const freshAuth = endpoint.isolatedAuth
           ? await authManager.retrieve(domain)
           : await authManager.retrieveWithFallback(domain);
-        if (freshAuth) {
-          headers[freshAuth.header] = freshAuth.value;
-        }
+        if (freshAuth) injectAuthHeaders(headers, freshAuth);
       }
     } else {
       // Proactive expiry check (30s buffer for clock skew)

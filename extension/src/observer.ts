@@ -7,8 +7,8 @@ import type { IndexEndpoint } from './types.js';
 export interface Observation {
   domain: string;
   endpoint: IndexEndpoint;
-  /** Raw auth header + value, if detected */
-  authToken?: { header: string; value: string };
+  /** Raw auth headers + values, if detected (v1.5.1: multi-header) */
+  authTokens?: Array<{ header: string; value: string }>;
 }
 
 /** Input for processCompletedRequest — abstraction over webRequest details */
@@ -20,8 +20,8 @@ export interface CompletedRequestDetails {
   requestHeaders: Record<string, string>;
   responseHeaders: Record<string, string>;
   authTypeOverride?: string;  // pre-detected, avoids storing raw headers
-  /** Raw auth header+value pair, pre-extracted from onSendHeaders */
-  authTokenOverride?: { header: string; value: string };
+  /** Raw auth header+value pairs, pre-extracted from onSendHeaders (v1.5.1: multi-header) */
+  authTokensOverride?: Array<{ header: string; value: string }>;
 }
 
 /** Content types that indicate API responses */
@@ -32,14 +32,25 @@ function isApiContentType(contentType: string): boolean {
     ct.includes('application/vnd.api+json');
 }
 
-/** Extract auth header name and raw value from request headers */
-export function extractAuthToken(headers: Record<string, string>): { header: string; value: string } | undefined {
+/** Extract ALL matching auth headers (v1.5.1: multi-header for Twitch etc.) */
+export function extractAuthTokens(headers: Record<string, string>): Array<{ header: string; value: string }> {
+  const tokens: Array<{ header: string; value: string }> = [];
   const auth = headers['authorization'] || headers['Authorization'];
-  if (auth) return { header: 'authorization', value: auth };
+  if (auth) tokens.push({ header: 'authorization', value: auth });
   const apiKey = headers['x-api-key'] || headers['X-Api-Key'];
-  if (apiKey) return { header: 'x-api-key', value: apiKey };
+  if (apiKey) tokens.push({ header: 'x-api-key', value: apiKey });
+  const clientId = headers['client-id'] || headers['Client-ID'] || headers['Client-Id'];
+  if (clientId) tokens.push({ header: 'client-id', value: clientId });
+  const xAuthToken = headers['x-auth-token'] || headers['X-Auth-Token'];
+  if (xAuthToken) tokens.push({ header: 'x-auth-token', value: xAuthToken });
   // Skip cookies — too broad and session-specific
-  return undefined;
+  return tokens;
+}
+
+/** @deprecated Use extractAuthTokens() — kept for backwards compat */
+export function extractAuthToken(headers: Record<string, string>): { header: string; value: string } | undefined {
+  const tokens = extractAuthTokens(headers);
+  return tokens.length > 0 ? tokens[0] : undefined;
 }
 
 /** Detect auth type from request headers (type only, never the value) */
@@ -140,6 +151,8 @@ export function processCompletedRequest(details: CompletedRequestDetails): Obser
   return {
     domain,
     endpoint,
-    ...(details.authTokenOverride ? { authToken: details.authTokenOverride } : {}),
+    ...(details.authTokensOverride && details.authTokensOverride.length > 0
+      ? { authTokens: details.authTokensOverride }
+      : {}),
   };
 }

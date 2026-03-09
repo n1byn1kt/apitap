@@ -206,6 +206,19 @@ function loadIndex() {
   });
 }
 
+// --- Auto-learn toggle in Capture tab ---
+
+const autolearnCaptureToggle = document.getElementById('autolearn-capture-toggle') as HTMLInputElement;
+
+chrome.storage.local.get(['autoLearnEnabled'], (result) => {
+  autolearnCaptureToggle.checked = result.autoLearnEnabled !== false; // default true
+});
+
+autolearnCaptureToggle.addEventListener('change', (e) => {
+  const enabled = (e.target as HTMLInputElement).checked;
+  chrome.storage.local.set({ autoLearnEnabled: enabled });
+});
+
 // --- Settings tab ---
 
 chrome.storage.local.get(['autoLearn', 'revisitThreshold'], (result) => {

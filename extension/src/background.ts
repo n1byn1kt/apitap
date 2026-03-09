@@ -7,11 +7,11 @@ import type { CaptureState, CaptureMessage, CaptureResponse, AgentRequest, Agent
 import { extractDomain, pickPrimaryDomain } from './domain-utils.js';
 import { DomainGeneratorMap } from './multi-domain.js';
 import { isAllowedUrl, scrubAuthFromSkillJson } from './security.js';
-import { processCompletedRequest, detectAuthType, extractAuthToken } from './observer.js';
+import { processCompletedRequest, detectAuthType, extractAuthTokens } from './observer.js';
 import { mergeObservation, createEmptyIndex } from './index-store.js';
 import { markPromoted } from './promotion.js';
 import { applyLifecycle } from './lifecycle.js';
-import type { IndexFile } from './types.js';
+import type { IndexFile, IndexEntry } from './types.js';
 
 // --- Native messaging bridge (persistent port) ---
 
@@ -582,7 +582,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // Pending auth types for auth detection (store only type, never raw header values)
 const pendingObserverAuthTypes = new Map<string, string | undefined>();
 // Pending auth tokens for auth capture (raw header+value, stored in session storage)
-const pendingObserverAuthTokens = new Map<string, { header: string; value: string } | undefined>();
+const pendingObserverAuthTokens = new Map<string, Array<{ header: string; value: string }>>();
 
 // Load index from chrome.storage.local on startup
 chrome.storage.local.get(['passiveIndex'], (result) => {
@@ -603,7 +603,8 @@ chrome.webRequest.onSendHeaders.addListener(
     }
     const reqId = String(details.requestId);
     pendingObserverAuthTypes.set(reqId, detectAuthType(headers));
-    pendingObserverAuthTokens.set(reqId, extractAuthToken(headers));
+    const tokens = extractAuthTokens(headers);
+    if (tokens.length > 0) pendingObserverAuthTokens.set(reqId, tokens);
     // Clean up if maps grow too large (prevent memory leak)
     if (pendingObserverAuthTypes.size > 1000) {
       const keys = [...pendingObserverAuthTypes.keys()];
@@ -630,7 +631,7 @@ chrome.webRequest.onCompleted.addListener(
 
     const reqId = String(details.requestId);
     const authTypeOverride = pendingObserverAuthTypes.get(reqId);
-    const authTokenOverride = pendingObserverAuthTokens.get(reqId);
+    const authTokensOverride = pendingObserverAuthTokens.get(reqId);
     pendingObserverAuthTypes.delete(reqId);
     pendingObserverAuthTokens.delete(reqId);
 
@@ -650,17 +651,17 @@ chrome.webRequest.onCompleted.addListener(
       requestHeaders: {},
       responseHeaders,
       authTypeOverride,
-      authTokenOverride,
+      authTokensOverride,
     });
 
     if (obs) {
       passiveIndex = mergeObservation(passiveIndex, obs);
       indexDirty = true;
 
-      // Store auth token in session storage (cleared on browser close)
+      // Store auth tokens in session storage (cleared on browser close)
       // TODO: encrypt with AES-GCM via HKDF-derived key
-      if (obs.authToken) {
-        void storeAuthToken(obs.domain, obs.authToken);
+      if (obs.authTokens && obs.authTokens.length > 0) {
+        void storeAuthTokens(obs.domain, obs.authTokens);
       }
 
       // Auto-learn check
@@ -717,20 +718,60 @@ chrome.runtime.onSuspend.addListener(() => {
 // Auth tokens are stored in chrome.storage.session (cleared on browser close).
 // TODO: encrypt with AES-GCM via HKDF-derived key for defense-in-depth.
 
-async function storeAuthToken(domain: string, token: { header: string; value: string }): Promise<void> {
+async function storeAuthTokens(domain: string, newTokens: Array<{ header: string; value: string }>): Promise<void> {
   const result = await chrome.storage.session.get(['authTokens']);
-  const tokens: Record<string, { header: string; value: string }> = result.authTokens ?? {};
-  // Only store first token per domain (most likely the primary auth)
-  if (!tokens[domain]) {
-    tokens[domain] = token;
-    await chrome.storage.session.set({ authTokens: tokens });
+  const store: Record<string, Array<{ header: string; value: string }>> = result.authTokens ?? {};
+  const existing = store[domain] ?? [];
+  // Merge: update existing headers, add new ones
+  for (const t of newTokens) {
+    const idx = existing.findIndex(e => e.header === t.header);
+    if (idx >= 0) {
+      existing[idx] = t; // update value
+    } else {
+      existing.push(t);
+    }
   }
+  store[domain] = existing;
+  await chrome.storage.session.set({ authTokens: store });
 }
 
-async function getAuthToken(domain: string): Promise<{ header: string; value: string } | undefined> {
+async function getAuthTokens(domain: string): Promise<Array<{ header: string; value: string }>> {
   const result = await chrome.storage.session.get(['authTokens']);
-  const tokens: Record<string, { header: string; value: string }> = result.authTokens ?? {};
-  return tokens[domain];
+  const store: Record<string, Array<{ header: string; value: string }>> = result.authTokens ?? {};
+  return store[domain] ?? [];
+}
+
+// --- Skeleton skill file generation (v1.5.1) ---
+
+function generateSkeletonSkillFile(entry: IndexEntry): Record<string, unknown> {
+  // Deduplicate by method+parameterizedPath
+  const seen = new Set<string>();
+  const endpoints: Array<Record<string, string>> = [];
+  for (const ep of entry.endpoints) {
+    for (const method of ep.methods) {
+      const key = `${method} ${ep.path}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      endpoints.push({
+        method,
+        path: ep.path,
+        parameterizedPath: ep.path,
+        queryParams: '{}',
+      });
+    }
+  }
+  return {
+    version: 2,
+    domain: entry.domain,
+    provenance: 'passive-index',
+    capturedAt: entry.firstSeen,
+    endpoints: endpoints.map(ep => ({
+      method: ep.method,
+      path: ep.path,
+      parameterizedPath: ep.parameterizedPath,
+      queryParams: {},
+    })),
+  };
 }
 
 // --- Auto-learn ---
@@ -740,15 +781,24 @@ let autoLearnInProgress = false;
 async function checkAutoLearn(domain: string): Promise<void> {
   if (autoLearnInProgress) return;  // prevent concurrent auto-learn captures
 
-  const settings = await chrome.storage.local.get(['autoLearn', 'revisitThreshold']);
+  // v1.5.1: check autoLearnEnabled flag (default true)
+  const settings = await chrome.storage.local.get(['autoLearn', 'autoLearnEnabled', 'revisitThreshold']);
   if (!settings.autoLearn) return;
+  if (settings.autoLearnEnabled === false) return;
 
   const threshold = Math.max(2, Math.min(20, settings.revisitThreshold ?? 3));
   const entry = passiveIndex.entries.find(e => e.domain === domain);
   if (!entry || entry.promoted) return;
 
+  // v1.5.1: 30-minute backoff between auto-learn attempts
+  if (entry.lastAutoLearnAttempt && Date.now() - entry.lastAutoLearnAttempt < 30 * 60 * 1000) return;
+
   // Use totalHits as a proxy for revisit frequency
   if (entry.totalHits >= threshold && !state.active) {
+    // Record attempt timestamp before trying
+    entry.lastAutoLearnAttempt = Date.now();
+    indexDirty = true;
+
     autoLearnInProgress = true;
     try {
       const tab = await findOrOpenTab(domain);
@@ -763,19 +813,37 @@ async function checkAutoLearn(domain: string): Promise<void> {
           return { domain: parsed.domain, skillJson: json };
         });
         await saveViaBridge(skills);
-        // Save stored auth token to native host encrypted storage
-        const token = await getAuthToken(domain);
-        if (token) {
+        // Save stored auth tokens to native host encrypted storage
+        const tokens = await getAuthTokens(domain);
+        if (tokens.length > 0) {
           await sendNativePortMessage({
             action: 'save_auth',
             domain,
-            authHeader: token.header,
-            authValue: token.value,
+            headers: tokens,
           });
         }
         passiveIndex = markPromoted(passiveIndex, domain, 'extension');
         indexDirty = true;
         await flushIndex();
+      } else {
+        // v1.5.1: CDP capture failed — generate skeleton skill file from index entry
+        if (bridgeAvailable && nativePort && entry.endpoints.length > 0) {
+          const skeleton = generateSkeletonSkillFile(entry);
+          const skeletonJson = JSON.stringify(skeleton);
+          await saveViaBridge([{ domain, skillJson: skeletonJson }]);
+          // Save stored auth tokens
+          const tokens = await getAuthTokens(domain);
+          if (tokens.length > 0) {
+            await sendNativePortMessage({
+              action: 'save_auth',
+              domain,
+              headers: tokens,
+            });
+          }
+          passiveIndex = markPromoted(passiveIndex, domain, 'extension');
+          indexDirty = true;
+          await flushIndex();
+        }
       }
     } finally {
       autoLearnInProgress = false;
@@ -978,14 +1046,13 @@ chrome.runtime.onMessage.addListener(
               });
               await saveViaBridge(skills);
 
-              // Save stored auth token to native host encrypted storage
-              const token = await getAuthToken(promoteDomain);
-              if (token) {
+              // Save stored auth tokens to native host encrypted storage
+              const tokens = await getAuthTokens(promoteDomain);
+              if (tokens.length > 0) {
                 await sendNativePortMessage({
                   action: 'save_auth',
                   domain: promoteDomain,
-                  authHeader: token.header,
-                  authValue: token.value,
+                  headers: tokens,
                 });
               }
             }

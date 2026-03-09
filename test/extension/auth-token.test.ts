@@ -12,12 +12,12 @@ describe('extractAuthToken (legacy single-header)', () => {
   });
 
   it('extracts API key from x-api-key header', () => {
-    const token = extractAuthToken({ 'x-api-key': 'sk-abc123' });
-    assert.deepEqual(token, { header: 'x-api-key', value: 'sk-abc123' });
+    const token = extractAuthToken({ 'x-api-key': 'sk-abc123-long-enough' });
+    assert.deepEqual(token, { header: 'x-api-key', value: 'sk-abc123-long-enough' });
   });
 
   it('returns undefined for cookie-only auth (too broad)', () => {
-    const token = extractAuthToken({ cookie: 'session=abc' });
+    const token = extractAuthToken({ cookie: 'session=abc123456789' });
     assert.equal(token, undefined);
   });
 
@@ -28,22 +28,22 @@ describe('extractAuthToken (legacy single-header)', () => {
 
   it('prefers Authorization over x-api-key', () => {
     const token = extractAuthToken({
-      authorization: 'Bearer xyz',
-      'x-api-key': 'sk-abc',
+      authorization: 'Bearer xyz-long-enough',
+      'x-api-key': 'sk-abc-long-enough',
     });
     assert.equal(token!.header, 'authorization');
   });
 });
 
-describe('extractAuthTokens (v1.5.1 multi-header)', () => {
+describe('extractAuthTokens (v1.5.2 pattern-based)', () => {
   it('returns all matching auth headers', () => {
     const tokens = extractAuthTokens({
-      authorization: 'OAuth xyz',
+      authorization: 'OAuth xyz-long-enough',
       'client-id': 'kimne78kx3ncx6brgo4mv6wki5h1ko',
     });
     assert.equal(tokens.length, 2);
-    assert.deepEqual(tokens[0], { header: 'authorization', value: 'OAuth xyz' });
-    assert.deepEqual(tokens[1], { header: 'client-id', value: 'kimne78kx3ncx6brgo4mv6wki5h1ko' });
+    assert.deepEqual(tokens.find(t => t.header === 'authorization'), { header: 'authorization', value: 'OAuth xyz-long-enough' });
+    assert.deepEqual(tokens.find(t => t.header === 'client-id'), { header: 'client-id', value: 'kimne78kx3ncx6brgo4mv6wki5h1ko' });
   });
 
   it('returns empty array when no auth headers present', () => {
@@ -52,25 +52,59 @@ describe('extractAuthTokens (v1.5.1 multi-header)', () => {
   });
 
   it('captures x-auth-token header', () => {
-    const tokens = extractAuthTokens({ 'x-auth-token': 'abc123' });
+    const tokens = extractAuthTokens({ 'x-auth-token': 'abc12345-long-enough' });
     assert.equal(tokens.length, 1);
-    assert.deepEqual(tokens[0], { header: 'x-auth-token', value: 'abc123' });
+    assert.deepEqual(tokens[0], { header: 'x-auth-token', value: 'abc12345-long-enough' });
   });
 
   it('captures Client-ID with various casings', () => {
-    const tokens = extractAuthTokens({ 'Client-ID': 'test-id' });
+    const tokens = extractAuthTokens({ 'Client-ID': 'test-id-long-enough' });
     assert.equal(tokens.length, 1);
     assert.equal(tokens[0].header, 'client-id');
   });
 
   it('returns single header when only one matches', () => {
-    const tokens = extractAuthTokens({ authorization: 'Bearer xyz' });
+    const tokens = extractAuthTokens({ authorization: 'Bearer xyz-long-enough' });
     assert.equal(tokens.length, 1);
-    assert.deepEqual(tokens[0], { header: 'authorization', value: 'Bearer xyz' });
+    assert.deepEqual(tokens[0], { header: 'authorization', value: 'Bearer xyz-long-enough' });
   });
 
   it('skips cookies (too broad and session-specific)', () => {
-    const tokens = extractAuthTokens({ cookie: 'session=abc', authorization: 'Bearer xyz' });
+    const tokens = extractAuthTokens({ cookie: 'session=abc123456789', authorization: 'Bearer xyz-long-enough' });
+    assert.equal(tokens.length, 1);
+    assert.equal(tokens[0].header, 'authorization');
+  });
+
+  it('captures custom bearer/token headers like Nordstrom', () => {
+    const tokens = extractAuthTokens({
+      'nord-shopper-bearer-token': 'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIyODI3',
+      'x-shopper-token': 'abc123def456ghi789',
+      'content-type': 'application/json',
+      'user-agent': 'Mozilla/5.0',
+    });
+    assert.equal(tokens.length, 2);
+    assert.ok(tokens.find(t => t.header === 'nord-shopper-bearer-token'));
+    assert.ok(tokens.find(t => t.header === 'x-shopper-token'));
+  });
+
+  it('skips values shorter than 8 characters', () => {
+    const tokens = extractAuthTokens({ authorization: 'short' });
+    assert.equal(tokens.length, 0);
+  });
+
+  it('captures apikey headers', () => {
+    const tokens = extractAuthTokens({ apikey: 'long-api-key-value-here' });
+    assert.equal(tokens.length, 1);
+    assert.equal(tokens[0].header, 'apikey');
+  });
+
+  it('skips noise headers like traceparent and newrelic', () => {
+    const tokens = extractAuthTokens({
+      traceparent: '00-abc123def456-789-01',
+      newrelic: 'long-newrelic-agent-string-here',
+      tracecontext: 'some-long-trace-context',
+      authorization: 'Bearer real-token-here',
+    });
     assert.equal(tokens.length, 1);
     assert.equal(tokens[0].header, 'authorization');
   });

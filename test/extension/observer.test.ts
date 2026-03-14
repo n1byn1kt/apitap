@@ -50,7 +50,7 @@ describe('observer processCompletedRequest', () => {
     });
     assert.ok(result);
     assert.equal(result!.domain, 'discord.com');
-    assert.equal(result!.endpoint.path, '/api/v10/channels/:id');
+    assert.equal(result!.endpoint.path, '/api/v10/channels/:channel');
     assert.deepEqual(result!.endpoint.methods, ['GET']);
     assert.equal(result!.endpoint.authType, 'Bearer');
     assert.equal(result!.endpoint.hasBody, true);

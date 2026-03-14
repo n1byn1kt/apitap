@@ -118,7 +118,9 @@ const STRUCTURAL_SEGMENTS = new Set<string>([
   'latest', 'trending', 'popular', 'featured', 'recommended', 'top', 'new',
   'web', 'app', 'mobile', 'desktop', 'data', 'raw', 'render',
   'consent', 'wrapper', 'widget', 'integrity', 'pathfinder', 'rum',
-  // All resource noun keys are also structural
+  // All resource noun keys are also structural — this means a noun after itself
+  // (e.g. /repos/repos) treats the second "repos" as structural, not a param slot.
+  // That's a degenerate case and the correct behavior: we preserve the literal.
   ...RESOURCE_NOUNS.keys(),
 ]);
 

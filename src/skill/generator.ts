@@ -132,6 +132,25 @@ function extractAuth(headers: Record<string, string>): [StoredAuth[], Set<string
   return [auth, entropyDetected];
 }
 
+/**
+ * Deduplicate extracted auth entries by header name and build a StoredAuth
+ * object with all unique headers. Entries are expected to be pre-sorted
+ * by priority (bearer > api-key > custom) via getExtractedAuth().
+ */
+export function deduplicateAuth(extractedAuth: StoredAuth[]): StoredAuth | null {
+  if (extractedAuth.length === 0) return null;
+  const seen = new Set<string>();
+  const headers: Array<{ header: string; value: string }> = [];
+  for (const a of extractedAuth) {
+    if (!seen.has(a.header)) {
+      seen.add(a.header);
+      headers.push({ header: a.header, value: a.value });
+    }
+  }
+  const primary = extractedAuth[0];
+  return { type: primary.type, header: primary.header, value: primary.value, headers };
+}
+
 function generateEndpointId(method: string, parameterizedPath: string): string {
   // Clean framework noise for the ID (but not for the stored path)
   let cleaned = cleanFrameworkPath(parameterizedPath);

@@ -3,7 +3,7 @@ import http from 'node:http';
 import { homedir } from 'node:os';
 import type { CapturedExchange } from '../types.js';
 import { shouldCapture } from './filter.js';
-import { SkillGenerator } from '../skill/generator.js';
+import { SkillGenerator, deduplicateAuth } from '../skill/generator.js';
 import { signSkillFile } from '../skill/signing.js';
 import { writeSkillFile } from '../skill/store.js';
 import { AuthManager, getMachineId } from '../auth/manager.js';
@@ -445,25 +445,10 @@ export async function attach(options: AttachOptions): Promise<AttachResult> {
         let skill = gen.toSkillFile(domain);
         if (skill.endpoints.length === 0) continue;
 
-        // Store extracted auth credentials — deduplicate by header name,
-        // keeping the first (highest-priority) value for each header
-        const extractedAuth = gen.getExtractedAuth();
-        if (extractedAuth.length > 0) {
-          const seen = new Set<string>();
-          const uniqueHeaders: Array<{ header: string; value: string }> = [];
-          for (const a of extractedAuth) {
-            if (!seen.has(a.header)) {
-              seen.add(a.header);
-              uniqueHeaders.push({ header: a.header, value: a.value });
-            }
-          }
-          const primary = extractedAuth[0];
-          await authManager.store(domain, {
-            type: primary.type,
-            header: primary.header,
-            value: primary.value,
-            headers: uniqueHeaders,
-          });
+        // Store extracted auth credentials
+        const auth = deduplicateAuth(gen.getExtractedAuth());
+        if (auth) {
+          await authManager.store(domain, auth);
         }
 
         // Store OAuth credentials if detected

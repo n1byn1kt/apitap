@@ -26,6 +26,7 @@ import { readFileSync } from 'node:fs';
 import { stat, unlink } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createMcpServer } from './mcp.js';
+import { attach, parseDomainPatterns } from './capture/cdp-attach.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
@@ -66,6 +67,8 @@ function printUsage(): void {
 
   Usage:
     apitap capture <url>       Capture API traffic from a website
+    apitap attach [--port 9222] [--domain *.github.com]
+                               Attach to running Chrome and capture API traffic
     apitap discover <url>      Detect APIs without a browser (fast recon)
     apitap inspect <url>       Discover APIs without saving (X-ray vision)
     apitap search <query>      Search skill files for a domain or endpoint
@@ -1233,6 +1236,20 @@ async function handleExtension(positional: string[], flags: Record<string, strin
   process.exit(1);
 }
 
+async function handleAttach(_positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const port = typeof flags.port === 'string' ? parseInt(flags.port, 10) : 9222;
+  const domainPatterns = parseDomainPatterns(
+    typeof flags.domain === 'string' ? flags.domain : undefined,
+  );
+  const json = flags.json === true;
+
+  const result = await attach({ port, domainPatterns, json });
+
+  if (json) {
+    console.log(JSON.stringify(result, null, 2));
+  }
+}
+
 async function main(): Promise<void> {
   const { command, positional, flags } = parseArgs(process.argv.slice(2));
 
@@ -1299,6 +1316,9 @@ async function main(): Promise<void> {
       break;
     case 'extension':
       await handleExtension(positional, flags);
+      break;
+    case 'attach':
+      await handleAttach(positional, flags);
       break;
     default:
       printUsage();

@@ -143,8 +143,8 @@ When `--domain` is specified, each captured URL's hostname is tested against the
 
 Glob rules:
 - `*` matches any sequence of characters within a domain segment
-- `*.github.com` matches `api.github.com`, `raw.github.com`, `github.com`
-- `nordstrom.com` is exact match (also matches `www.nordstrom.com` if glob is `*nordstrom.com`)
+- `*.github.com` matches `api.github.com`, `raw.github.com`, AND the bare domain `github.com` — the `*.` prefix means "zero or more subdomains", not "one or more". This is intentional: OAuth flows routinely touch both `github.com` and `api.github.com`, and a user writing `--domain *.github.com` expects to catch both.
+- `nordstrom.com` is exact match only
 - Multiple patterns comma-separated: `--domain *.github.com,*.stripe.com`
 
 Applied after the blocklist — a blocklisted domain is filtered even if it matches `--domain`.

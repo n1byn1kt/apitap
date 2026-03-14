@@ -265,8 +265,11 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
       },
     },
     async ({ requests, maxBytes }) => {
-      if (!rateLimiter.check()) {
-        return { content: [{ type: 'text' as const, text: 'Rate limit exceeded. Try again in a moment.' }], isError: true };
+      // Consume one rate-limit token per batch item
+      for (let i = 0; i < requests.length; i++) {
+        if (!rateLimiter.check()) {
+          return { content: [{ type: 'text' as const, text: `Rate limit exceeded after ${i} of ${requests.length} items. Try again in a moment.` }], isError: true };
+        }
       }
       const { replayMultiple } = await import('./replay/engine.js');
       const typed = requests.map(r => ({
@@ -337,6 +340,9 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
       },
     },
     async ({ url }) => {
+      if (!rateLimiter.check()) {
+        return { content: [{ type: 'text' as const, text: 'Rate limit exceeded. Try again in a moment.' }], isError: true };
+      }
       try {
         if (!options._skipSsrfCheck) {
           const validation = await resolveAndValidateUrl(url);

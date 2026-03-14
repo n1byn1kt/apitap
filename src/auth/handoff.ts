@@ -296,7 +296,7 @@ async function doHandoff(
       const cookieDomain = (c.domain || '').replace(/^\./, ''); // Remove leading dot
       return cookieDomain === domain ||
         cookieDomain.endsWith('.' + domain) ||
-        domain.endsWith('.' + cookieDomain);
+        (domain.endsWith('.' + cookieDomain) && cookieDomain.includes('.'));
     });
 
     if (cookies.length === 0 && !authDetected) {

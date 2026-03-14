@@ -265,6 +265,9 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
       },
     },
     async ({ requests, maxBytes }) => {
+      if (!rateLimiter.check()) {
+        return { content: [{ type: 'text' as const, text: 'Rate limit exceeded. Try again in a moment.' }], isError: true };
+      }
       const { replayMultiple } = await import('./replay/engine.js');
       const typed = requests.map(r => ({
         domain: r.domain,
@@ -415,6 +418,9 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
       },
     },
     async ({ url, duration }) => {
+      if (!rateLimiter.check()) {
+        return { content: [{ type: 'text' as const, text: 'Rate limit exceeded. Try again in a moment.' }], isError: true };
+      }
       if (!options._skipSsrfCheck) {
         const validation = await resolveAndValidateUrl(url);
         if (!validation.safe) {

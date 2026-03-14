@@ -237,6 +237,13 @@ export async function startSocketServer(
 
       conn.on('data', (chunk) => {
         buffer += chunk.toString();
+
+        // Guard against unbounded buffer growth (max 10MB)
+        if (buffer.length > 10 * 1024 * 1024) {
+          conn.destroy();
+          return;
+        }
+
         const newlineIdx = buffer.indexOf('\n');
         if (newlineIdx === -1) return;
 

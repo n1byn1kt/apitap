@@ -3,6 +3,7 @@ import { searchSkills } from './skill/search.js';
 import { readSkillFile } from './skill/store.js';
 import { replayEndpoint } from './replay/engine.js';
 import { AuthManager, getMachineId } from './auth/manager.js';
+import { deriveSigningKey } from './auth/crypto.js';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -93,7 +94,9 @@ export function createPlugin(options: PluginOptions = {}): Plugin {
       const endpointId = args.endpointId as string;
       const params = args.params as Record<string, string> | undefined;
 
-      const skill = await readSkillFile(domain, skillsDir, { trustUnsigned: true });
+      const machineId = await getMachineId();
+      const signingKey = deriveSigningKey(machineId);
+      const skill = await readSkillFile(domain, skillsDir, { verifySignature: true, signingKey, trustUnsigned: true });
       if (!skill) {
         return {
           error: `No skill file found for "${domain}". Use apitap_capture to capture it first.`,

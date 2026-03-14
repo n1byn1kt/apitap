@@ -272,6 +272,12 @@ export async function attach(options: AttachOptions): Promise<AttachResult> {
     const prefix = sessionId.slice(0, 8);
 
     browser.on(`${sessionId}:Network.requestWillBeSent`, (params) => {
+      // Evict oldest entries if Maps grow too large (memory safety)
+      if (requests.size > 10000) {
+        const keys = [...requests.keys()].slice(0, 1000);
+        for (const k of keys) { requests.delete(k); responses.delete(k); }
+      }
+
       const key = `${prefix}:${params.requestId}`;
       const request = params.request as Record<string, unknown>;
       requests.set(key, {

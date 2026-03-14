@@ -60,6 +60,12 @@ Skill file → replay/engine.ts → fetch() → JSON response
 - **Generator deduplication**: keyed on `method + parameterizedPath`. For POST bodies, duplicate bodies stored in `exchangeBodies` map for cross-request diffing during `toSkillFile()`.
 - **ESM-only**: `"type": "module"` with `.js` extensions in imports (even for .ts source files, required by NodeNext resolution).
 
+### Security Model
+
+- **Signing threat model**: Skill file HMAC-SHA256 signatures protect against external attackers and file corruption, not same-user processes. Any process running as the same user can derive the signing key from `/etc/machine-id` + `~/.apitap/install-salt`. This follows the standard Unix security model where same-user processes share a trust boundary.
+- **`APITAP_MACHINE_ID` env var**: Testing-only override for the machine ID used in key derivation. Never set in production.
+- **Auth encryption**: Credentials in `~/.apitap/auth.enc` use AES-256-GCM with per-install random salt and 100K PBKDF2-SHA512 iterations. Fresh random IV per encryption. File permissions `0o600`, directory `0o700`.
+
 ## Testing Conventions
 
 - Tests mirror `src/` structure under `test/` (e.g., `src/capture/filter.ts` → `test/capture/filter.test.ts`).

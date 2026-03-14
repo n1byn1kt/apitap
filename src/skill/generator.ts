@@ -46,6 +46,18 @@ const STRIP_HEADERS = new Set([
   'cookie',
 ]);
 
+/** Headers that should never be treated as auth by entropy detection. */
+const NOT_AUTH_HEADERS = new Set([
+  'referer', 'user-agent', 'content-type', 'accept', 'accept-language',
+  'origin', 'host', 'content-length', 'cache-control', 'pragma', 'if-none-match',
+  'if-modified-since', 'dnt', 'upgrade-insecure-requests',
+  // Observability/tracing (high entropy but not auth)
+  'traceparent', 'tracestate', 'tracecontext', 'newrelic', 'sentry-trace',
+  'baggage', 'x-request-id', 'x-correlation-id', 'x-trace-id', 'x-span-id',
+  'x-datadog-trace-id', 'x-datadog-parent-id', 'x-datadog-sampling-priority',
+  'x-amzn-trace-id', 'x-cloud-trace-context',
+]);
+
 const AUTH_HEADERS = new Set([
   'authorization',
   'x-api-key',
@@ -107,7 +119,8 @@ function extractAuth(headers: Record<string, string>): [StoredAuth[], Set<string
       });
     } else if (lower === 'x-api-key' && value) {
       auth.push({ type: 'api-key', header: lower, value });
-    } else if (!AUTH_HEADERS.has(lower) && value) {
+    } else if (!AUTH_HEADERS.has(lower) && !STRIP_HEADERS.has(lower) && !NOT_AUTH_HEADERS.has(lower)
+      && !lower.startsWith('sec-') && value) {
       // Entropy-based detection for non-standard headers
       const classification = isLikelyToken(lower, value);
       if (classification.isToken) {
@@ -476,9 +489,12 @@ export class SkillGenerator {
     this.filteredCount++;
   }
 
-  /** Get auth credentials extracted during capture. */
+  /** Get auth credentials extracted during capture, prioritized by type. */
   getExtractedAuth(): StoredAuth[] {
-    return this.extractedAuthList;
+    const priority: Record<string, number> = { bearer: 0, 'api-key': 1, custom: 2 };
+    return [...this.extractedAuthList].sort(
+      (a, b) => (priority[a.type] ?? 3) - (priority[b.type] ?? 3),
+    );
   }
 
   /** Mark this domain as having captcha risk (detected during capture). */

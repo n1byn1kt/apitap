@@ -208,10 +208,25 @@ export class CaptureSession {
 
       if (skill.endpoints.length === 0) continue;
 
-      // Store extracted auth
+      // Store extracted auth — deduplicate by header name,
+      // keeping the first (highest-priority) value for each header
       const extractedAuth = generator.getExtractedAuth();
       if (extractedAuth.length > 0) {
-        await authManager.store(domain, extractedAuth[0]);
+        const seen = new Set<string>();
+        const uniqueHeaders: Array<{ header: string; value: string }> = [];
+        for (const a of extractedAuth) {
+          if (!seen.has(a.header)) {
+            seen.add(a.header);
+            uniqueHeaders.push({ header: a.header, value: a.value });
+          }
+        }
+        const primary = extractedAuth[0];
+        await authManager.store(domain, {
+          type: primary.type,
+          header: primary.header,
+          value: primary.value,
+          headers: uniqueHeaders,
+        });
       }
 
       // Store OAuth credentials if detected

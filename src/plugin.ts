@@ -162,7 +162,7 @@ export function createPlugin(options: PluginOptions = {}): Plugin {
       const { promisify } = await import('node:util');
       const execFileAsync = promisify(execFile);
 
-      const cliArgs = ['--import', 'tsx', 'src/cli.ts', 'capture', url, '--duration', String(duration), '--json', '--no-verify'];
+      const cliArgs = ['--import', 'tsx', 'src/cli.ts', 'capture', url, '--duration', String(duration), '--json'];
       if (allDomains) cliArgs.push('--all-domains');
 
       try {

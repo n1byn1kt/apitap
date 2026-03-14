@@ -30,7 +30,11 @@ const APITAP_DIR = join(homedir(), '.apitap');
 
 /** M20: Mark plugin responses as untrusted external content */
 function wrapUntrusted(data: unknown): unknown {
-  return { ...data as Record<string, unknown>, _meta: { externalContent: { untrusted: true } } };
+  const meta = { externalContent: { untrusted: true } };
+  if (Array.isArray(data)) {
+    return { results: data, _meta: meta };
+  }
+  return { ...data as Record<string, unknown>, _meta: meta };
 }
 
 export function createPlugin(options: PluginOptions = {}): Plugin {

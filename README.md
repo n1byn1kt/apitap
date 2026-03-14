@@ -1,7 +1,7 @@
 # ApiTap
 
 [![npm version](https://img.shields.io/npm/v/@apitap/core)](https://www.npmjs.com/package/@apitap/core)
-[![tests](https://img.shields.io/badge/tests-1176%20passing-brightgreen)](https://github.com/n1byn1kt/apitap)
+[![tests](https://img.shields.io/badge/tests-1196%20passing-brightgreen)](https://github.com/n1byn1kt/apitap)
 [![license](https://img.shields.io/badge/license-BSL--1.1-blue)](./LICENSE)
 
 **The MCP server that turns any website into an API — no docs, no SDK, no browser.**
@@ -34,13 +34,14 @@ No scraping. No browser. Just the API.
 
 ## How It Works
 
-1. **Capture** — Launch a Playwright browser, visit a site, browse normally. ApiTap intercepts all network traffic via CDP.
+1. **Capture** — Launch a Playwright browser, visit a site, browse normally. ApiTap intercepts all network traffic via CDP. Or use `apitap attach` to capture from your already-running Chrome.
 2. **Filter** — Scoring engine separates signal from noise. Analytics, tracking pixels, and framework internals are filtered out. Only real API endpoints survive.
-3. **Generate** — Captured endpoints are grouped by domain, URLs are parameterized (`/users/123` → `/users/:id`), and a JSON skill file is written to `~/.apitap/skills/`.
+3. **Generate** — Captured endpoints are grouped by domain, URLs are parameterized (`/users/123` → `/users/:id` with context-aware semantic names), and a JSON skill file is written to `~/.apitap/skills/`.
 4. **Replay** — Read the skill file, substitute parameters, call the API with `fetch()`. Zero dependencies in the replay path.
 
 ```
-Capture:  Browser → Playwright listener → Filter → Skill Generator → skill.json
+Capture:  Browser → Playwright/CDP listener → Filter → Skill Generator → skill.json
+Attach:   Running Chrome → CDP attach → Filter → Skill Generator → skill.json
 Replay:   Agent → Replay Engine (skill.json) → fetch() → API → JSON response
 ```
 
@@ -83,6 +84,22 @@ apitap capture https://polymarket.com --duration 30
 ```
 
 ApiTap opens a browser window. Browse the site normally — click around, scroll, search. Every API call is captured. Press Ctrl+C when done.
+
+### Attach to a running Chrome
+
+```bash
+# Enable remote debugging in Chrome: Settings → Remote debugging → toggle on
+
+# Attach to your signed-in Chrome — captures all tabs
+apitap attach --port 9222
+
+# Filter to specific domains
+apitap attach --port 9222 --domain *.github.com
+
+# Ctrl+C to stop — generates signed skill files for each captured domain
+```
+
+No separate browser, no re-login. Captures from your real Chrome sessions with all your cookies and auth tokens.
 
 ### List and explore captured APIs
 
@@ -327,7 +344,7 @@ For one-off captures without the passive index:
 2. Browse the site — extension records API traffic
 3. Click **Stop** → skill file auto-saves to `~/.apitap/skills/`
 
-The popup shows CLI connection status and live capture stats. Auth tokens are automatically stored to `~/.apitap/auth.enc` with `[stored]` placeholders in the exported skill files.
+The popup shows CLI connection status and live capture stats. Auth tokens are encrypted with AES-256-GCM in session storage and automatically persisted to `~/.apitap/auth.enc` via the native host, with `[stored]` placeholders in the exported skill files.
 
 > **Note:** Chrome Web Store submission coming soon. For now, load as an unpacked extension in Developer mode.
 
@@ -360,7 +377,7 @@ Skill files are JSON documents stored at `~/.apitap/skills/<domain>.json`. They 
 
 ```json
 {
-  "version": "1.1",
+  "version": 2,
   "domain": "gamma-api.polymarket.com",
   "baseUrl": "https://gamma-api.polymarket.com",
   "endpoints": [
@@ -425,7 +442,7 @@ Endpoint replayed
   → Redirect check: if server redirects, validate new target before following
 ```
 
-**Blocked ranges:** `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16` (cloud metadata), `0.0.0.0`, IPv6 equivalents (`::1`, `fe80::/10`, `fc00::/7`, `::ffff:` mapped addresses), `localhost`, `.local`, `.internal`, `file://`, `javascript:` schemes.
+**Blocked ranges:** `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16` (cloud metadata), `100.64.0.0/10` (CGNAT/Tailscale), `198.18.0.0/15` (benchmarking), `240.0.0.0/4` (reserved), `0.0.0.0`, IPv6 equivalents (`::1`, `fe80::/10`, `fc00::/7`, `::ffff:` mapped addresses), `localhost`, `.local`, `.internal`, `file://`, `javascript:` schemes. Alternative IP representations (decimal integer, octal, hex) are normalized before checking.
 
 This is especially relevant now that [MCP servers are being used as attack vectors in the wild](https://cloud.google.com/blog/topics/threat-intelligence/distillation-experimentation-integration-ai-adversarial-use) — Google's Threat Intelligence Group recently documented underground toolkits built on compromised MCP servers. ApiTap is designed to be safe even when processing untrusted inputs.
 
@@ -442,6 +459,7 @@ All commands support `--json` for machine-readable output.
 | `apitap read <url>` | Extract content without a browser |
 | `apitap discover <url>` | Detect APIs without launching a browser |
 | `apitap capture <url>` | Capture API traffic from a website |
+| `apitap attach --port <port>` | Attach to running Chrome and capture API traffic |
 | `apitap list` | List available skill files |
 | `apitap show <domain>` | Show endpoints for a domain |
 | `apitap search <query>` | Search skill files by domain or endpoint |
@@ -452,6 +470,7 @@ All commands support `--json` for machine-readable output.
 | `apitap serve <domain>` | Serve a skill file as an MCP server |
 | `apitap inspect <url>` | Discover APIs without saving |
 | `apitap stats` | Show token savings report |
+| `apitap index [domain]` | View passive index from Chrome extension |
 | `apitap audit` | Audit stored skill files and credentials |
 | `apitap forget <domain>` | Remove skill file and credentials for a domain |
 | `apitap --version` | Print version |
@@ -468,6 +487,7 @@ All commands support `--json` for machine-readable output.
 | `--attach` | Only attach to existing browser |
 | `--no-scrub` | Disable PII scrubbing |
 | `--no-verify` | Skip auto-verification of GET endpoints |
+| `--domain <glob>` | Filter traffic by domain glob (attach mode, e.g. `*.github.com`) |
 
 ## Development
 
@@ -475,7 +495,7 @@ All commands support `--json` for machine-readable output.
 git clone https://github.com/n1byn1kt/apitap.git
 cd apitap
 npm install
-npm test          # 1051 tests, Node built-in test runner
+npm test          # ~1196 tests, Node built-in test runner
 npm run typecheck # Type checking
 npm run build     # Compile to dist/
 npx tsx src/cli.ts capture <url>  # Run from source

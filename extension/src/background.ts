@@ -11,6 +11,7 @@ import { processCompletedRequest, detectAuthType, extractAuthTokens } from './ob
 import { mergeObservation, createEmptyIndex } from './index-store.js';
 import { markPromoted } from './promotion.js';
 import { applyLifecycle } from './lifecycle.js';
+import { encrypt, decrypt } from './crypto.js';
 import type { IndexFile, IndexEntry } from './types.js';
 
 // --- Native messaging bridge (persistent port) ---
@@ -681,8 +682,7 @@ chrome.webRequest.onCompleted.addListener(
       passiveIndex = mergeObservation(passiveIndex, obs);
       indexDirty = true;
 
-      // Store auth tokens in session storage (cleared on browser close)
-      // TODO: encrypt with AES-GCM via HKDF-derived key
+      // Store auth tokens encrypted in session storage (cleared on browser close)
       if (obs.authTokens && obs.authTokens.length > 0) {
         void storeAuthTokens(obs.domain, obs.authTokens);
       }
@@ -738,13 +738,24 @@ chrome.runtime.onSuspend.addListener(() => {
 });
 
 // --- Auth token session storage ---
-// Auth tokens are stored in chrome.storage.session (cleared on browser close).
-// TODO: encrypt with AES-GCM via HKDF-derived key for defense-in-depth.
+// Auth tokens are encrypted with AES-256-GCM before storing in chrome.storage.session.
+// Key is per-session (generated on first use, cleared on browser close).
+// Provides defense-in-depth against memory dumps or co-resident extensions.
 
 async function storeAuthTokens(domain: string, newTokens: Array<{ header: string; value: string }>): Promise<void> {
   const result = await chrome.storage.session.get(['authTokens']);
-  const store: Record<string, Array<{ header: string; value: string }>> = result.authTokens ?? {};
-  const existing = store[domain] ?? [];
+  const store: Record<string, string> = result.authTokens ?? {};
+
+  // Decrypt existing tokens for this domain to merge
+  let existing: Array<{ header: string; value: string }> = [];
+  if (store[domain]) {
+    try {
+      existing = JSON.parse(await decrypt(store[domain]));
+    } catch {
+      existing = []; // Key rotated or corrupt — start fresh
+    }
+  }
+
   // Merge: update existing headers, add new ones
   for (const t of newTokens) {
     const idx = existing.findIndex(e => e.header === t.header);
@@ -754,14 +765,21 @@ async function storeAuthTokens(domain: string, newTokens: Array<{ header: string
       existing.push(t);
     }
   }
-  store[domain] = existing;
+
+  // Encrypt and store
+  store[domain] = await encrypt(JSON.stringify(existing));
   await chrome.storage.session.set({ authTokens: store });
 }
 
 async function getAuthTokens(domain: string): Promise<Array<{ header: string; value: string }>> {
   const result = await chrome.storage.session.get(['authTokens']);
-  const store: Record<string, Array<{ header: string; value: string }>> = result.authTokens ?? {};
-  return store[domain] ?? [];
+  const store: Record<string, string> = result.authTokens ?? {};
+  if (!store[domain]) return [];
+  try {
+    return JSON.parse(await decrypt(store[domain]));
+  } catch {
+    return []; // Key rotated or corrupt
+  }
 }
 
 // --- Skeleton skill file generation (v1.5.1) ---

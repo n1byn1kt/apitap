@@ -14,6 +14,7 @@ export { peek, read, type PeekOptions, type ReadOptions } from './read/index.js'
 export type { PeekResult, ReadResult, Decoder } from './read/types.js';
 export { AuthManager, getMachineId } from './auth/manager.js';
 export { parameterizePath, cleanFrameworkPath } from './capture/parameterize.js';
+export { attach, matchesDomainGlob, parseDomainPatterns } from './capture/cdp-attach.js';
 export { detectPagination } from './capture/pagination.js';
 export { verifyEndpoints } from './capture/verifier.js';
 export { IdleTracker } from './capture/idle.js';

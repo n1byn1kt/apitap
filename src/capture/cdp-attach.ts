@@ -3,11 +3,12 @@ import http from 'node:http';
 import { homedir } from 'node:os';
 import type { CapturedExchange } from '../types.js';
 import { shouldCapture } from './filter.js';
-import { SkillGenerator } from '../skill/generator.js';
+import { SkillGenerator, deduplicateAuth } from '../skill/generator.js';
 import { signSkillFile } from '../skill/signing.js';
 import { writeSkillFile } from '../skill/store.js';
-import { getMachineId } from '../auth/manager.js';
+import { AuthManager, getMachineId } from '../auth/manager.js';
 import { deriveSigningKey } from '../auth/crypto.js';
+import { join } from 'node:path';
 
 // ---- Domain glob matching ----
 
@@ -436,11 +437,32 @@ export async function attach(options: AttachOptions): Promise<AttachResult> {
 
       const machineId = await getMachineId();
       const signingKey = deriveSigningKey(machineId);
+      const apitapDir = process.env.APITAP_DIR || join(homedir(), '.apitap');
+      const authManager = new AuthManager(apitapDir, machineId);
       const domains: AttachResult['domains'] = [];
 
       for (const [domain, gen] of generators) {
         let skill = gen.toSkillFile(domain);
         if (skill.endpoints.length === 0) continue;
+
+        // Store extracted auth credentials
+        const auth = deduplicateAuth(gen.getExtractedAuth());
+        if (auth) {
+          await authManager.store(domain, auth);
+        }
+
+        // Store OAuth credentials if detected
+        const oauthConfig = gen.getOAuthConfig();
+        if (oauthConfig) {
+          const clientSecret = gen.getOAuthClientSecret();
+          const refreshToken = gen.getOAuthRefreshToken();
+          if (clientSecret || refreshToken) {
+            await authManager.storeOAuthCredentials(domain, {
+              ...(clientSecret ? { clientSecret } : {}),
+              ...(refreshToken ? { refreshToken } : {}),
+            });
+          }
+        }
 
         skill = signSkillFile(skill, signingKey);
         const skillPath = await writeSkillFile(skill);

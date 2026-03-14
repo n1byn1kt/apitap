@@ -150,4 +150,20 @@ describe('shouldCapture', () => {
       contentType: 'application/json',
     }), true);
   });
+
+  it('rejects chrome-extension:// URLs', () => {
+    assert.equal(shouldCapture({
+      url: 'chrome-extension://fignfifoniblkonapihmkfakmlgkbkcf/api/data',
+      status: 200,
+      contentType: 'application/json',
+    }), false);
+  });
+
+  it('rejects moz-extension:// URLs', () => {
+    assert.equal(shouldCapture({
+      url: 'moz-extension://abcd1234/api/data',
+      status: 200,
+      contentType: 'application/json',
+    }), false);
+  });
 });

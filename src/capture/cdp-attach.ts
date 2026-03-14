@@ -263,6 +263,7 @@ export async function attach(options: AttachOptions): Promise<AttachResult> {
   let filteredRequests = 0;
   const startTime = Date.now();
   const activeSessions = new Set<string>();
+  const loggedSkippedDomains = new Set<string>();
 
   function enableNetworkForSession(sessionId: string): void {
     if (activeSessions.has(sessionId)) return;
@@ -351,6 +352,10 @@ export async function attach(options: AttachOptions): Promise<AttachResult> {
 
     if (!matchesDomainGlob(hostname, domainPatterns)) {
       filteredRequests++;
+      if (!loggedSkippedDomains.has(hostname)) {
+        loggedSkippedDomains.add(hostname);
+        logFn(`  [skip] ${hostname} (not in domain filter)`);
+      }
       return;
     }
 

@@ -275,7 +275,7 @@ describe('SkillGenerator', () => {
 
     const skill = gen.toSkillFile('example.com');
     assert.equal(skill.endpoints.length, 1);
-    assert.equal(skill.endpoints[0].path, '/api/items/:id');
+    assert.equal(skill.endpoints[0].path, '/api/items/:item_id');
     assert.equal(skill.metadata.captureCount, 2);
   });
 
@@ -286,8 +286,8 @@ describe('SkillGenerator', () => {
     }));
 
     const skill = gen.toSkillFile('example.com');
-    assert.equal(skill.endpoints[0].path, '/events/slug/:slug');
-    assert.equal(skill.endpoints[0].id, 'get-events-slug');
+    assert.equal(skill.endpoints[0].path, '/events/:event_id/:slug');
+    assert.equal(skill.endpoints[0].id, 'get-events');
   });
 
   it('preserves original URL in examples after parameterization', () => {

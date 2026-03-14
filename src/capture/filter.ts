@@ -36,6 +36,11 @@ export function isPathNoise(pathname: string): boolean {
 }
 
 export function shouldCapture(response: FilterableResponse): boolean {
+  // Block extension-internal traffic (prevents self-capture when
+  // attaching to a browser with ApiTap extension loaded)
+  if (response.url.startsWith('chrome-extension://')) return false;
+  if (response.url.startsWith('moz-extension://')) return false;
+
   // Only keep 2xx success responses
   if (response.status < 200 || response.status >= 300) return false;
 

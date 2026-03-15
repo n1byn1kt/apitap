@@ -1,0 +1,43 @@
+{
+  "name": "n1byn1kt/apitap",
+  "description": "The MCP server that turns any website into an API — no docs, no SDK, no browser. npm: @apitap/core",
+  "accepts": [
+    {
+      "network": "eip155:8453",
+      "asset": "USDC",
+      "address": "YOUR_WALLET_ADDRESS"
+    }
+  ],
+  "resources": [
+    {
+      "path": "/wp-json/wp/v2/posts",
+      "price": "0.01",
+      "description": "Pay-per-call access to /wp-json/wp/v2/posts"
+    },
+    {
+      "path": "/events",
+      "price": "0.01",
+      "description": "Pay-per-call access to /events"
+    },
+    {
+      "path": "/teams",
+      "price": "0.01",
+      "description": "Pay-per-call access to /teams"
+    },
+    {
+      "path": "/api/v10/channels/:id",
+      "price": "0.01",
+      "description": "Pay-per-call access to /api/v10/channels/:id"
+    },
+    {
+      "path": "/api/v10/guilds/:id/members",
+      "price": "0.01",
+      "description": "Pay-per-call access to /api/v10/guilds/:id/members"
+    },
+    {
+      "path": "/api/v10/channels/:id/messages",
+      "price": "0.01",
+      "description": "Pay-per-call access to /api/v10/channels/:id/messages"
+    }
+  ]
+}

@@ -133,11 +133,21 @@ export class CaptureSession {
         case 'navigate': {
           if (!action.url) return { success: false, error: 'url required for navigate', snapshot: await this.takeSnapshot() };
 
-          // M7 fix: Full SSRF validation on navigate URLs (same checks as ssrf.ts)
-          const { validateUrl: validateNavUrl } = await import('../skill/ssrf.js');
-          const navResult = validateNavUrl(action.url);
-          if (!navResult.safe) {
-            return { success: false, error: `Navigation blocked: ${navResult.reason}`, snapshot: await this.takeSnapshot() };
+          // M7 fix: SSRF validation on navigate URLs — skip for same-origin
+          // (session.start() already navigated to targetUrl, so same-origin is trusted)
+          let sameOrigin = false;
+          try {
+            sameOrigin = this.targetUrl !== '' && new URL(action.url).origin === new URL(this.targetUrl).origin;
+          } catch {
+            // Invalid URL — let validateUrl produce the error
+          }
+
+          if (!sameOrigin) {
+            const { validateUrl: validateNavUrl } = await import('../skill/ssrf.js');
+            const navResult = validateNavUrl(action.url);
+            if (!navResult.safe) {
+              return { success: false, error: `Navigation blocked: ${navResult.reason}`, snapshot: await this.takeSnapshot() };
+            }
           }
 
           await this.page.goto(action.url, { waitUntil: 'domcontentloaded' });

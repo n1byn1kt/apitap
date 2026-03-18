@@ -66,5 +66,8 @@ reddit.json
 TRACTION.md
 launch-*.md
 launch-traction-baseline.json
+launch-traction.json
 monitoring/
 .traction-baseline
+.traction-state
+tasks/

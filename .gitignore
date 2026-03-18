@@ -71,3 +71,4 @@ monitoring/
 .traction-baseline
 .traction-state
 tasks/
+launch-monitor-baseline.json

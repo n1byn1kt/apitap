@@ -205,6 +205,24 @@ function wrapAuthError(
 }
 
 /**
+ * Returns a user-facing hint about confidence level, or null if confidence is high enough.
+ */
+export function getConfidenceHint(confidence: number | undefined): string | null {
+  const c = confidence ?? 1.0;
+  if (c >= 0.85) return null;
+  if (c >= 0.7) return '(imported from spec — params may need adjustment)';
+  return '(imported from spec — provide params explicitly, no captured examples available)';
+}
+
+/**
+ * Returns true if a query param should be omitted from the request.
+ * Omits spec-derived params that have no real example value.
+ */
+export function shouldOmitQueryParam(param: { type: string; example: string; fromSpec?: boolean }): boolean {
+  return param.fromSpec === true && param.example === '';
+}
+
+/**
  * Replay a captured API endpoint.
  *
  * @param skill - Skill file containing endpoint definitions
@@ -240,6 +258,7 @@ export async function replayEndpoint(
 
   // Apply query params: start with captured defaults, override with provided params
   for (const [key, val] of Object.entries(endpoint.queryParams)) {
+    if (shouldOmitQueryParam(val)) continue;
     url.searchParams.set(key, val.example);
   }
   if (params) {

@@ -1,4 +1,5 @@
 // src/skill/apis-guru.ts
+import { resolveAndValidateUrl } from '../skill/ssrf.js';
 
 export interface ApisGuruEntry {
   apiId: string;           // e.g., "twilio.com:api"
@@ -116,25 +117,47 @@ export function filterEntries(
  * Fetch the APIs.guru list.json and parse it into ApisGuruEntry array.
  */
 export async function fetchApisGuruList(): Promise<ApisGuruEntry[]> {
-  const response = await fetch(APIS_GURU_LIST_URL);
+  const ssrf = await resolveAndValidateUrl(APIS_GURU_LIST_URL);
+  if (!ssrf.safe) {
+    throw new Error(`SSRF check failed for APIs.guru list URL: ${ssrf.reason}`);
+  }
+  const response = await fetch(APIS_GURU_LIST_URL, {
+    signal: AbortSignal.timeout(30_000),
+  });
   if (!response.ok) {
     throw new Error(
       `Failed to fetch APIs.guru list: ${response.status} ${response.statusText}`,
     );
   }
-  const raw = (await response.json()) as Record<string, any>;
-  return parseApisGuruList(raw);
+  const text = await response.text();
+  try {
+    return parseApisGuruList(JSON.parse(text) as Record<string, any>);
+  } catch {
+    throw new Error(`Invalid JSON from ${APIS_GURU_LIST_URL}: ${text.slice(0, 100)}`);
+  }
 }
 
 /**
  * Fetch a single OpenAPI spec by URL and return the parsed JSON.
  */
 export async function fetchSpec(specUrl: string): Promise<Record<string, any>> {
-  const response = await fetch(specUrl);
+  const ssrf = await resolveAndValidateUrl(specUrl);
+  if (!ssrf.safe) {
+    throw new Error(`SSRF check failed for spec URL ${specUrl}: ${ssrf.reason}`);
+  }
+  const response = await fetch(specUrl, {
+    signal: AbortSignal.timeout(30_000),
+    redirect: 'error',
+  });
   if (!response.ok) {
     throw new Error(
       `Failed to fetch spec at ${specUrl}: ${response.status} ${response.statusText}`,
     );
   }
-  return (await response.json()) as Record<string, any>;
+  const text = await response.text();
+  try {
+    return JSON.parse(text) as Record<string, any>;
+  } catch {
+    throw new Error(`Invalid JSON from ${specUrl}: ${text.slice(0, 100)}`);
+  }
 }

@@ -34,6 +34,7 @@ export function resolveRef(
   if (!obj.$ref) return obj;
 
   const ref = obj.$ref as string;
+  if (!ref.startsWith('#/')) return null; // Only local document refs supported
   if (visited.has(ref)) return null; // cycle detected
   if (depth > 10) return null;       // depth safety net
 
@@ -61,18 +62,26 @@ export function extractDomainAndBasePath(
       return { domain: parsed.hostname, basePath: parsed.pathname.replace(/\/$/, '') };
     } catch {
       if (serverUrl.startsWith('/')) {
-        const domain = spec.info?.['x-providerName'] || new URL(specUrl).hostname;
+        const providerName = spec.info?.['x-providerName'];
+        const domain = (providerName && /^[a-zA-Z0-9][a-zA-Z0-9._-]+$/.test(providerName))
+          ? providerName
+          : new URL(specUrl).hostname;
         return { domain, basePath: serverUrl.replace(/\/$/, '') };
       }
     }
   }
   if (spec.host) {
-    return { domain: spec.host, basePath: (spec.basePath || '').replace(/\/$/, '') };
+    try {
+      const parsed = new URL(`https://${spec.host}`);
+      return { domain: parsed.hostname, basePath: (spec.basePath || '').replace(/\/$/, '') };
+    } catch {
+      return { domain: spec.host.split(':')[0], basePath: (spec.basePath || '').replace(/\/$/, '') };
+    }
   }
   try {
     return { domain: new URL(specUrl).hostname, basePath: '' };
   } catch {
-    return { domain: 'unknown', basePath: '' };
+    throw new Error(`Cannot determine API domain from spec (no servers, host, or valid specUrl)`);
   }
 }
 

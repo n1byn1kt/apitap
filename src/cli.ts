@@ -2,7 +2,7 @@
 // src/cli.ts
 import { capture } from './capture/monitor.js';
 import { writeSkillFile, readSkillFile, listSkillFiles } from './skill/store.js';
-import { replayEndpoint } from './replay/engine.js';
+import { replayEndpoint, getConfidenceHint } from './replay/engine.js';
 import { AuthManager, getMachineId } from './auth/manager.js';
 import { deriveSigningKey } from './auth/crypto.js';
 import { signSkillFile } from './skill/signing.js';
@@ -465,6 +465,10 @@ async function handleReplay(positional: string[], flags: Record<string, string |
       ...(result.contractWarnings?.length ? { contractWarnings: result.contractWarnings } : {}),
     }, null, 2));
   } else {
+    const hint = endpoint ? getConfidenceHint(endpoint.confidence) : null;
+    if (hint) {
+      console.error(`  Note: ${hint}`);
+    }
     console.log(`\n  Status: ${result.status}\n`);
     console.log(JSON.stringify(result.data, null, 2));
     console.log();
@@ -504,7 +508,11 @@ async function handleImport(positional: string[], flags: Record<string, string |
 
   if (isUrl) {
     try {
-      const response = await fetch(source);
+      const ssrfCheck = await resolveAndValidateUrl(source);
+      if (!ssrfCheck.safe) {
+        throw new Error(`SSRF check failed: ${ssrfCheck.reason}`);
+      }
+      const response = await fetch(source, { signal: AbortSignal.timeout(30_000) });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status} ${response.statusText}`);
       }
@@ -578,22 +586,24 @@ async function handleSkillFileImport(filePath: string, json: boolean): Promise<v
   const key = deriveSigningKey(machineId);
 
   // DNS-resolving SSRF check before importing (prevents DNS rebinding attacks)
+  let raw: any;
   try {
-    const raw = JSON.parse(await import('node:fs/promises').then(fs => fs.readFile(filePath, 'utf-8')));
-    if (raw.baseUrl) {
-      const dnsCheck = await resolveAndValidateUrl(raw.baseUrl);
-      if (!dnsCheck.safe) {
-        const msg = `DNS rebinding risk: ${dnsCheck.reason}`;
-        if (json) {
-          console.log(JSON.stringify({ success: false, reason: msg }));
-        } else {
-          console.error(`Error: ${msg}`);
-        }
-        process.exit(1);
-      }
-    }
+    raw = JSON.parse(await import('node:fs/promises').then(fs => fs.readFile(filePath, 'utf-8')));
   } catch {
-    // Parse errors will be caught by importSkillFile
+    // Parse errors will be caught by importSkillFile below
+  }
+
+  if (raw?.baseUrl) {
+    const dnsCheck = await resolveAndValidateUrl(raw.baseUrl);
+    if (!dnsCheck.safe) {
+      const msg = `DNS rebinding risk: ${dnsCheck.reason}`;
+      if (json) {
+        console.log(JSON.stringify({ success: false, reason: msg }));
+      } else {
+        console.error(`Error: ${msg}`);
+      }
+      process.exit(1);
+    }
   }
 
   const result = await importSkillFile(filePath, undefined, key);
@@ -663,8 +673,10 @@ async function handleOpenAPIImport(
       verifySignature: true,
       trustUnsigned: true,
     });
-  } catch {
-    // No existing file — that's fine, we'll create a new one
+  } catch (err: any) {
+    if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+      if (!json) console.error(`  Warning: could not read existing skill file for ${domain}: ${err.message}`);
+    }
   }
 
   // Merge
@@ -814,8 +826,10 @@ async function handleApisGuruImport(flags: Record<string, string | boolean>): Pr
           verifySignature: true,
           trustUnsigned: true,
         });
-      } catch {
-        // No existing file
+      } catch (err: any) {
+        if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+          if (!json) console.error(`  Warning: could not read existing skill file for ${domain}: ${err.message}`);
+        }
       }
 
       // Merge

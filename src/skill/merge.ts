@@ -160,6 +160,9 @@ export function mergeSkillFile(
   for (const ep of imported) {
     const key = matchKey(ep.method, ep.path);
     // If multiple imported endpoints map to the same key, last wins
+    if (importedMap.has(key)) {
+      process.stderr.write(`[openapi-import] Warning: ${ep.method} ${ep.path} collides with existing import after normalization\n`);
+    }
     importedMap.set(key, ep);
   }
 
@@ -264,7 +267,7 @@ function extractDomainFromMeta(meta: ImportMeta): string {
   try {
     return new URL(meta.specUrl).hostname;
   } catch {
-    return 'unknown';
+    throw new Error(`Cannot determine domain from specUrl: ${meta.specUrl}`);
   }
 }
 
@@ -273,6 +276,6 @@ function extractBaseUrlFromMeta(meta: ImportMeta): string {
     const u = new URL(meta.specUrl);
     return `${u.protocol}//${u.hostname}`;
   } catch {
-    return 'https://unknown';
+    throw new Error(`Cannot determine base URL from specUrl: ${meta.specUrl}`);
   }
 }

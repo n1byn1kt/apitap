@@ -162,7 +162,7 @@ export interface SkillFile {
       endpointsEnriched: number;
     }>;
   };
-  provenance: 'self' | 'imported' | 'unsigned';
+  provenance: 'self' | 'imported' | 'imported-signed' | 'unsigned';
   signature?: string;
   auth?: SkillAuth; // v0.8: top-level auth config
 }
@@ -215,7 +215,7 @@ export interface SkillSummary {
   skillFile: string;
   endpointCount: number;
   capturedAt: string;
-  provenance: 'self' | 'imported' | 'unsigned';
+  provenance: 'self' | 'imported' | 'imported-signed' | 'unsigned';
 }
 
 // --- Discovery types (Milestone 2: Smart Discovery) ---

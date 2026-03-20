@@ -31,6 +31,14 @@ export function resolveRef(
     return merged;
   }
 
+  // Handle oneOf/anyOf: use first option as representative
+  if (obj.oneOf && Array.isArray(obj.oneOf) && obj.oneOf.length > 0) {
+    return resolveRef(obj.oneOf[0], spec, new Set(visited), depth + 1);
+  }
+  if (obj.anyOf && Array.isArray(obj.anyOf) && obj.anyOf.length > 0) {
+    return resolveRef(obj.anyOf[0], spec, new Set(visited), depth + 1);
+  }
+
   if (!obj.$ref) return obj;
 
   const ref = obj.$ref as string;

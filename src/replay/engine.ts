@@ -45,6 +45,15 @@ const BLOCKED_REPLAY_HEADERS = new Set([
   'sec-fetch-user',
 ]);
 
+export function safeParseJson(text: string): unknown {
+  if (text.length === 0) return text;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
 export interface ReplayOptions {
   /** User-provided parameters for path, query, and body substitution */
   params?: Record<string, string>;
@@ -70,6 +79,8 @@ export interface ReplayResult {
   truncated?: boolean;
   /** Contract warnings from schema drift detection */
   contractWarnings?: ContractWarning[];
+  /** Upgrade hint: set when a low-confidence endpoint gets a 2xx response */
+  upgrade?: { confidence: 1.0; endpointProvenance: 'captured' };
 }
 
 /**
@@ -548,8 +559,8 @@ export async function replayEndpoint(
       let retryData: unknown;
       const retryCt = retryResponse.headers.get('content-type') ?? '';
       const retryText = await retryResponse.text();
-      if (retryCt.includes('json') && retryText.length > 0) {
-        retryData = JSON.parse(retryText);
+      if (retryCt.includes('json')) {
+        retryData = safeParseJson(retryText);
       } else {
         retryData = retryText;
       }
@@ -557,6 +568,11 @@ export async function replayEndpoint(
       const retryFinalData = (retryResponse.status === 401 || retryResponse.status === 403)
         ? wrapAuthError(retryResponse.status, retryData, skill.domain)
         : retryData;
+
+      const retryUpgrade = (endpoint.confidence !== undefined && endpoint.confidence < 1.0
+        && retryResponse.status >= 200 && retryResponse.status < 300)
+        ? { confidence: 1.0 as const, endpointProvenance: 'captured' as const }
+        : undefined;
 
       if (options.maxBytes) {
         const truncated = truncateResponse(retryFinalData, { maxBytes: options.maxBytes });
@@ -566,6 +582,7 @@ export async function replayEndpoint(
           data: truncated.data,
           refreshed,
           ...(truncated.truncated ? { truncated: true } : {}),
+          ...(retryUpgrade ? { upgrade: retryUpgrade } : {}),
         };
       }
 
@@ -574,6 +591,7 @@ export async function replayEndpoint(
         headers: retryHeaders,
         data: retryFinalData,
         refreshed,
+        ...(retryUpgrade ? { upgrade: retryUpgrade } : {}),
       };
     }
   }
@@ -586,8 +604,8 @@ export async function replayEndpoint(
   let data: unknown;
   const ct = response.headers.get('content-type') ?? '';
   const text = await response.text();
-  if (ct.includes('json') && text.length > 0) {
-    data = JSON.parse(text);
+  if (ct.includes('json')) {
+    data = safeParseJson(text);
   } else {
     data = text;
   }
@@ -606,6 +624,11 @@ export async function replayEndpoint(
     }
   }
 
+  const upgrade = (endpoint.confidence !== undefined && endpoint.confidence < 1.0
+    && response.status >= 200 && response.status < 300)
+    ? { confidence: 1.0 as const, endpointProvenance: 'captured' as const }
+    : undefined;
+
   // Apply truncation if maxBytes is set
   if (options.maxBytes) {
     const truncated = truncateResponse(finalData, { maxBytes: options.maxBytes });
@@ -616,10 +639,11 @@ export async function replayEndpoint(
       ...(refreshed ? { refreshed } : {}),
       ...(truncated.truncated ? { truncated: true } : {}),
       ...(contractWarnings ? { contractWarnings } : {}),
+      ...(upgrade ? { upgrade } : {}),
     };
   }
 
-  return { status: response.status, headers: responseHeaders, data: finalData, ...(refreshed ? { refreshed } : {}), ...(contractWarnings ? { contractWarnings } : {}) };
+  return { status: response.status, headers: responseHeaders, data: finalData, ...(refreshed ? { refreshed } : {}), ...(contractWarnings ? { contractWarnings } : {}), ...(upgrade ? { upgrade } : {}) };
 }
 
 // --- Batch replay ---

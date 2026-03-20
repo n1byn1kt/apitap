@@ -5,7 +5,7 @@ import { writeSkillFile, readSkillFile, listSkillFiles } from './skill/store.js'
 import { replayEndpoint, getConfidenceHint } from './replay/engine.js';
 import { AuthManager, getMachineId } from './auth/manager.js';
 import { deriveSigningKey } from './auth/crypto.js';
-import { signSkillFile } from './skill/signing.js';
+import { signSkillFile, signSkillFileAs } from './skill/signing.js';
 import { importSkillFile } from './skill/importer.js';
 import { resolveAndValidateUrl } from './skill/ssrf.js';
 import { verifyEndpoints } from './capture/verifier.js';
@@ -458,6 +458,20 @@ async function handleReplay(positional: string[], flags: Record<string, string |
     _skipSsrfCheck: dangerDisableSsrf,
   });
 
+  // Auto-upgrade imported endpoints on successful replay
+  if ((result as any).upgrade && endpoint) {
+    endpoint.confidence = 1.0;
+    endpoint.endpointProvenance = 'captured';
+    // Update example with the actual successful request
+    endpoint.examples.responsePreview = typeof result.data === 'object' ? result.data : null;
+    // Re-sign and write
+    const signed = signSkillFile(skill, signingKey);
+    await writeSkillFile(signed, SKILLS_DIR);
+    if (!json) {
+      console.error('  \u2713 Endpoint upgraded to captured (confidence 1.0)');
+    }
+  }
+
   if (json) {
     console.log(JSON.stringify({
       status: result.status,
@@ -489,17 +503,6 @@ async function handleImport(positional: string[], flags: Record<string, string |
   }
 
   const json = flags.json === true;
-
-  // Reject YAML files with helpful message
-  if (/\.ya?ml$/i.test(source)) {
-    const msg = 'YAML specs not yet supported. Convert to JSON first: npx swagger-cli bundle spec.yaml -o spec.json';
-    if (json) {
-      console.log(JSON.stringify({ success: false, reason: msg }));
-    } else {
-      console.error(`Error: ${msg}`);
-    }
-    process.exit(1);
-  }
 
   // Load content — from URL or file
   let rawText: string;
@@ -542,18 +545,25 @@ async function handleImport(positional: string[], flags: Record<string, string |
     }
   }
 
-  // Parse JSON
+  // Parse JSON or YAML
   let parsed: any;
   try {
     parsed = JSON.parse(rawText);
   } catch {
-    const msg = `Invalid JSON in ${source}`;
-    if (json) {
-      console.log(JSON.stringify({ success: false, reason: msg }));
-    } else {
-      console.error(`Error: ${msg}`);
+    try {
+      const yaml = await import('js-yaml');
+      parsed = yaml.load(rawText);
+      if (typeof parsed !== 'object' || parsed === null) {
+        throw new Error('YAML parsed to non-object');
+      }
+    } catch (yamlErr: any) {
+      if (json) {
+        console.log(JSON.stringify({ success: false, reason: `Invalid JSON/YAML: ${yamlErr.message}` }));
+      } else {
+        console.error(`Error: Could not parse as JSON or YAML: ${yamlErr.message}`);
+      }
+      process.exit(1);
     }
-    process.exit(1);
   }
 
   // Route: OpenAPI spec vs SkillFile
@@ -631,6 +641,8 @@ async function handleOpenAPIImport(
 ): Promise<void> {
   const json = flags.json === true;
   const dryRun = flags['dry-run'] === true;
+  const update = flags.update === true;
+  const force = flags.force === true;
   const skillsDir = SKILLS_DIR || join(APITAP_DIR, 'skills');
 
   // Convert OpenAPI spec to endpoints
@@ -679,6 +691,15 @@ async function handleOpenAPIImport(
     }
   }
 
+  if (!force && update && existing?.metadata.importHistory?.some(h => h.specUrl === specUrl)) {
+    if (json) {
+      console.log(JSON.stringify({ success: true, skipped: true, reason: 'Already imported from this spec URL' }));
+    } else {
+      console.log('  Already imported from this spec URL. Use --force to reimport.\n');
+    }
+    return;
+  }
+
   // Merge
   const { skillFile, diff } = mergeSkillFile(existing, endpoints, meta);
 
@@ -705,7 +726,11 @@ async function handleOpenAPIImport(
   // Sign and write
   const machineId = await getMachineId();
   const key = deriveSigningKey(machineId);
-  const signed = signSkillFile(skillFile, key);
+  // Determine provenance: 'self' if file has any captured endpoints, 'imported-signed' if all from import
+  const hasCaptured = skillFile.endpoints.some(
+    ep => !ep.endpointProvenance || ep.endpointProvenance === 'captured'
+  );
+  const signed = signSkillFileAs(skillFile, key, hasCaptured ? 'self' : 'imported-signed');
   const filePath = await writeSkillFile(signed, skillsDir);
 
   if (json) {
@@ -737,6 +762,8 @@ function printOpenAPIDiff(
 async function handleApisGuruImport(flags: Record<string, string | boolean>): Promise<void> {
   const json = flags.json === true;
   const dryRun = flags['dry-run'] === true;
+  const update = flags.update === true;
+  const force = flags.force === true;
   const limit = typeof flags.limit === 'string' ? parseInt(flags.limit, 10) : 100;
   const search = typeof flags.search === 'string' ? flags.search : undefined;
   const skillsDir = SKILLS_DIR || join(APITAP_DIR, 'skills');
@@ -832,6 +859,16 @@ async function handleApisGuruImport(flags: Record<string, string | boolean>): Pr
         }
       }
 
+      if (!force && update && existing?.metadata.importHistory?.length) {
+        const lastImport = existing.metadata.importHistory[existing.metadata.importHistory.length - 1];
+        if (lastImport.importedAt >= entry.updated) {
+          if (!json) console.log(`  [${idx}/${total}] SKIP ${domain.padEnd(24)} up to date`);
+          results.push({ index: i + 1, status: 'skip', domain, title: entry.title, endpointsAdded: 0 });
+          skippedApis++;
+          continue;
+        }
+      }
+
       // Merge
       const { skillFile, diff } = mergeSkillFile(existing, endpoints, meta);
 
@@ -841,7 +878,11 @@ async function handleApisGuruImport(flags: Record<string, string | boolean>): Pr
 
       if (!dryRun) {
         // Sign and write
-        const signed = signSkillFile(skillFile, key);
+        // Determine provenance: 'self' if file has any captured endpoints, 'imported-signed' if all from import
+        const hasCaptured = skillFile.endpoints.some(
+          ep => !ep.endpointProvenance || ep.endpointProvenance === 'captured'
+        );
+        const signed = signSkillFileAs(skillFile, key, hasCaptured ? 'self' : 'imported-signed');
         await writeSkillFile(signed, skillsDir);
       }
 

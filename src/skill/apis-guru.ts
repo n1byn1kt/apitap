@@ -1,6 +1,29 @@
 // src/skill/apis-guru.ts
 import { resolveAndValidateUrl } from '../skill/ssrf.js';
 
+const MAX_SPEC_SIZE = 10 * 1024 * 1024;   // 10 MB per spec
+const MAX_LIST_SIZE = 100 * 1024 * 1024;  // 100 MB for APIs.guru list
+
+async function fetchWithSizeLimit(url: string, maxBytes: number, options?: RequestInit): Promise<string> {
+  const response = await fetch(url, {
+    signal: AbortSignal.timeout(30_000),
+    ...options,
+    headers: { 'User-Agent': 'apitap-import/1.0', ...(options?.headers as Record<string, string> || {}) },
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);
+  }
+  const contentLength = response.headers.get('content-length');
+  if (contentLength && parseInt(contentLength, 10) > maxBytes) {
+    throw new Error(`Response too large: ${contentLength} bytes (limit: ${maxBytes})`);
+  }
+  const text = await response.text();
+  if (text.length > maxBytes) {
+    throw new Error(`Response body too large: ${text.length} bytes (limit: ${maxBytes})`);
+  }
+  return text;
+}
+
 export interface ApisGuruEntry {
   apiId: string;           // e.g., "twilio.com:api"
   providerName: string;    // e.g., "twilio.com"
@@ -121,15 +144,7 @@ export async function fetchApisGuruList(): Promise<ApisGuruEntry[]> {
   if (!ssrf.safe) {
     throw new Error(`SSRF check failed for APIs.guru list URL: ${ssrf.reason}`);
   }
-  const response = await fetch(APIS_GURU_LIST_URL, {
-    signal: AbortSignal.timeout(30_000),
-  });
-  if (!response.ok) {
-    throw new Error(
-      `Failed to fetch APIs.guru list: ${response.status} ${response.statusText}`,
-    );
-  }
-  const text = await response.text();
+  const text = await fetchWithSizeLimit(APIS_GURU_LIST_URL, MAX_LIST_SIZE);
   try {
     return parseApisGuruList(JSON.parse(text) as Record<string, any>);
   } catch {
@@ -145,16 +160,7 @@ export async function fetchSpec(specUrl: string): Promise<Record<string, any>> {
   if (!ssrf.safe) {
     throw new Error(`SSRF check failed for spec URL ${specUrl}: ${ssrf.reason}`);
   }
-  const response = await fetch(specUrl, {
-    signal: AbortSignal.timeout(30_000),
-    redirect: 'error',
-  });
-  if (!response.ok) {
-    throw new Error(
-      `Failed to fetch spec at ${specUrl}: ${response.status} ${response.statusText}`,
-    );
-  }
-  const text = await response.text();
+  const text = await fetchWithSizeLimit(specUrl, MAX_SPEC_SIZE, { redirect: 'error' });
   try {
     return JSON.parse(text) as Record<string, any>;
   } catch {

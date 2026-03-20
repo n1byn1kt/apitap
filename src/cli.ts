@@ -642,6 +642,7 @@ async function handleOpenAPIImport(
   const json = flags.json === true;
   const dryRun = flags['dry-run'] === true;
   const update = flags.update === true;
+  const force = flags.force === true;
   const skillsDir = SKILLS_DIR || join(APITAP_DIR, 'skills');
 
   // Convert OpenAPI spec to endpoints
@@ -690,7 +691,7 @@ async function handleOpenAPIImport(
     }
   }
 
-  if (update && existing?.metadata.importHistory?.some(h => h.specUrl === specUrl)) {
+  if (!force && update && existing?.metadata.importHistory?.some(h => h.specUrl === specUrl)) {
     if (json) {
       console.log(JSON.stringify({ success: true, skipped: true, reason: 'Already imported from this spec URL' }));
     } else {
@@ -762,6 +763,7 @@ async function handleApisGuruImport(flags: Record<string, string | boolean>): Pr
   const json = flags.json === true;
   const dryRun = flags['dry-run'] === true;
   const update = flags.update === true;
+  const force = flags.force === true;
   const limit = typeof flags.limit === 'string' ? parseInt(flags.limit, 10) : 100;
   const search = typeof flags.search === 'string' ? flags.search : undefined;
   const skillsDir = SKILLS_DIR || join(APITAP_DIR, 'skills');
@@ -857,7 +859,7 @@ async function handleApisGuruImport(flags: Record<string, string | boolean>): Pr
         }
       }
 
-      if (update && existing?.metadata.importHistory?.length) {
+      if (!force && update && existing?.metadata.importHistory?.length) {
         const lastImport = existing.metadata.importHistory[existing.metadata.importHistory.length - 1];
         if (lastImport.importedAt >= entry.updated) {
           if (!json) console.log(`  [${idx}/${total}] SKIP ${domain.padEnd(24)} up to date`);

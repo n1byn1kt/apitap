@@ -1,5 +1,5 @@
 // src/skill/store.ts
-import { readFile, writeFile, mkdir, readdir, access } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, readdir, access, rename } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import type { SkillFile, SkillSummary } from '../types.js';
@@ -40,7 +40,10 @@ export async function writeSkillFile(
   await mkdir(skillsDir, { recursive: true, mode: 0o700 });
   await ensureGitignore(skillsDir);
   const filePath = skillPath(skill.domain, skillsDir);
-  await writeFile(filePath, JSON.stringify(skill, null, 2) + '\n', { mode: 0o600 });
+  const tmpPath = `${filePath}.${process.pid}.tmp`;
+  const content = JSON.stringify(skill, null, 2) + '\n';
+  await writeFile(tmpPath, content, { mode: 0o600 });
+  await rename(tmpPath, filePath);
   return filePath;
 }
 
@@ -114,8 +117,9 @@ export async function listSkillFiles(
   let files: string[];
   try {
     files = await readdir(skillsDir);
-  } catch {
-    return [];
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw err;
   }
 
   const summaries: SkillSummary[] = [];

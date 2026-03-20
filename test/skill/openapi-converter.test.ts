@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveRef, extractDomainAndBasePath } from '../../src/skill/openapi-converter.js';
+import { resolveRef, extractDomainAndBasePath, convertOpenAPISpec, isOpenAPISpec } from '../../src/skill/openapi-converter.js';
 
 describe('resolveRef', () => {
   it('resolves a simple $ref like #/components/schemas/User', () => {
@@ -206,5 +206,186 @@ describe('generateEndpointId', () => {
     const longId = 'a'.repeat(100);
     const result = generateEndpointId('get', '/x', longId, new Set());
     assert.ok(result.length <= 80);
+  });
+});
+
+// --- convertOpenAPISpec tests ---
+
+const minimalSpec = {
+  openapi: '3.0.0',
+  info: { title: 'Test API', version: '1.0', description: 'Test desc' },
+  servers: [{ url: 'https://api.test.com/v1' }],
+  paths: {
+    '/users': {
+      get: {
+        operationId: 'listUsers', summary: 'List all users',
+        parameters: [
+          { name: 'limit', in: 'query', schema: { type: 'integer', example: 10 } },
+          { name: 'status', in: 'query', schema: { type: 'string' } },
+        ],
+        responses: { '200': { content: { 'application/json': { schema: { type: 'object', properties: { data: { type: 'array' }, total: { type: 'number' } } } } } } },
+      },
+    },
+    '/users/{userId}': {
+      get: {
+        operationId: 'getUser',
+        parameters: [{ name: 'userId', in: 'path', required: true, schema: { type: 'string', example: '123' } }],
+        responses: { '200': { content: { 'application/json': { schema: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' } } } } } } },
+      },
+    },
+  },
+};
+
+describe('convertOpenAPISpec', () => {
+  it('converts OpenAPI 3.x spec — correct domain, endpoint count, specVersion', () => {
+    const result = convertOpenAPISpec(minimalSpec, 'https://example.com/spec.json');
+    assert.strictEqual(result.domain, 'api.test.com');
+    assert.strictEqual(result.endpoints.length, 2);
+    assert.strictEqual(result.meta.specVersion, 'openapi3');
+    assert.strictEqual(result.meta.title, 'Test API');
+    assert.strictEqual(result.meta.description, 'Test desc');
+    assert.strictEqual(result.meta.endpointCount, 2);
+  });
+
+  it('converts path params {userId} to :userId', () => {
+    const result = convertOpenAPISpec(minimalSpec, 'https://example.com/spec.json');
+    const userEndpoint = result.endpoints.find(e => e.path.includes(':userId'));
+    assert.ok(userEndpoint, 'should have endpoint with :userId');
+    assert.strictEqual(userEndpoint.path, '/v1/users/:userId');
+  });
+
+  it('query params with examples get fromSpec: true and populated example; without get empty example', () => {
+    const result = convertOpenAPISpec(minimalSpec, 'https://example.com/spec.json');
+    const listEndpoint = result.endpoints.find(e => e.id.includes('listusers'))!;
+    assert.ok(listEndpoint);
+
+    // limit has example: 10
+    assert.strictEqual(listEndpoint.queryParams['limit'].example, '10');
+    assert.strictEqual(listEndpoint.queryParams['limit'].fromSpec, true);
+
+    // status has no example
+    assert.strictEqual(listEndpoint.queryParams['status'].example, '');
+    assert.strictEqual(listEndpoint.queryParams['status'].fromSpec, true);
+  });
+
+  it('example URL includes path param examples', () => {
+    const result = convertOpenAPISpec(minimalSpec, 'https://example.com/spec.json');
+    const userEndpoint = result.endpoints.find(e => e.path.includes(':userId'))!;
+    assert.ok(userEndpoint);
+    assert.ok(
+      userEndpoint.examples.request.url.includes('/users/123'),
+      `expected URL to contain /users/123, got: ${userEndpoint.examples.request.url}`,
+    );
+  });
+
+  it('sets confidence and endpointProvenance on all endpoints', () => {
+    const result = convertOpenAPISpec(minimalSpec, 'https://example.com/spec.json');
+    for (const ep of result.endpoints) {
+      assert.ok(typeof ep.confidence === 'number', `endpoint ${ep.id} should have confidence`);
+      assert.ok(ep.confidence! >= 0.6 && ep.confidence! <= 0.85, `confidence ${ep.confidence} out of range`);
+      assert.strictEqual(ep.endpointProvenance, 'openapi-import');
+    }
+  });
+
+  it('extracts response shape fields', () => {
+    const result = convertOpenAPISpec(minimalSpec, 'https://example.com/spec.json');
+    const listEndpoint = result.endpoints.find(e => e.id.includes('listusers'))!;
+    assert.strictEqual(listEndpoint.responseShape.type, 'object');
+    assert.ok(listEndpoint.responseShape.fields);
+    assert.ok(listEndpoint.responseShape.fields!.includes('data'));
+    assert.ok(listEndpoint.responseShape.fields!.includes('total'));
+  });
+
+  it('sets description from summary', () => {
+    const result = convertOpenAPISpec(minimalSpec, 'https://example.com/spec.json');
+    const listEndpoint = result.endpoints.find(e => e.id.includes('listusers'))!;
+    assert.strictEqual(listEndpoint.description, 'List all users');
+  });
+
+  it('converts Swagger 2.0 spec with host + basePath', () => {
+    const swaggerSpec = {
+      swagger: '2.0',
+      info: { title: 'Petstore', version: '1.0', description: 'A pet store' },
+      host: 'petstore.swagger.io',
+      basePath: '/v2',
+      paths: {
+        '/pets': {
+          get: {
+            operationId: 'listPets',
+            parameters: [{ name: 'limit', in: 'query', type: 'integer' }],
+            responses: {
+              '200': {
+                schema: { type: 'array', items: { type: 'object', properties: { id: { type: 'integer' }, name: { type: 'string' } } } },
+              },
+            },
+          },
+        },
+      },
+    };
+    const result = convertOpenAPISpec(swaggerSpec, 'https://example.com/swagger.json');
+    assert.strictEqual(result.domain, 'petstore.swagger.io');
+    assert.strictEqual(result.meta.specVersion, 'swagger2');
+    assert.strictEqual(result.endpoints.length, 1);
+    assert.strictEqual(result.endpoints[0].path, '/v2/pets');
+    // Swagger 2.0 response shape: array with item fields
+    assert.strictEqual(result.endpoints[0].responseShape.type, 'array');
+    assert.ok(result.endpoints[0].responseShape.fields);
+    assert.ok(result.endpoints[0].responseShape.fields!.includes('id'));
+  });
+
+  it('truncates at 500 endpoints', () => {
+    const largePaths: Record<string, any> = {};
+    for (let i = 0; i < 550; i++) {
+      largePaths[`/endpoint${i}`] = {
+        get: {
+          operationId: `op${i}`,
+          responses: { '200': { content: { 'application/json': { schema: { type: 'object' } } } } },
+        },
+      };
+    }
+    const largeSpec = {
+      openapi: '3.0.0',
+      info: { title: 'Large API', version: '1.0', description: '' },
+      servers: [{ url: 'https://large.api.com' }],
+      paths: largePaths,
+    };
+    const result = convertOpenAPISpec(largeSpec, 'https://example.com/spec.json');
+    assert.strictEqual(result.endpoints.length, 500);
+    assert.strictEqual(result.meta.endpointCount, 500);
+  });
+});
+
+describe('isOpenAPISpec', () => {
+  it('detects OpenAPI 3.x spec', () => {
+    assert.strictEqual(isOpenAPISpec({ openapi: '3.0.0', info: {}, paths: {} }), true);
+  });
+
+  it('detects Swagger 2.0 spec', () => {
+    assert.strictEqual(isOpenAPISpec({ swagger: '2.0', info: {}, paths: {} }), true);
+  });
+
+  it('rejects a SkillFile', () => {
+    assert.strictEqual(
+      isOpenAPISpec({ version: '1.0', domain: 'example.com', baseUrl: 'https://example.com', endpoints: [] }),
+      false,
+    );
+  });
+
+  it('handles ambiguous object with both openapi and SkillFile fields — prefers SkillFile', () => {
+    assert.strictEqual(
+      isOpenAPISpec({ openapi: '3.0.0', version: '1.0', domain: 'example.com', baseUrl: 'https://example.com', endpoints: [] }),
+      false,
+    );
+  });
+
+  it('returns false for null/undefined/non-object', () => {
+    assert.strictEqual(isOpenAPISpec(null), false);
+    assert.strictEqual(isOpenAPISpec(undefined), false);
+    assert.strictEqual(isOpenAPISpec('string'), false);
+    assert.strictEqual(isOpenAPISpec(42), false);
+  });
+
+  it('returns false for unrelated object', () => {
+    assert.strictEqual(isOpenAPISpec({ foo: 'bar', baz: 123 }), false);
   });
 });

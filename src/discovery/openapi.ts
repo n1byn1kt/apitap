@@ -1,6 +1,7 @@
 // src/discovery/openapi.ts
 import type { SkillEndpoint, SkillFile, DiscoveredSpec } from '../types.js';
 import { safeFetch } from './fetch.js';
+import { convertOpenAPISpec } from '../skill/openapi-converter.js';
 
 /** Paths to check for API specs, in priority order */
 const SPEC_PATHS = [
@@ -137,7 +138,7 @@ export async function parseSpecToSkillFile(
 
   if (!spec.paths) return null;
 
-  // Determine API base URL
+  // Determine API base URL (discovery uses the passed-in baseUrl as starting point)
   let apiBase = baseUrl;
   if (spec.servers?.[0]?.url) {
     const serverUrl = spec.servers[0].url;
@@ -147,55 +148,29 @@ export async function parseSpecToSkillFile(
     apiBase = `${scheme}://${spec.host}${spec.basePath || ''}`;
   }
 
-  const endpoints: SkillEndpoint[] = [];
+  // Delegate endpoint extraction to the shared converter
+  const { endpoints: convertedEndpoints } = convertOpenAPISpec(spec, specUrl);
 
-  for (const [path, methods] of Object.entries(spec.paths)) {
-    for (const [method, operation] of Object.entries(methods)) {
-      if (!['get', 'post', 'put', 'patch', 'delete'].includes(method)) continue;
-      const op = operation as OpenApiOperation;
+  if (convertedEndpoints.length === 0) return null;
 
-      // Parameterize path: {id} → :id
-      const paramPath = path.replace(/\{([^}]+)\}/g, ':$1');
-
-      // Extract query params
-      const queryParams: Record<string, { type: string; example: string }> = {};
-      if (op.parameters) {
-        for (const param of op.parameters) {
-          if (param.in === 'query') {
-            queryParams[param.name] = {
-              type: param.schema?.type || 'string',
-              example: '',
-            };
-          }
-        }
-      }
-
-      // Generate endpoint ID
-      const id = op.operationId
-        ? method.toLowerCase() + '-' + op.operationId.replace(/[^a-z0-9]/gi, '-').toLowerCase()
-        : generateId(method, paramPath);
-
-      endpoints.push({
-        id,
-        method: method.toUpperCase(),
-        path: paramPath,
-        queryParams,
-        headers: {},
-        responseShape: { type: 'unknown' },
-        examples: {
-          request: { url: `${apiBase}${path}`, headers: {} },
-          responsePreview: null,
-        },
-        replayability: {
-          tier: 'unknown',
-          verified: false,
-          signals: ['discovered-from-spec'],
-        },
-      });
-    }
-  }
-
-  if (endpoints.length === 0) return null;
+  // Post-process: add replayability signal and fix example URLs to use apiBase
+  const endpoints: SkillEndpoint[] = convertedEndpoints.map(ep => {
+    // Rebuild example URL using apiBase (converter uses https://<domain> but discovery
+    // should use the baseUrl passed in, which may be http:// or a different host)
+    const exampleUrl = ep.examples.request.url.replace(/^https?:\/\/[^/]+/, apiBase.replace(/\/$/, ''));
+    return {
+      ...ep,
+      examples: {
+        ...ep.examples,
+        request: { ...ep.examples.request, url: exampleUrl },
+      },
+      replayability: {
+        tier: 'unknown',
+        verified: false,
+        signals: ['discovered-from-spec'],
+      },
+    };
+  });
 
   return {
     version: '1.2',
@@ -210,12 +185,6 @@ export async function parseSpecToSkillFile(
     },
     provenance: 'unsigned',
   };
-}
-
-function generateId(method: string, path: string): string {
-  const segments = path.split('/').filter(s => s !== '' && !s.startsWith(':'));
-  const slug = segments.join('-').replace(/[^a-z0-9-]/gi, '').toLowerCase() || 'root';
-  return `${method.toLowerCase()}-${slug}`;
 }
 
 function parseLinkHeader(header: string, rel: string): string | null {

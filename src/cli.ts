@@ -504,17 +504,6 @@ async function handleImport(positional: string[], flags: Record<string, string |
 
   const json = flags.json === true;
 
-  // Reject YAML files with helpful message
-  if (/\.ya?ml$/i.test(source)) {
-    const msg = 'YAML specs not yet supported. Convert to JSON first: npx swagger-cli bundle spec.yaml -o spec.json';
-    if (json) {
-      console.log(JSON.stringify({ success: false, reason: msg }));
-    } else {
-      console.error(`Error: ${msg}`);
-    }
-    process.exit(1);
-  }
-
   // Load content — from URL or file
   let rawText: string;
   let sourceUrl: string = source;
@@ -556,18 +545,25 @@ async function handleImport(positional: string[], flags: Record<string, string |
     }
   }
 
-  // Parse JSON
+  // Parse JSON or YAML
   let parsed: any;
   try {
     parsed = JSON.parse(rawText);
   } catch {
-    const msg = `Invalid JSON in ${source}`;
-    if (json) {
-      console.log(JSON.stringify({ success: false, reason: msg }));
-    } else {
-      console.error(`Error: ${msg}`);
+    try {
+      const yaml = await import('js-yaml');
+      parsed = yaml.load(rawText);
+      if (typeof parsed !== 'object' || parsed === null) {
+        throw new Error('YAML parsed to non-object');
+      }
+    } catch (yamlErr: any) {
+      if (json) {
+        console.log(JSON.stringify({ success: false, reason: `Invalid JSON/YAML: ${yamlErr.message}` }));
+      } else {
+        console.error(`Error: Could not parse as JSON or YAML: ${yamlErr.message}`);
+      }
+      process.exit(1);
     }
-    process.exit(1);
   }
 
   // Route: OpenAPI spec vs SkillFile

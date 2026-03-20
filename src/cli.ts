@@ -2,7 +2,7 @@
 // src/cli.ts
 import { capture } from './capture/monitor.js';
 import { writeSkillFile, readSkillFile, listSkillFiles } from './skill/store.js';
-import { replayEndpoint } from './replay/engine.js';
+import { replayEndpoint, getConfidenceHint } from './replay/engine.js';
 import { AuthManager, getMachineId } from './auth/manager.js';
 import { deriveSigningKey } from './auth/crypto.js';
 import { signSkillFile } from './skill/signing.js';
@@ -27,6 +27,9 @@ import { stat, unlink } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createMcpServer } from './mcp.js';
 import { attach, parseDomainPatterns } from './capture/cdp-attach.js';
+import { isOpenAPISpec, convertOpenAPISpec } from './skill/openapi-converter.js';
+import { mergeSkillFile } from './skill/merge.js';
+import { fetchApisGuruList, filterEntries, fetchSpec } from './skill/apis-guru.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
@@ -76,7 +79,9 @@ function printUsage(): void {
     apitap show <domain>       Show endpoints for a domain
     apitap replay <domain> <endpoint-id> [key=value...]
                                Replay an API endpoint
-    apitap import <file>       Import a skill file with safety validation
+    apitap import <file|url>   Import a skill file or OpenAPI spec
+    apitap import --from apis-guru
+                               Bulk-import from APIs.guru directory
     apitap refresh <domain>    Refresh auth tokens via browser
     apitap auth [domain]       View or manage stored auth
     apitap mcp                 Run the full ApiTap MCP server over stdio
@@ -128,6 +133,11 @@ function printUsage(): void {
 
   Import options:
     --yes                      Skip confirmation prompt
+    --dry-run                  Show what would change without writing
+    --json                     Output machine-readable JSON
+    --from apis-guru           Bulk-import from APIs.guru directory
+    --search <term>            Filter APIs.guru entries by name/title
+    --limit <n>                Max APIs to import (default: 100)
 
   Serve options:
     --json                     Output tool list as JSON on stderr
@@ -455,6 +465,10 @@ async function handleReplay(positional: string[], flags: Record<string, string |
       ...(result.contractWarnings?.length ? { contractWarnings: result.contractWarnings } : {}),
     }, null, 2));
   } else {
+    const hint = endpoint ? getConfidenceHint(endpoint.confidence) : null;
+    if (hint) {
+      console.error(`  Note: ${hint}`);
+    }
     console.log(`\n  Status: ${result.status}\n`);
     console.log(JSON.stringify(result.data, null, 2));
     console.log();
@@ -462,35 +476,134 @@ async function handleReplay(positional: string[], flags: Record<string, string |
 }
 
 async function handleImport(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
-  const filePath = positional[0];
-  if (!filePath) {
-    console.error('Error: File path required. Usage: apitap import <file>');
+  // --from apis-guru: bulk import mode
+  if (flags['from'] === 'apis-guru') {
+    await handleApisGuruImport(flags);
+    return;
+  }
+
+  const source = positional[0];
+  if (!source) {
+    console.error('Error: File path or URL required. Usage: apitap import <file|url>');
     process.exit(1);
   }
 
   const json = flags.json === true;
 
+  // Reject YAML files with helpful message
+  if (/\.ya?ml$/i.test(source)) {
+    const msg = 'YAML specs not yet supported. Convert to JSON first: npx swagger-cli bundle spec.yaml -o spec.json';
+    if (json) {
+      console.log(JSON.stringify({ success: false, reason: msg }));
+    } else {
+      console.error(`Error: ${msg}`);
+    }
+    process.exit(1);
+  }
+
+  // Load content — from URL or file
+  let rawText: string;
+  let sourceUrl: string = source;
+  const isUrl = source.startsWith('http://') || source.startsWith('https://');
+
+  if (isUrl) {
+    try {
+      const ssrfCheck = await resolveAndValidateUrl(source);
+      if (!ssrfCheck.safe) {
+        throw new Error(`SSRF check failed: ${ssrfCheck.reason}`);
+      }
+      const response = await fetch(source, { signal: AbortSignal.timeout(30_000) });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} ${response.statusText}`);
+      }
+      rawText = await response.text();
+    } catch (err: any) {
+      const msg = `Failed to fetch ${source}: ${err.message}`;
+      if (json) {
+        console.log(JSON.stringify({ success: false, reason: msg }));
+      } else {
+        console.error(`Error: ${msg}`);
+      }
+      process.exit(1);
+    }
+  } else {
+    try {
+      const { readFile } = await import('node:fs/promises');
+      rawText = await readFile(source, 'utf-8');
+      sourceUrl = `file://${resolve(source)}`;
+    } catch (err: any) {
+      const msg = `Failed to read ${source}: ${err.message}`;
+      if (json) {
+        console.log(JSON.stringify({ success: false, reason: msg }));
+      } else {
+        console.error(`Error: ${msg}`);
+      }
+      process.exit(1);
+    }
+  }
+
+  // Parse JSON
+  let parsed: any;
+  try {
+    parsed = JSON.parse(rawText);
+  } catch {
+    const msg = `Invalid JSON in ${source}`;
+    if (json) {
+      console.log(JSON.stringify({ success: false, reason: msg }));
+    } else {
+      console.error(`Error: ${msg}`);
+    }
+    process.exit(1);
+  }
+
+  // Route: OpenAPI spec vs SkillFile
+  if (isOpenAPISpec(parsed)) {
+    await handleOpenAPIImport(parsed, sourceUrl, flags);
+    return;
+  }
+
+  // --- Existing SkillFile import flow (unchanged) ---
+  if (isUrl) {
+    // SkillFile imports from URLs: write to temp file first
+    const { writeFile: writeTmp } = await import('node:fs/promises');
+    const { tmpdir } = await import('node:os');
+    const tmpPath = join(tmpdir(), `apitap-import-${Date.now()}.json`);
+    await writeTmp(tmpPath, rawText);
+    try {
+      await handleSkillFileImport(tmpPath, json);
+    } finally {
+      const { unlink: unlinkTmp } = await import('node:fs/promises');
+      await unlinkTmp(tmpPath).catch(() => {});
+    }
+  } else {
+    await handleSkillFileImport(source, json);
+  }
+}
+
+async function handleSkillFileImport(filePath: string, json: boolean): Promise<void> {
   // Get local key for signature verification
   const machineId = await getMachineId();
   const key = deriveSigningKey(machineId);
 
   // DNS-resolving SSRF check before importing (prevents DNS rebinding attacks)
+  let raw: any;
   try {
-    const raw = JSON.parse(await import('node:fs/promises').then(fs => fs.readFile(filePath, 'utf-8')));
-    if (raw.baseUrl) {
-      const dnsCheck = await resolveAndValidateUrl(raw.baseUrl);
-      if (!dnsCheck.safe) {
-        const msg = `DNS rebinding risk: ${dnsCheck.reason}`;
-        if (json) {
-          console.log(JSON.stringify({ success: false, reason: msg }));
-        } else {
-          console.error(`Error: ${msg}`);
-        }
-        process.exit(1);
-      }
-    }
+    raw = JSON.parse(await import('node:fs/promises').then(fs => fs.readFile(filePath, 'utf-8')));
   } catch {
-    // Parse errors will be caught by importSkillFile
+    // Parse errors will be caught by importSkillFile below
+  }
+
+  if (raw?.baseUrl) {
+    const dnsCheck = await resolveAndValidateUrl(raw.baseUrl);
+    if (!dnsCheck.safe) {
+      const msg = `DNS rebinding risk: ${dnsCheck.reason}`;
+      if (json) {
+        console.log(JSON.stringify({ success: false, reason: msg }));
+      } else {
+        console.error(`Error: ${msg}`);
+      }
+      process.exit(1);
+    }
   }
 
   const result = await importSkillFile(filePath, undefined, key);
@@ -508,6 +621,275 @@ async function handleImport(positional: string[], flags: Record<string, string |
     console.log(JSON.stringify({ success: true, skillFile: result.skillFile }));
   } else {
     console.log(`\n  ✓ Imported skill file: ${result.skillFile}\n`);
+  }
+}
+
+async function handleOpenAPIImport(
+  spec: Record<string, any>,
+  specUrl: string,
+  flags: Record<string, string | boolean>,
+): Promise<void> {
+  const json = flags.json === true;
+  const dryRun = flags['dry-run'] === true;
+  const skillsDir = SKILLS_DIR || join(APITAP_DIR, 'skills');
+
+  // Convert OpenAPI spec to endpoints
+  let importResult;
+  try {
+    importResult = convertOpenAPISpec(spec, specUrl);
+  } catch (err: any) {
+    const msg = `Failed to convert OpenAPI spec: ${err.message}`;
+    if (json) {
+      console.log(JSON.stringify({ success: false, reason: msg }));
+    } else {
+      console.error(`Error: ${msg}`);
+    }
+    process.exit(1);
+  }
+
+  const { domain, endpoints, meta } = importResult;
+  const specVersion = spec.openapi || spec.swagger || 'unknown';
+
+  if (!json) {
+    console.log(`\n  Importing ${domain} from OpenAPI ${specVersion} spec...\n`);
+  }
+
+  // SSRF validate the domain
+  const dnsCheck = await resolveAndValidateUrl(`https://${domain}`);
+  if (!dnsCheck.safe) {
+    const msg = `DNS rebinding risk for ${domain}: ${dnsCheck.reason}`;
+    if (json) {
+      console.log(JSON.stringify({ success: false, reason: msg }));
+    } else {
+      console.error(`Error: ${msg}`);
+    }
+    process.exit(1);
+  }
+
+  // Read existing skill file (if any)
+  let existing = null;
+  try {
+    existing = await readSkillFile(domain, skillsDir, {
+      verifySignature: true,
+      trustUnsigned: true,
+    });
+  } catch (err: any) {
+    if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+      if (!json) console.error(`  Warning: could not read existing skill file for ${domain}: ${err.message}`);
+    }
+  }
+
+  // Merge
+  const { skillFile, diff } = mergeSkillFile(existing, endpoints, meta);
+
+  // Ensure domain and baseUrl reflect the API, not the spec source URL
+  skillFile.domain = domain;
+  skillFile.baseUrl = `https://${domain}`;
+
+  if (dryRun) {
+    if (json) {
+      console.log(JSON.stringify({
+        success: true,
+        dryRun: true,
+        domain,
+        diff,
+        totalEndpoints: skillFile.endpoints.length,
+      }));
+    } else {
+      printOpenAPIDiff(diff, skillFile, skillsDir);
+      console.log('  (dry run — no changes written)\n');
+    }
+    return;
+  }
+
+  // Sign and write
+  const machineId = await getMachineId();
+  const key = deriveSigningKey(machineId);
+  const signed = signSkillFile(skillFile, key);
+  const filePath = await writeSkillFile(signed, skillsDir);
+
+  if (json) {
+    console.log(JSON.stringify({
+      success: true,
+      domain,
+      skillFile: filePath,
+      diff,
+      totalEndpoints: signed.endpoints.length,
+    }));
+  } else {
+    printOpenAPIDiff(diff, signed, filePath);
+  }
+}
+
+function printOpenAPIDiff(
+  diff: { preserved: number; added: number; enriched: number; skipped: number },
+  skillFile: { endpoints: { length: number } },
+  pathOrDir: string,
+): void {
+  console.log(`  ✓ ${diff.preserved} existing captured endpoints preserved`);
+  console.log(`  + ${diff.added} new endpoints added from OpenAPI spec`);
+  console.log(`  ~ ${diff.enriched} endpoints enriched with spec metadata`);
+  console.log(`  · ${diff.skipped} skipped (already imported)`);
+  console.log();
+  console.log(`  Skill file: ${pathOrDir} (${skillFile.endpoints.length} endpoints)\n`);
+}
+
+async function handleApisGuruImport(flags: Record<string, string | boolean>): Promise<void> {
+  const json = flags.json === true;
+  const dryRun = flags['dry-run'] === true;
+  const limit = typeof flags.limit === 'string' ? parseInt(flags.limit, 10) : 100;
+  const search = typeof flags.search === 'string' ? flags.search : undefined;
+  const skillsDir = SKILLS_DIR || join(APITAP_DIR, 'skills');
+
+  if (!json) {
+    console.log(`\n  Importing from APIs.guru (limit: ${limit})...\n`);
+  }
+
+  // Fetch and filter
+  let entries;
+  try {
+    const allEntries = await fetchApisGuruList();
+    entries = filterEntries(allEntries, { search, limit, preferOpenapi3: true });
+  } catch (err: any) {
+    const msg = `Failed to fetch APIs.guru list: ${err.message}`;
+    if (json) {
+      console.log(JSON.stringify({ success: false, reason: msg }));
+    } else {
+      console.error(`Error: ${msg}`);
+    }
+    process.exit(1);
+  }
+
+  if (entries.length === 0) {
+    if (json) {
+      console.log(JSON.stringify({ success: true, imported: 0, failed: 0, skipped: 0, totalEndpoints: 0 }));
+    } else {
+      console.log('  No matching APIs found.\n');
+    }
+    return;
+  }
+
+  const total = entries.length;
+  let imported = 0;
+  let failed = 0;
+  let skippedApis = 0;
+  let totalEndpointsAdded = 0;
+
+  const machineId = await getMachineId();
+  const key = deriveSigningKey(machineId);
+
+  const results: Array<{
+    index: number;
+    status: 'ok' | 'fail' | 'skip';
+    domain: string;
+    title: string;
+    endpointsAdded: number;
+    error?: string;
+  }> = [];
+
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    const idx = String(i + 1).padStart(String(total).length, ' ');
+
+    try {
+      // Fetch spec
+      const spec = await fetchSpec(entry.specUrl);
+
+      // Convert
+      const importResult = convertOpenAPISpec(spec, entry.specUrl);
+      const { domain, endpoints, meta } = importResult;
+
+      if (endpoints.length === 0) {
+        if (!json) {
+          console.log(`  [${idx}/${total}] SKIP ${domain.padEnd(24)} 0 endpoints  (${entry.title})`);
+        }
+        results.push({ index: i + 1, status: 'skip', domain, title: entry.title, endpointsAdded: 0 });
+        skippedApis++;
+        continue;
+      }
+
+      // SSRF validate
+      const dnsCheck = await resolveAndValidateUrl(`https://${domain}`);
+      if (!dnsCheck.safe) {
+        if (!json) {
+          console.log(`  [${idx}/${total}] SKIP ${domain.padEnd(24)} SSRF risk  (${entry.title})`);
+        }
+        results.push({ index: i + 1, status: 'skip', domain, title: entry.title, endpointsAdded: 0 });
+        skippedApis++;
+        continue;
+      }
+
+      // Read existing
+      let existing = null;
+      try {
+        existing = await readSkillFile(domain, skillsDir, {
+          verifySignature: true,
+          trustUnsigned: true,
+        });
+      } catch (err: any) {
+        if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+          if (!json) console.error(`  Warning: could not read existing skill file for ${domain}: ${err.message}`);
+        }
+      }
+
+      // Merge
+      const { skillFile, diff } = mergeSkillFile(existing, endpoints, meta);
+
+      // Ensure domain and baseUrl reflect the API, not the spec source URL
+      skillFile.domain = domain;
+      skillFile.baseUrl = `https://${domain}`;
+
+      if (!dryRun) {
+        // Sign and write
+        const signed = signSkillFile(skillFile, key);
+        await writeSkillFile(signed, skillsDir);
+      }
+
+      if (!json) {
+        console.log(`  [${idx}/${total}] OK   ${domain.padEnd(24)} +${diff.added} endpoints  (${entry.title})`);
+      }
+      results.push({ index: i + 1, status: 'ok', domain, title: entry.title, endpointsAdded: diff.added });
+      imported++;
+      totalEndpointsAdded += diff.added;
+    } catch (err: any) {
+      if (!json) {
+        console.log(`  [${idx}/${total}] FAIL ${entry.providerName.padEnd(24)} ${err.message}`);
+      }
+      results.push({
+        index: i + 1,
+        status: 'fail',
+        domain: entry.providerName,
+        title: entry.title,
+        endpointsAdded: 0,
+        error: err.message,
+      });
+      failed++;
+    }
+
+    // Small delay between requests to be polite to APIs.guru
+    if (i < entries.length - 1) {
+      await new Promise(r => setTimeout(r, 100));
+    }
+  }
+
+  if (json) {
+    console.log(JSON.stringify({
+      success: true,
+      dryRun,
+      imported,
+      failed,
+      skipped: skippedApis,
+      totalEndpoints: totalEndpointsAdded,
+      results,
+    }));
+  } else {
+    console.log();
+    console.log(`  Done: ${imported} imported, ${failed} failed, ${skippedApis} skipped`);
+    console.log(`       ${totalEndpointsAdded.toLocaleString()} endpoints added across ${imported} APIs`);
+    if (dryRun) {
+      console.log('  (dry run — no changes written)');
+    }
+    console.log();
   }
 }
 

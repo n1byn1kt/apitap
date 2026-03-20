@@ -118,7 +118,7 @@ export interface SkillEndpoint {
   id: string;
   method: string;
   path: string;
-  queryParams: Record<string, { type: string; example: string }>;
+  queryParams: Record<string, { type: string; example: string; required?: boolean; enum?: string[]; fromSpec?: boolean }>;
   headers: Record<string, string>;
   responseShape: { type: string; fields?: string[] };
   examples: {
@@ -131,6 +131,11 @@ export interface SkillEndpoint {
   responseBytes?: number; // v1.0: response body size in bytes
   isolatedAuth?: boolean; // v1.1: opt out of cross-subdomain auth fallback
   responseSchema?: SchemaNode; // v1.1: schema snapshot for contract validation
+  normalizedPath?: string;
+  confidence?: number;
+  endpointProvenance?: 'captured' | 'openapi-import';
+  specSource?: string;
+  description?: string;
 }
 
 /** The full skill file written to disk */
@@ -149,6 +154,13 @@ export interface SkillFile {
       totalNetworkBytes: number;  // sum of ALL response body sizes
       totalRequests: number;
     };
+    importHistory?: Array<{
+      specUrl: string;
+      specVersion: 'openapi3' | 'swagger2';
+      importedAt: string;
+      endpointsAdded: number;
+      endpointsEnriched: number;
+    }>;
   };
   provenance: 'self' | 'imported' | 'unsigned';
   signature?: string;
@@ -244,4 +256,33 @@ export interface DiscoveryResult {
   authRequired?: boolean;     // true if site appears to need login
   authSignals?: string[];     // reasons auth was detected
   loginUrl?: string;          // detected login page URL
+}
+
+/** Metadata about an OpenAPI spec import */
+export interface ImportMeta {
+  specUrl: string;
+  specVersion: 'openapi3' | 'swagger2';
+  title: string;
+  description: string;
+  requiresAuth: boolean;
+  authType?: 'apiKey' | 'oauth2' | 'bearer' | 'basic' | 'openIdConnect';
+  endpointCount: number;
+}
+
+/** Result of converting an OpenAPI spec */
+export interface ImportResult {
+  domain: string;
+  endpoints: SkillEndpoint[];
+  meta: ImportMeta;
+}
+
+/** Result of merging imported endpoints into an existing skill file */
+export interface MergeResult {
+  skillFile: SkillFile;
+  diff: {
+    preserved: number;
+    added: number;
+    enriched: number;
+    skipped: number;
+  };
 }

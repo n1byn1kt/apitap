@@ -45,6 +45,20 @@ export function signSkillFile(skill: SkillFile, key: Buffer): SkillFile {
 }
 
 /**
+ * Sign a skill file with a specific provenance value.
+ * Use 'self' for captured files, 'imported-signed' for import-only files.
+ */
+export function signSkillFileAs(
+  skill: SkillFile,
+  key: Buffer,
+  provenance: 'self' | 'imported-signed',
+): SkillFile {
+  const payload = canonicalize(skill);
+  const signature = hmacSign(payload, key);
+  return { ...skill, provenance, signature };
+}
+
+/**
  * Verify a skill file's signature.
  * Returns true if the signature is valid for the given key.
  */

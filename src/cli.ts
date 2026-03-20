@@ -5,7 +5,7 @@ import { writeSkillFile, readSkillFile, listSkillFiles } from './skill/store.js'
 import { replayEndpoint, getConfidenceHint } from './replay/engine.js';
 import { AuthManager, getMachineId } from './auth/manager.js';
 import { deriveSigningKey } from './auth/crypto.js';
-import { signSkillFile } from './skill/signing.js';
+import { signSkillFile, signSkillFileAs } from './skill/signing.js';
 import { importSkillFile } from './skill/importer.js';
 import { resolveAndValidateUrl } from './skill/ssrf.js';
 import { verifyEndpoints } from './capture/verifier.js';
@@ -705,7 +705,11 @@ async function handleOpenAPIImport(
   // Sign and write
   const machineId = await getMachineId();
   const key = deriveSigningKey(machineId);
-  const signed = signSkillFile(skillFile, key);
+  // Determine provenance: 'self' if file has any captured endpoints, 'imported-signed' if all from import
+  const hasCaptured = skillFile.endpoints.some(
+    ep => !ep.endpointProvenance || ep.endpointProvenance === 'captured'
+  );
+  const signed = signSkillFileAs(skillFile, key, hasCaptured ? 'self' : 'imported-signed');
   const filePath = await writeSkillFile(signed, skillsDir);
 
   if (json) {
@@ -841,7 +845,11 @@ async function handleApisGuruImport(flags: Record<string, string | boolean>): Pr
 
       if (!dryRun) {
         // Sign and write
-        const signed = signSkillFile(skillFile, key);
+        // Determine provenance: 'self' if file has any captured endpoints, 'imported-signed' if all from import
+        const hasCaptured = skillFile.endpoints.some(
+          ep => !ep.endpointProvenance || ep.endpointProvenance === 'captured'
+        );
+        const signed = signSkillFileAs(skillFile, key, hasCaptured ? 'self' : 'imported-signed');
         await writeSkillFile(signed, skillsDir);
       }
 

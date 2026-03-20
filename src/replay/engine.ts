@@ -45,6 +45,15 @@ const BLOCKED_REPLAY_HEADERS = new Set([
   'sec-fetch-user',
 ]);
 
+export function safeParseJson(text: string): unknown {
+  if (text.length === 0) return text;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
 export interface ReplayOptions {
   /** User-provided parameters for path, query, and body substitution */
   params?: Record<string, string>;
@@ -548,8 +557,8 @@ export async function replayEndpoint(
       let retryData: unknown;
       const retryCt = retryResponse.headers.get('content-type') ?? '';
       const retryText = await retryResponse.text();
-      if (retryCt.includes('json') && retryText.length > 0) {
-        retryData = JSON.parse(retryText);
+      if (retryCt.includes('json')) {
+        retryData = safeParseJson(retryText);
       } else {
         retryData = retryText;
       }
@@ -586,8 +595,8 @@ export async function replayEndpoint(
   let data: unknown;
   const ct = response.headers.get('content-type') ?? '';
   const text = await response.text();
-  if (ct.includes('json') && text.length > 0) {
-    data = JSON.parse(text);
+  if (ct.includes('json')) {
+    data = safeParseJson(text);
   } else {
     data = text;
   }

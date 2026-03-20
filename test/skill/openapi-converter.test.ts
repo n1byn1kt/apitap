@@ -150,3 +150,40 @@ describe('extractDomainAndBasePath', () => {
     assert.strictEqual(result.basePath, '');
   });
 });
+
+import { computeConfidence, detectAuth } from '../../src/skill/openapi-converter.js';
+
+describe('computeConfidence', () => {
+  it('returns 0.85 for GET + open + examples', () => {
+    assert.strictEqual(computeConfidence({ method: 'GET', hasExamples: true, requiresAuth: false }), 0.85);
+  });
+  it('returns 0.6 for POST + auth + no examples', () => {
+    assert.strictEqual(computeConfidence({ method: 'POST', hasExamples: false, requiresAuth: true }), 0.6);
+  });
+  it('returns 0.75 for GET + auth + examples', () => {
+    assert.strictEqual(computeConfidence({ method: 'GET', hasExamples: true, requiresAuth: true }), 0.75);
+  });
+  it('caps at 0.85', () => {
+    assert.ok(computeConfidence({ method: 'GET', hasExamples: true, requiresAuth: false }) <= 0.85);
+  });
+});
+
+describe('detectAuth', () => {
+  it('detects bearer from OpenAPI 3.x', () => {
+    const spec = { components: { securitySchemes: { BearerAuth: { type: 'http', scheme: 'bearer' } } }, security: [{ BearerAuth: [] }] };
+    const result = detectAuth(spec);
+    assert.strictEqual(result.requiresAuth, true);
+    assert.strictEqual(result.authType, 'bearer');
+  });
+  it('detects apiKey from Swagger 2.0', () => {
+    const spec = { securityDefinitions: { api_key: { type: 'apiKey', in: 'header', name: 'X-API-Key' } }, security: [{ api_key: [] }] };
+    assert.strictEqual(detectAuth(spec).authType, 'apiKey');
+  });
+  it('returns no auth when no security defined', () => {
+    assert.strictEqual(detectAuth({ security: [], paths: {} }).requiresAuth, false);
+  });
+  it('detects oauth2', () => {
+    const spec = { components: { securitySchemes: { OAuth: { type: 'oauth2' } } }, security: [{ OAuth: [] }] };
+    assert.strictEqual(detectAuth(spec).authType, 'oauth2');
+  });
+});

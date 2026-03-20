@@ -75,3 +75,41 @@ export function extractDomainAndBasePath(
     return { domain: 'unknown', basePath: '' };
   }
 }
+
+export interface ConfidenceInput {
+  method: string;
+  hasExamples: boolean;
+  requiresAuth: boolean;
+}
+
+export function computeConfidence(input: ConfidenceInput): number {
+  let score = 0.6;
+  if (input.hasExamples) score += 0.1;
+  if (!input.requiresAuth) score += 0.1;
+  if (input.method === 'GET') score += 0.05;
+  return Math.min(score, 0.85);
+}
+
+export type AuthType = 'apiKey' | 'oauth2' | 'bearer' | 'basic' | 'openIdConnect';
+
+export function detectAuth(spec: Record<string, any>): { requiresAuth: boolean; authType?: AuthType } {
+  const schemes = spec.components?.securitySchemes || {};
+  const defs = spec.securityDefinitions || {};
+  const allSchemes = { ...schemes, ...defs };
+  const security = spec.security || [];
+
+  if (Object.keys(allSchemes).length === 0 && security.length === 0) {
+    return { requiresAuth: false };
+  }
+
+  let authType: AuthType | undefined;
+  for (const scheme of Object.values(allSchemes) as any[]) {
+    if (scheme.type === 'http' && scheme.scheme === 'bearer') { authType = 'bearer'; break; }
+    if (scheme.type === 'http' && scheme.scheme === 'basic') { authType = 'basic'; break; }
+    if (scheme.type === 'apiKey') { authType = 'apiKey'; break; }
+    if (scheme.type === 'oauth2') { authType = 'oauth2'; break; }
+    if (scheme.type === 'openIdConnect') { authType = 'openIdConnect'; break; }
+  }
+
+  return { requiresAuth: true, authType };
+}

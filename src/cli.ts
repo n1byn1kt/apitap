@@ -641,6 +641,7 @@ async function handleOpenAPIImport(
 ): Promise<void> {
   const json = flags.json === true;
   const dryRun = flags['dry-run'] === true;
+  const update = flags.update === true;
   const skillsDir = SKILLS_DIR || join(APITAP_DIR, 'skills');
 
   // Convert OpenAPI spec to endpoints
@@ -687,6 +688,15 @@ async function handleOpenAPIImport(
     if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') {
       if (!json) console.error(`  Warning: could not read existing skill file for ${domain}: ${err.message}`);
     }
+  }
+
+  if (update && existing?.metadata.importHistory?.some(h => h.specUrl === specUrl)) {
+    if (json) {
+      console.log(JSON.stringify({ success: true, skipped: true, reason: 'Already imported from this spec URL' }));
+    } else {
+      console.log('  Already imported from this spec URL. Use --force to reimport.\n');
+    }
+    return;
   }
 
   // Merge
@@ -751,6 +761,7 @@ function printOpenAPIDiff(
 async function handleApisGuruImport(flags: Record<string, string | boolean>): Promise<void> {
   const json = flags.json === true;
   const dryRun = flags['dry-run'] === true;
+  const update = flags.update === true;
   const limit = typeof flags.limit === 'string' ? parseInt(flags.limit, 10) : 100;
   const search = typeof flags.search === 'string' ? flags.search : undefined;
   const skillsDir = SKILLS_DIR || join(APITAP_DIR, 'skills');
@@ -843,6 +854,16 @@ async function handleApisGuruImport(flags: Record<string, string | boolean>): Pr
       } catch (err: any) {
         if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') {
           if (!json) console.error(`  Warning: could not read existing skill file for ${domain}: ${err.message}`);
+        }
+      }
+
+      if (update && existing?.metadata.importHistory?.length) {
+        const lastImport = existing.metadata.importHistory[existing.metadata.importHistory.length - 1];
+        if (lastImport.importedAt >= entry.updated) {
+          if (!json) console.log(`  [${idx}/${total}] SKIP ${domain.padEnd(24)} up to date`);
+          results.push({ index: i + 1, status: 'skip', domain, title: entry.title, endpointsAdded: 0 });
+          skippedApis++;
+          continue;
         }
       }
 

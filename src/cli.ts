@@ -458,6 +458,20 @@ async function handleReplay(positional: string[], flags: Record<string, string |
     _skipSsrfCheck: dangerDisableSsrf,
   });
 
+  // Auto-upgrade imported endpoints on successful replay
+  if ((result as any).upgrade && endpoint) {
+    endpoint.confidence = 1.0;
+    endpoint.endpointProvenance = 'captured';
+    // Update example with the actual successful request
+    endpoint.examples.responsePreview = typeof result.data === 'object' ? result.data : null;
+    // Re-sign and write
+    const signed = signSkillFile(skill, signingKey);
+    await writeSkillFile(signed, SKILLS_DIR);
+    if (!json) {
+      console.error('  \u2713 Endpoint upgraded to captured (confidence 1.0)');
+    }
+  }
+
   if (json) {
     console.log(JSON.stringify({
       status: result.status,

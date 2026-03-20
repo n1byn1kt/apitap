@@ -113,3 +113,27 @@ export function detectAuth(spec: Record<string, any>): { requiresAuth: boolean; 
 
   return { requiresAuth: true, authType };
 }
+
+export function generateEndpointId(
+  method: string,
+  path: string,
+  operationId: string | undefined,
+  seen: Set<string>,
+): string {
+  let base: string;
+  if (operationId) {
+    base = `${method.toLowerCase()}-${operationId.replace(/[^a-z0-9]/gi, '-').toLowerCase()}`;
+  } else {
+    const segments = path.split('/').filter(s => s !== '' && !s.startsWith(':')).join('-').replace(/[^a-z0-9-]/gi, '').toLowerCase() || 'root';
+    base = `${method.toLowerCase()}-${segments}`;
+  }
+  base = base.replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 80);
+  let id = base;
+  let counter = 2;
+  while (seen.has(id)) {
+    id = `${base}-${counter}`.slice(0, 80);
+    counter++;
+  }
+  seen.add(id);
+  return id;
+}

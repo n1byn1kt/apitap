@@ -151,7 +151,7 @@ describe('extractDomainAndBasePath', () => {
   });
 });
 
-import { computeConfidence, detectAuth } from '../../src/skill/openapi-converter.js';
+import { computeConfidence, detectAuth, generateEndpointId } from '../../src/skill/openapi-converter.js';
 
 describe('computeConfidence', () => {
   it('returns 0.85 for GET + open + examples', () => {
@@ -185,5 +185,26 @@ describe('detectAuth', () => {
   it('detects oauth2', () => {
     const spec = { components: { securitySchemes: { OAuth: { type: 'oauth2' } } }, security: [{ OAuth: [] }] };
     assert.strictEqual(detectAuth(spec).authType, 'oauth2');
+  });
+});
+
+describe('generateEndpointId', () => {
+  it('uses method-operationId convention', () => {
+    assert.strictEqual(generateEndpointId('get', '/users', 'listUsers', new Set()), 'get-listusers');
+  });
+  it('slugifies operationId', () => {
+    assert.strictEqual(generateEndpointId('post', '/users', 'createUser.v2', new Set()), 'post-createuser-v2');
+  });
+  it('falls back to method-path when no operationId', () => {
+    assert.strictEqual(generateEndpointId('get', '/users/:id/posts', undefined, new Set()), 'get-users-posts');
+  });
+  it('deduplicates with numeric suffix', () => {
+    const seen = new Set(['get-listusers']);
+    assert.strictEqual(generateEndpointId('get', '/users', 'listUsers', seen), 'get-listusers-2');
+  });
+  it('truncates to 80 chars', () => {
+    const longId = 'a'.repeat(100);
+    const result = generateEndpointId('get', '/x', longId, new Set());
+    assert.ok(result.length <= 80);
   });
 });

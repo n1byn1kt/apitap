@@ -670,6 +670,10 @@ async function handleOpenAPIImport(
   // Merge
   const { skillFile, diff } = mergeSkillFile(existing, endpoints, meta);
 
+  // Ensure domain and baseUrl reflect the API, not the spec source URL
+  skillFile.domain = domain;
+  skillFile.baseUrl = `https://${domain}`;
+
   if (dryRun) {
     if (json) {
       console.log(JSON.stringify({
@@ -816,6 +820,10 @@ async function handleApisGuruImport(flags: Record<string, string | boolean>): Pr
 
       // Merge
       const { skillFile, diff } = mergeSkillFile(existing, endpoints, meta);
+
+      // Ensure domain and baseUrl reflect the API, not the spec source URL
+      skillFile.domain = domain;
+      skillFile.baseUrl = `https://${domain}`;
 
       if (!dryRun) {
         // Sign and write

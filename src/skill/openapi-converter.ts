@@ -49,3 +49,29 @@ export function resolveRef(
   // Recursively resolve if the resolved object also has $ref or allOf
   return resolveRef(resolved, spec, visited, depth + 1);
 }
+
+export function extractDomainAndBasePath(
+  spec: Record<string, any>,
+  specUrl: string,
+): { domain: string; basePath: string } {
+  const serverUrl = spec.servers?.[0]?.url;
+  if (serverUrl) {
+    try {
+      const parsed = new URL(serverUrl);
+      return { domain: parsed.hostname, basePath: parsed.pathname.replace(/\/$/, '') };
+    } catch {
+      if (serverUrl.startsWith('/')) {
+        const domain = spec.info?.['x-providerName'] || new URL(specUrl).hostname;
+        return { domain, basePath: serverUrl.replace(/\/$/, '') };
+      }
+    }
+  }
+  if (spec.host) {
+    return { domain: spec.host, basePath: (spec.basePath || '').replace(/\/$/, '') };
+  }
+  try {
+    return { domain: new URL(specUrl).hostname, basePath: '' };
+  } catch {
+    return { domain: 'unknown', basePath: '' };
+  }
+}

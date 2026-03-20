@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveRef } from '../../src/skill/openapi-converter.js';
+import { resolveRef, extractDomainAndBasePath } from '../../src/skill/openapi-converter.js';
 
 describe('resolveRef', () => {
   it('resolves a simple $ref like #/components/schemas/User', () => {
@@ -112,5 +112,41 @@ describe('resolveRef', () => {
     const result = resolveRef({ $ref: '#/components/schemas/DoesNotExist' }, spec);
 
     assert.equal(result, null);
+  });
+});
+
+describe('extractDomainAndBasePath', () => {
+  it('extracts from absolute OpenAPI 3.x server URL', () => {
+    const spec = { openapi: '3.0.0', servers: [{ url: 'https://api.stripe.com/v1' }] };
+    const result = extractDomainAndBasePath(spec, 'https://example.com/spec.json');
+    assert.strictEqual(result.domain, 'api.stripe.com');
+    assert.strictEqual(result.basePath, '/v1');
+  });
+
+  it('extracts from relative server URL using specUrl', () => {
+    const spec = { openapi: '3.0.0', servers: [{ url: '/v1' }] };
+    const result = extractDomainAndBasePath(spec, 'https://api.apis.guru/v2/specs/stripe.com/spec.json');
+    assert.strictEqual(result.basePath, '/v1');
+    assert.strictEqual(result.domain, 'api.apis.guru');
+  });
+
+  it('uses x-providerName for relative server URL when available', () => {
+    const spec = { openapi: '3.0.0', servers: [{ url: '/v1' }], info: { 'x-providerName': 'stripe.com' } };
+    const result = extractDomainAndBasePath(spec, 'https://api.apis.guru/v2/specs/stripe.com/spec.json');
+    assert.strictEqual(result.domain, 'stripe.com');
+  });
+
+  it('extracts from Swagger 2.0 host + basePath', () => {
+    const spec = { swagger: '2.0', host: 'petstore.swagger.io', basePath: '/v2' };
+    const result = extractDomainAndBasePath(spec, 'https://example.com/spec.json');
+    assert.strictEqual(result.domain, 'petstore.swagger.io');
+    assert.strictEqual(result.basePath, '/v2');
+  });
+
+  it('falls back to specUrl when no servers or host', () => {
+    const spec = { openapi: '3.0.0', paths: {} };
+    const result = extractDomainAndBasePath(spec, 'https://my-api.example.com/openapi.json');
+    assert.strictEqual(result.domain, 'my-api.example.com');
+    assert.strictEqual(result.basePath, '');
   });
 });

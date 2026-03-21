@@ -41,7 +41,6 @@ export async function searchSkills(
 
   for (const [domain, entry] of Object.entries(index.domains)) {
     const domainLower = domain.toLowerCase();
-    const domainMatches = terms.some(term => domainLower.includes(term));
 
     for (const ep of entry.endpoints) {
       const endpointIdLower = ep.id.toLowerCase();
@@ -49,9 +48,7 @@ export async function searchSkills(
       const methodLower = ep.method.toLowerCase();
 
       const searchText = `${domainLower} ${endpointIdLower} ${pathLower} ${methodLower}`;
-      const allMatch = domainMatches
-        ? terms.every(term => searchText.includes(term))
-        : terms.every(term => searchText.includes(term));
+      const allMatch = terms.every(term => searchText.includes(term));
 
       if (allMatch) {
         results.push({

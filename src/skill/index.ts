@@ -16,6 +16,7 @@ export interface IndexEndpoint {
 export interface IndexDomain {
   endpointCount: number;
   provenance: 'self' | 'imported-signed' | 'imported' | 'unsigned';
+  capturedAt: string;
   endpoints: IndexEndpoint[];
 }
 
@@ -118,6 +119,7 @@ export async function buildIndex(skillsDir: string = DEFAULT_SKILLS_DIR): Promis
       domains[domain] = {
         endpointCount: skill.endpoints.length,
         provenance: skill.provenance ?? 'unsigned',
+        capturedAt: skill.capturedAt ?? '',
         endpoints: skill.endpoints.map((ep: any) => ({
           id: ep.id ?? '',
           method: ep.method ?? 'GET',
@@ -153,6 +155,7 @@ export async function updateIndex(
   endpoints: IndexEndpoint[],
   provenance: string,
   skillsDir: string = DEFAULT_SKILLS_DIR,
+  capturedAt: string = '',
 ): Promise<void> {
   const existing = await readIndex(skillsDir);
   const index: IndexFile = existing ?? {
@@ -167,6 +170,7 @@ export async function updateIndex(
   index.domains[domain] = {
     endpointCount: endpoints.length,
     provenance: (provenance ?? 'unsigned') as IndexDomain['provenance'],
+    capturedAt,
     endpoints,
   };
 

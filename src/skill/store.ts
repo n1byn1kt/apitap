@@ -62,6 +62,7 @@ export async function writeSkillFile(
       })),
       skill.provenance ?? 'unsigned',
       skillsDir,
+      skill.capturedAt,
     );
   } catch {
     // Index update failure should not block writes
@@ -163,7 +164,7 @@ export async function listSkillFiles(
       domain,
       skillFile: join(skillsDir, `${domain}.json`),
       endpointCount: entry.endpointCount,
-      capturedAt: index.builtAt,
+      capturedAt: entry.capturedAt || index.builtAt,
       provenance: entry.provenance,
     });
   }

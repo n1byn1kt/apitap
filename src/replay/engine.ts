@@ -218,9 +218,15 @@ function wrapAuthError(
 /**
  * Returns a user-facing hint about confidence level, or null if confidence is high enough.
  */
-export function getConfidenceHint(confidence: number | undefined): string | null {
+export function getConfidenceHint(
+  confidence: number | undefined,
+  provenance?: string,
+): string | null {
   const c = confidence ?? 1.0;
   if (c >= 0.85) return null;
+  if (provenance === 'skeleton') {
+    return '(observed in traffic, no response shape — first successful replay will upgrade)';
+  }
   if (c >= 0.7) return '(imported from spec — params may need adjustment)';
   return '(imported from spec — provide params explicitly, no captured examples available)';
 }

@@ -288,6 +288,54 @@ describe('mergeSkillFile — import history', () => {
   });
 });
 
+describe('skeleton merge behavior', () => {
+  it('import enriches skeleton: adds response shape, keeps skeleton provenance', () => {
+    const skeletonEp = makeEndpoint({
+      id: 'get-users', path: '/users', confidence: 0.8,
+      endpointProvenance: 'skeleton' as const,
+      responseShape: { type: 'unknown' },
+    });
+    const existing = makeSkillFile([skeletonEp]);
+
+    const importedEp = makeEndpoint({
+      id: 'get-users', path: '/users', confidence: 0.85,
+      endpointProvenance: 'openapi-import' as const,
+      responseShape: { type: 'object', fields: ['id', 'name', 'email'] },
+      description: 'List all users',
+      specSource: 'https://example.com/spec.json',
+    });
+
+    const result = mergeSkillFile(existing, [importedEp], testMeta);
+    assert.strictEqual(result.diff.enriched, 1);
+    const ep = result.skillFile.endpoints[0];
+    assert.strictEqual(ep.endpointProvenance, 'skeleton');
+    assert.strictEqual(ep.confidence, 0.85); // max(0.8, 0.85)
+    assert.deepStrictEqual(ep.responseShape, { type: 'object', fields: ['id', 'name', 'email'] });
+    assert.strictEqual(ep.description, 'List all users');
+    assert.strictEqual(ep.specSource, 'https://example.com/spec.json');
+  });
+
+  it('skeleton + lower confidence import → confidence stays at 0.8', () => {
+    const skeletonEp = makeEndpoint({
+      id: 'get-users', path: '/users', confidence: 0.8,
+      endpointProvenance: 'skeleton' as const,
+    });
+    const existing = makeSkillFile([skeletonEp]);
+
+    const importedEp = makeEndpoint({
+      id: 'get-users', path: '/users', confidence: 0.7,
+      endpointProvenance: 'openapi-import' as const,
+      description: 'List users',
+    });
+
+    const result = mergeSkillFile(existing, [importedEp], testMeta);
+    assert.strictEqual(result.diff.enriched, 1);
+    const ep = result.skillFile.endpoints[0];
+    assert.strictEqual(ep.confidence, 0.8); // max(0.8, 0.7)
+    assert.strictEqual(ep.description, 'List users');
+  });
+});
+
 describe('mergeSkillFile — query param merge', () => {
   it('merges query param schema: keeps captured example, adds spec enum/required', () => {
     const captured = makeEndpoint({

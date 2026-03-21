@@ -292,6 +292,7 @@ export class SkillGenerator {
   private oauthClientSecret: string | undefined;
   private oauthRefreshToken: string | undefined;
   private totalNetworkBytes = 0; // v1.0: accumulate all response sizes
+  private _lastDedupKey: string | null = null; // side-channel for dedup key when _prepareEndpoint returns null
 
   /** Number of unique endpoints captured so far */
   get endpointCount(): number {
@@ -305,13 +306,37 @@ export class SkillGenerator {
     };
   }
 
-  /** Add a captured exchange. Returns the new endpoint if first seen, null if duplicate. */
-  addExchange(exchange: CapturedExchange): SkillEndpoint | null {
+  /**
+   * Extract shared request-side logic: URL parsing, GraphQL detection, path
+   * parameterization, dedup, OAuth, auth extraction, header/query scrubbing,
+   * and endpoint ID generation.
+   *
+   * Returns null when the endpoint is a duplicate (existing non-skeleton).
+   * When returning null, stores the dedup key in `_lastDedupKey` so callers
+   * can still perform body storage for cross-request diffing.
+   */
+  private _prepareEndpoint(request: {
+    url: string;
+    method: string;
+    headers: Record<string, string>;
+    postData?: string;
+  }): {
+    key: string;
+    method: string;
+    paramPath: string;
+    queryParams: Record<string, { type: string; example: string }>;
+    safeHeaders: Record<string, string>;
+    exampleUrl: string;
+    endpointId: string;
+    graphqlInfo: { operationName: string; query: string; variables: Record<string, unknown> | null } | null;
+    entropyDetected: Set<string>;
+    isSkeletonReplacement: boolean;
+  } | null {
     this.captureCount++;
 
-    const url = new URL(exchange.request.url);
-    const method = exchange.request.method;
-    const contentType = exchange.request.headers['content-type'] ?? '';
+    const url = new URL(request.url);
+    const method = request.method;
+    const contentType = request.headers['content-type'] ?? '';
 
     // Track baseUrl from the first captured exchange
     if (!this.baseUrl) {
@@ -319,11 +344,11 @@ export class SkillGenerator {
     }
 
     // Check for GraphQL
-    const isGraphQL = isGraphQLEndpoint(url.pathname, contentType, exchange.request.postData ?? null);
+    const isGraphQL = isGraphQLEndpoint(url.pathname, contentType, request.postData ?? null);
     let graphqlInfo: { operationName: string; query: string; variables: Record<string, unknown> | null } | null = null;
 
-    if (isGraphQL && exchange.request.postData) {
-      const parsed = parseGraphQLBody(exchange.request.postData);
+    if (isGraphQL && request.postData) {
+      const parsed = parseGraphQLBody(request.postData);
       if (parsed) {
         const opName = extractOperationName(parsed.query, parsed.operationName);
         graphqlInfo = {
@@ -344,20 +369,22 @@ export class SkillGenerator {
       ? `${method} graphql:${graphqlInfo.operationName}`
       : `${method} ${dedupPath}`;
 
-    // Track response bytes for all exchanges (for browser cost measurement)
-    this.totalNetworkBytes += exchange.response.body.length;
-
     if (this.endpoints.has(key)) {
-      // Store duplicate body for cross-request diffing (Strategy 1) — scrubbed (H3 fix)
-      if (exchange.request.postData) {
-        const bodies = this.exchangeBodies.get(key);
-        if (bodies) bodies.push(this.scrubBodyString(exchange.request.postData));
+      const existing = this.endpoints.get(key)!;
+      if (existing.endpointProvenance === 'skeleton') {
+        // Skeleton endpoint — fall through to replace it with captured data
+      } else {
+        // Non-skeleton duplicate — store key for body diffing, return null
+        this._lastDedupKey = key;
+        return null;
       }
-      return null;
     }
 
+    const isSkeletonReplacement = this.endpoints.has(key)
+      && this.endpoints.get(key)!.endpointProvenance === 'skeleton';
+
     // Detect OAuth token requests from captured traffic
-    const oauthInfo = isOAuthTokenRequest(exchange.request);
+    const oauthInfo = isOAuthTokenRequest(request);
     if (oauthInfo && !this.oauthConfig) {
       this.oauthConfig = {
         tokenEndpoint: oauthInfo.tokenEndpoint,
@@ -370,11 +397,11 @@ export class SkillGenerator {
     }
 
     // Extract auth before filtering headers (includes entropy-based detection)
-    const [auth, entropyDetected] = extractAuth(exchange.request.headers);
+    const [auth, entropyDetected] = extractAuth(request.headers);
     this.extractedAuthList.push(...auth);
 
     // Filter headers, then strip auth values (including entropy-detected tokens)
-    const filtered = filterHeaders(exchange.request.headers);
+    const filtered = filterHeaders(request.headers);
     const safeHeaders = stripAuth(filtered, entropyDetected);
 
     // Build query params, optionally scrub PII
@@ -384,10 +411,49 @@ export class SkillGenerator {
     }
 
     // Build example URL, optionally scrub PII and sensitive query params
-    let exampleUrl = exchange.request.url;
+    let exampleUrl = request.url;
     if (this.options.scrub) {
       exampleUrl = scrubUrlQueryParams(scrubPII(exampleUrl));
     }
+
+    // Generate endpoint ID - use GraphQL operation name if applicable
+    const endpointId = graphqlInfo
+      ? `${method.toLowerCase()}-graphql-${graphqlInfo.operationName}`
+      : generateEndpointId(method, paramPath);
+
+    return {
+      key,
+      method,
+      paramPath,
+      queryParams,
+      safeHeaders,
+      exampleUrl,
+      endpointId,
+      graphqlInfo,
+      entropyDetected,
+      isSkeletonReplacement,
+    };
+  }
+
+  /** Add a captured exchange. Returns the new endpoint if first seen, null if duplicate. */
+  addExchange(exchange: CapturedExchange): SkillEndpoint | null {
+    // Track response bytes for all exchanges (for browser cost measurement)
+    this.totalNetworkBytes += exchange.response.body.length;
+
+    const prep = this._prepareEndpoint(exchange.request);
+
+    if (!prep) {
+      // Dedup: store body for cross-request diffing (Strategy 1) — scrubbed (H3 fix)
+      const dedupKey = this._lastDedupKey;
+      if (dedupKey && exchange.request.postData) {
+        const bodies = this.exchangeBodies.get(dedupKey);
+        if (bodies) bodies.push(this.scrubBodyString(exchange.request.postData));
+      }
+      return null;
+    }
+
+    const { key, method, paramPath, queryParams, safeHeaders, exampleUrl,
+            endpointId, graphqlInfo, entropyDetected } = prep;
 
     // Response preview: null by default, populated with --preview
     let responsePreview: unknown = null;
@@ -445,11 +511,6 @@ export class SkillGenerator {
       }
     }
 
-    // Generate endpoint ID - use GraphQL operation name if applicable
-    const endpointId = graphqlInfo
-      ? `${method.toLowerCase()}-graphql-${graphqlInfo.operationName}`
-      : generateEndpointId(method, paramPath);
-
     const endpoint: SkillEndpoint = {
       id: endpointId,
       method: exchange.request.method,
@@ -500,6 +561,52 @@ export class SkillGenerator {
       }
     }
 
+    return endpoint;
+  }
+
+  /** Add a skeleton endpoint (request data only, no response body). Confidence 0.8. */
+  addSkeleton(request: {
+    url: string;
+    method: string;
+    headers: Record<string, string>;
+    postData?: string;
+  }): SkillEndpoint | null {
+    const prep = this._prepareEndpoint(request);
+    if (!prep) return null;
+
+    const { key, paramPath, queryParams, safeHeaders, exampleUrl,
+            endpointId, entropyDetected, isSkeletonReplacement } = prep;
+
+    // If a skeleton already occupies this key, don't overwrite with another skeleton
+    if (isSkeletonReplacement) return null;
+
+    const endpoint: SkillEndpoint = {
+      id: endpointId,
+      method: request.method,
+      path: paramPath,
+      queryParams,
+      headers: safeHeaders,
+      responseShape: { type: 'unknown' },
+      examples: {
+        request: {
+          url: exampleUrl,
+          headers: stripAuth(filterHeaders(request.headers)),
+        },
+        responsePreview: null,
+      },
+      confidence: 0.8,
+      endpointProvenance: 'skeleton',
+      responseBytes: 0,
+    };
+
+    // Also strip entropy-detected tokens from example headers
+    if (entropyDetected.size > 0) {
+      endpoint.examples.request.headers = stripAuth(
+        filterHeaders(request.headers), entropyDetected
+      );
+    }
+
+    this.endpoints.set(key, endpoint);
     return endpoint;
   }
 

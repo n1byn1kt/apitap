@@ -317,8 +317,40 @@ export async function attach(options: AttachOptions): Promise<AttachResult> {
       ).then((result) => {
         processExchange(key, req, resp, (result.body as string) ?? '', log);
       }).catch(() => {
-        // Body evicted or unavailable — still process exchange without body
-        processExchange(key, req, resp, '', log);
+        // Body evicted — write skeleton instead of full capture with empty body
+        if (!shouldCapture({ url: req.url, status: resp.status, contentType: resp.mimeType })) {
+          filteredRequests++;
+          requests.delete(key);
+          responses.delete(key);
+          return;
+        }
+
+        let hostname: string;
+        try { hostname = new URL(req.url).hostname; } catch {
+          requests.delete(key);
+          responses.delete(key);
+          return;
+        }
+        if (!matchesDomainGlob(hostname, domainPatterns)) {
+          filteredRequests++;
+          requests.delete(key);
+          responses.delete(key);
+          return;
+        }
+
+        if (!generators.has(hostname)) generators.set(hostname, new SkillGenerator());
+        const gen = generators.get(hostname)!;
+        const endpoint = gen.addSkeleton({
+          url: req.url,
+          method: req.method,
+          headers: req.headers,
+          postData: req.postData,
+        });
+        if (endpoint) {
+          log(`  [skeleton] ${req.method} ${hostname} ${endpoint.path} (body evicted)`);
+        }
+        requests.delete(key);
+        responses.delete(key);
       });
     });
 

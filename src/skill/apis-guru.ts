@@ -88,7 +88,6 @@ export function parseApisGuruList(raw: Record<string, any>): ApisGuruEntry[] {
 export interface FilterOptions {
   search?: string;
   limit?: number;
-  noAuthOnly?: boolean;
   preferOpenapi3?: boolean;
 }
 

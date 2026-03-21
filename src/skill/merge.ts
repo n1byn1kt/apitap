@@ -140,10 +140,14 @@ export function mergeSkillFile(
 
   // --- Case: no existing file — create a new SkillFile from imported endpoints ---
   if (existing === null) {
-    const endpoints = imported.map(ep => ({
+    let endpoints = imported.map(ep => ({
       ...ep,
       normalizedPath: normalizePath(ep.path),
     }));
+    if (endpoints.length > 500) {
+      endpoints.sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
+      endpoints = endpoints.slice(0, 500);
+    }
 
     const skillFile: SkillFile = {
       version: '1.2',
@@ -304,6 +308,24 @@ export function mergeSkillFile(
       });
       added++;
     }
+  }
+
+  // Cap at MAX_ENDPOINTS after merge — keep captured/high-confidence first
+  const MAX_ENDPOINTS = 500;
+  if (resultEndpoints.length > MAX_ENDPOINTS) {
+    const overflow = resultEndpoints.length - MAX_ENDPOINTS;
+    resultEndpoints.sort((a, b) => {
+      // Captured endpoints always win over imported
+      const aIsCaptured = !a.endpointProvenance || a.endpointProvenance === 'captured';
+      const bIsCaptured = !b.endpointProvenance || b.endpointProvenance === 'captured';
+      if (aIsCaptured !== bIsCaptured) return aIsCaptured ? -1 : 1;
+      // Then by confidence descending
+      return (b.confidence ?? 0) - (a.confidence ?? 0);
+    });
+    resultEndpoints.length = MAX_ENDPOINTS;
+    process.stderr.write(
+      `[openapi-import] Warning: merged result has ${MAX_ENDPOINTS + overflow} endpoints, truncated to ${MAX_ENDPOINTS}\n`,
+    );
   }
 
   // Build updated import history

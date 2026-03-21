@@ -377,4 +377,34 @@ describe('mergeSkillFile — query param merge', () => {
     assert.ok(ep!.queryParams['page'], 'page param from spec should be added');
     assert.equal(ep!.queryParams['page'].example, '1');
   });
+
+  it('caps merged result at 500 endpoints, keeping captured first', () => {
+    // Existing file with 300 captured endpoints
+    const existingEndpoints = Array.from({ length: 300 }, (_, i) =>
+      makeEndpoint({ id: `captured-${i}`, method: 'GET', path: `/captured/${i}`, endpointProvenance: 'captured', confidence: 1.0 }),
+    );
+    const existing = makeSkillFile(existingEndpoints);
+
+    // Import 300 more — merge would produce 600, must be capped to 500
+    const imported = Array.from({ length: 300 }, (_, i) =>
+      makeEndpoint({ id: `imported-${i}`, method: 'GET', path: `/imported/${i}`, endpointProvenance: 'openapi-import', confidence: 0.6 }),
+    );
+
+    const result = mergeSkillFile(existing, imported, testMeta);
+    assert.equal(result.skillFile.endpoints.length, 500, 'should cap at 500');
+
+    // All 300 captured endpoints should be preserved (they sort first)
+    const capturedCount = result.skillFile.endpoints.filter(
+      ep => ep.endpointProvenance === 'captured',
+    ).length;
+    assert.equal(capturedCount, 300, 'all captured endpoints preserved');
+  });
+
+  it('caps new file at 500 endpoints', () => {
+    const imported = Array.from({ length: 600 }, (_, i) =>
+      makeEndpoint({ id: `ep-${i}`, method: 'GET', path: `/api/${i}` }),
+    );
+    const result = mergeSkillFile(null, imported, testMeta);
+    assert.equal(result.skillFile.endpoints.length, 500);
+  });
 });

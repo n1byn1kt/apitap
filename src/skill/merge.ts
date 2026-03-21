@@ -145,6 +145,7 @@ export function mergeSkillFile(
       normalizedPath: normalizePath(ep.path),
     }));
     if (endpoints.length > 500) {
+      endpoints.sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0));
       endpoints = endpoints.slice(0, 500);
     }
 

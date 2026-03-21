@@ -4,6 +4,7 @@ import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import type { SkillFile, SkillSummary } from '../types.js';
 import { validateSkillFile } from './validate.js';
+import { updateIndex, ensureIndex } from './index.js';
 
 const DEFAULT_SKILLS_DIR = join(homedir(), '.apitap', 'skills');
 
@@ -47,6 +48,26 @@ export async function writeSkillFile(
   const content = JSON.stringify(skill, null, 2) + '\n';
   await writeFile(tmpPath, content, { mode: 0o600 });
   await rename(tmpPath, filePath);
+
+  // Incrementally update the search index
+  try {
+    await updateIndex(
+      skill.domain,
+      skill.endpoints.map(ep => ({
+        id: ep.id,
+        method: ep.method,
+        path: ep.path,
+        ...(ep.replayability?.tier ? { tier: ep.replayability.tier } : {}),
+        ...(ep.replayability?.verified ? { verified: true } : {}),
+      })),
+      skill.provenance ?? 'unsigned',
+      skillsDir,
+      skill.capturedAt,
+    );
+  } catch {
+    // Index update failure should not block writes
+  }
+
   return filePath;
 }
 
@@ -135,30 +156,17 @@ export async function safeReadSkillFile(
 export async function listSkillFiles(
   skillsDir: string = DEFAULT_SKILLS_DIR,
 ): Promise<SkillSummary[]> {
-  let files: string[];
-  try {
-    files = await readdir(skillsDir);
-  } catch (err: unknown) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
-    throw err;
-  }
-
+  const index = await ensureIndex(skillsDir);
   const summaries: SkillSummary[] = [];
-  const DOMAIN_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
-  for (const file of files) {
-    if (!file.endsWith('.json')) continue;
-    const domain = file.replace(/\.json$/, '');
-    if (!DOMAIN_RE.test(domain)) continue; // skip non-conforming filenames
-    const skill = await safeReadSkillFile(domain, skillsDir, { trustUnsigned: true });
-    if (skill) {
-      summaries.push({
-        domain: skill.domain,
-        skillFile: join(skillsDir, file),
-        endpointCount: skill.endpoints.length,
-        capturedAt: skill.capturedAt,
-        provenance: skill.provenance ?? 'unsigned',
-      });
-    }
+
+  for (const [domain, entry] of Object.entries(index.domains)) {
+    summaries.push({
+      domain,
+      skillFile: join(skillsDir, `${domain}.json`),
+      endpointCount: entry.endpointCount,
+      capturedAt: entry.capturedAt || index.builtAt,
+      provenance: entry.provenance,
+    });
   }
 
   return summaries;

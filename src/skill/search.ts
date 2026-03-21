@@ -1,5 +1,5 @@
 // src/skill/search.ts
-import { listSkillFiles, safeReadSkillFile } from './store.js';
+import { ensureIndex } from './index.js';
 
 export interface SearchResult {
   domain: string;
@@ -18,6 +18,7 @@ export interface SearchResponse {
 
 /**
  * Search skill files for endpoints matching a query.
+ * Uses the search index for sub-second results.
  * Matches against domain names, endpoint IDs, and endpoint paths.
  * Query terms are matched case-insensitively.
  */
@@ -25,8 +26,10 @@ export async function searchSkills(
   query: string,
   skillsDir?: string,
 ): Promise<SearchResponse> {
-  const summaries = await listSkillFiles(skillsDir);
-  if (summaries.length === 0) {
+  const index = await ensureIndex(skillsDir);
+
+  const domainCount = Object.keys(index.domains).length;
+  if (domainCount === 0) {
     return {
       found: false,
       suggestion: 'No skill files found. Run `apitap capture <url>` to capture API traffic first.',
@@ -36,36 +39,32 @@ export async function searchSkills(
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
   const results: SearchResult[] = [];
 
-  for (const summary of summaries) {
-    const skill = await safeReadSkillFile(summary.domain, skillsDir, { trustUnsigned: true });
-    if (!skill) continue;
+  for (const [domain, entry] of Object.entries(index.domains)) {
+    const domainLower = domain.toLowerCase();
 
-    const domainLower = skill.domain.toLowerCase();
-
-    for (const ep of skill.endpoints) {
+    for (const ep of entry.endpoints) {
       const endpointIdLower = ep.id.toLowerCase();
       const pathLower = ep.path.toLowerCase();
       const methodLower = ep.method.toLowerCase();
 
-      // Check if all query terms match against the combined searchable text
       const searchText = `${domainLower} ${endpointIdLower} ${pathLower} ${methodLower}`;
       const allMatch = terms.every(term => searchText.includes(term));
 
       if (allMatch) {
         results.push({
-          domain: skill.domain,
+          domain,
           endpointId: ep.id,
           method: ep.method,
           path: ep.path,
-          tier: ep.replayability?.tier ?? 'unknown',
-          verified: ep.replayability?.verified ?? false,
+          tier: ep.tier ?? 'unknown',
+          verified: ep.verified ?? false,
         });
       }
     }
   }
 
   if (results.length === 0) {
-    const domains = summaries.map(s => s.domain).join(', ');
+    const domains = Object.keys(index.domains).join(', ');
     return {
       found: false,
       suggestion: `No matches for "${query}". Available domains: ${domains}`,

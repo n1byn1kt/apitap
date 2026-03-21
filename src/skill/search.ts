@@ -85,6 +85,7 @@ export async function searchSkills(
     const domains = Object.keys(index.domains).join(', ');
     return {
       found: false,
+      summary: '0 endpoints across 0 domains',
       suggestion: `No matches for "${query}". Available domains: ${domains}`,
     };
   }

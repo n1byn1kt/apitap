@@ -1,5 +1,5 @@
 // src/skill/search.ts
-import { listSkillFiles, readSkillFile } from './store.js';
+import { listSkillFiles, safeReadSkillFile } from './store.js';
 
 export interface SearchResult {
   domain: string;
@@ -37,12 +37,7 @@ export async function searchSkills(
   const results: SearchResult[] = [];
 
   for (const summary of summaries) {
-    let skill;
-    try {
-      skill = await readSkillFile(summary.domain, skillsDir, { trustUnsigned: true });
-    } catch {
-      continue; // Skip files that fail to load
-    }
+    const skill = await safeReadSkillFile(summary.domain, skillsDir, { trustUnsigned: true });
     if (!skill) continue;
 
     const domainLower = skill.domain.toLowerCase();

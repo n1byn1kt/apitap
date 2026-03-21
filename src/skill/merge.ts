@@ -83,6 +83,33 @@ function wouldEnrich(existing: SkillEndpoint, imported: SkillEndpoint): boolean 
 }
 
 /**
+ * Determine whether an imported endpoint would enrich an existing skeleton
+ * endpoint. Skeletons are enrichable by imports: imports can provide response
+ * shape (replacing the placeholder `{ type: 'unknown' }`), description,
+ * specSource, and query param metadata.
+ */
+function wouldEnrichSkeleton(existing: SkillEndpoint, imported: SkillEndpoint): boolean {
+  // Import can replace an unknown response shape
+  const existingShape = existing.responseShape;
+  const isUnknownShape = existingShape.type === 'unknown' && !existingShape.fields;
+  if (isUnknownShape && imported.responseShape.type !== 'unknown') return true;
+
+  if (!existing.description && imported.description) return true;
+  if (!existing.specSource && imported.specSource) return true;
+
+  // Check if any new query params would be added or enriched
+  for (const [name, specParam] of Object.entries(imported.queryParams)) {
+    if (!(name in existing.queryParams)) return true;
+    const ep = existing.queryParams[name];
+    if (!ep.enum && specParam.enum) return true;
+    if (ep.required === undefined && specParam.required !== undefined) return true;
+    if (ep.type === 'string' && specParam.type !== 'string') return true;
+  }
+
+  return false;
+}
+
+/**
  * Pure function — no I/O.
  *
  * Merges imported OpenAPI endpoints into an existing skill file.
@@ -179,6 +206,51 @@ export function mergeSkillFile(
         normalizedPath: normalizePath(existingEp.path),
       });
       preserved++;
+      continue;
+    }
+
+    // --- Skeleton branch: import can enrich skeleton endpoints ---
+    if (existingEp.endpointProvenance === 'skeleton') {
+      if (!wouldEnrichSkeleton(existingEp, importedEp)) {
+        resultEndpoints.push({
+          ...existingEp,
+          normalizedPath: normalizePath(existingEp.path),
+        });
+        const existingHasSpecData = !!(existingEp.specSource || existingEp.description);
+        const importHasSpecData = !!(importedEp.specSource || importedEp.description);
+        if (existingHasSpecData || importHasSpecData) {
+          skipped++;
+        } else {
+          preserved++;
+        }
+        continue;
+      }
+
+      const mergedQueryParams = mergeQueryParams(existingEp.queryParams, importedEp.queryParams);
+
+      // For skeletons, import can replace responseShape if existing is unknown
+      const existingShape = existingEp.responseShape;
+      const isUnknownShape = existingShape.type === 'unknown' && !existingShape.fields;
+      const responseShape = isUnknownShape && importedEp.responseShape.type !== 'unknown'
+        ? importedEp.responseShape
+        : existingShape;
+
+      const enrichedSkeleton: SkillEndpoint = {
+        ...existingEp,
+        normalizedPath: normalizePath(existingEp.path),
+        responseShape,
+        // Augment with spec fields (only if not already present)
+        ...(importedEp.description && !existingEp.description ? { description: importedEp.description } : {}),
+        ...(importedEp.specSource && !existingEp.specSource ? { specSource: importedEp.specSource } : {}),
+        // Confidence = max(skeleton, import)
+        confidence: Math.max(existingEp.confidence ?? 0, importedEp.confidence ?? 0) || existingEp.confidence,
+        // Provenance stays 'skeleton'
+        endpointProvenance: 'skeleton',
+        queryParams: mergedQueryParams,
+      };
+
+      resultEndpoints.push(enrichedSkeleton);
+      enriched++;
       continue;
     }
 

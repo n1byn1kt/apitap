@@ -37,7 +37,12 @@ export async function searchSkills(
   const results: SearchResult[] = [];
 
   for (const summary of summaries) {
-    const skill = await readSkillFile(summary.domain, skillsDir, { trustUnsigned: true });
+    let skill;
+    try {
+      skill = await readSkillFile(summary.domain, skillsDir, { trustUnsigned: true });
+    } catch {
+      continue; // Skip files that fail to load
+    }
     if (!skill) continue;
 
     const domainLower = skill.domain.toLowerCase();

@@ -1,7 +1,7 @@
 // test/skill/signing-enforcement.test.ts
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readSkillFile, writeSkillFile } from '../../src/skill/store.js';
@@ -54,7 +54,8 @@ describe('HMAC enforcement Phase 2', () => {
   it('tampered file is rejected', async () => {
     const signed = signSkillFile(makeSkill(), signingKey);
     signed.baseUrl = 'https://evil.com';
-    await writeSkillFile(signed, testDir);
+    // Write directly to disk to simulate tampering (bypasses write-time validation)
+    await writeFile(join(testDir, 'example.com.json'), JSON.stringify(signed, null, 2));
     await assert.rejects(
       () => readSkillFile('example.com', testDir, { verifySignature: true, signingKey }),
       /signature verification failed|tampered|does not match domain/i,
@@ -92,6 +93,49 @@ describe('HMAC enforcement Phase 2', () => {
     await assert.rejects(
       () => readSkillFile('example.com', testDir, { verifySignature: true, signingKey: wrongKey }),
       /signature verification failed|tampered/i,
+    );
+  });
+
+  it('writeSkillFile rejects file with mismatched baseUrl and domain', async () => {
+    const skill = makeSkill({ baseUrl: 'https://evil.com' });
+    await assert.rejects(
+      () => writeSkillFile(skill, testDir),
+      /does not match domain/i,
+    );
+  });
+
+  it('writeSkillFile rejects file with >500 endpoints', async () => {
+    const endpoints = Array.from({ length: 501 }, (_, i) => ({
+      id: `get-item-${i}`,
+      method: 'GET' as const,
+      path: `/api/items/${i}`,
+      queryParams: {},
+      headers: {},
+      responseShape: { type: 'object' as const },
+      examples: { request: { url: `https://example.com/api/items/${i}`, headers: {} }, responsePreview: null },
+    }));
+    const skill = makeSkill({ endpoints } as any);
+    await assert.rejects(
+      () => writeSkillFile(skill, testDir),
+      /too many endpoints/i,
+    );
+  });
+
+  it('writeSkillFile rejects file with missing endpoint id', async () => {
+    const skill = makeSkill({
+      endpoints: [{
+        id: '',
+        method: 'GET',
+        path: '/api/data',
+        queryParams: {},
+        headers: {},
+        responseShape: { type: 'object' },
+        examples: { request: { url: 'https://example.com/api/data', headers: {} }, responsePreview: null },
+      }],
+    } as any);
+    await assert.rejects(
+      () => writeSkillFile(skill, testDir),
+      /id must be a string/i,
     );
   });
 });

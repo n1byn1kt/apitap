@@ -37,6 +37,9 @@ export async function writeSkillFile(
   skill: SkillFile,
   skillsDir: string = DEFAULT_SKILLS_DIR,
 ): Promise<string> {
+  // Validate before writing — catch bad data at the source, not on read
+  validateSkillFile(skill);
+
   await mkdir(skillsDir, { recursive: true, mode: 0o700 });
   await ensureGitignore(skillsDir);
   const filePath = skillPath(skill.domain, skillsDir);
@@ -128,15 +131,19 @@ export async function listSkillFiles(
     if (!file.endsWith('.json')) continue;
     const domain = file.replace(/\.json$/, '');
     if (!DOMAIN_RE.test(domain)) continue; // skip non-conforming filenames
-    const skill = await readSkillFile(domain, skillsDir, { trustUnsigned: true });
-    if (skill) {
-      summaries.push({
-        domain: skill.domain,
-        skillFile: join(skillsDir, file),
-        endpointCount: skill.endpoints.length,
-        capturedAt: skill.capturedAt,
-        provenance: skill.provenance ?? 'unsigned',
-      });
+    try {
+      const skill = await readSkillFile(domain, skillsDir, { trustUnsigned: true });
+      if (skill) {
+        summaries.push({
+          domain: skill.domain,
+          skillFile: join(skillsDir, file),
+          endpointCount: skill.endpoints.length,
+          capturedAt: skill.capturedAt,
+          provenance: skill.provenance ?? 'unsigned',
+        });
+      }
+    } catch {
+      // Skip files that fail to load (bad signature, validation error, etc.)
     }
   }
 

@@ -479,7 +479,7 @@ async function handleReplay(positional: string[], flags: Record<string, string |
       ...(result.contractWarnings?.length ? { contractWarnings: result.contractWarnings } : {}),
     }, null, 2));
   } else {
-    const hint = endpoint ? getConfidenceHint(endpoint.confidence) : null;
+    const hint = endpoint ? getConfidenceHint(endpoint.confidence, endpoint.endpointProvenance) : null;
     if (hint) {
       console.error(`  Note: ${hint}`);
     }

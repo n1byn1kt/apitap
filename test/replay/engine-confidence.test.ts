@@ -18,6 +18,27 @@ describe('getConfidenceHint', () => {
   });
 });
 
+describe('getConfidenceHint with provenance', () => {
+  it('returns skeleton-specific hint for skeleton provenance', () => {
+    const hint = getConfidenceHint(0.8, 'skeleton');
+    assert.ok(hint);
+    assert.ok(hint.includes('observed in traffic'));
+    assert.ok(!hint.includes('imported from spec'));
+  });
+
+  it('returns import hint for openapi-import provenance', () => {
+    const hint = getConfidenceHint(0.75, 'openapi-import');
+    assert.ok(hint);
+    assert.ok(hint.includes('imported from spec'));
+  });
+
+  it('backward compat: no provenance arg returns import hint', () => {
+    const hint = getConfidenceHint(0.8);
+    assert.ok(hint);
+    assert.ok(hint.includes('imported from spec'));
+  });
+});
+
 describe('shouldOmitQueryParam', () => {
   it('omits fromSpec param with empty example', () => {
     assert.strictEqual(shouldOmitQueryParam({ type: 'string', example: '', fromSpec: true }), true);

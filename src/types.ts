@@ -133,7 +133,7 @@ export interface SkillEndpoint {
   responseSchema?: SchemaNode; // v1.1: schema snapshot for contract validation
   normalizedPath?: string;
   confidence?: number;
-  endpointProvenance?: 'captured' | 'openapi-import';
+  endpointProvenance?: 'captured' | 'openapi-import' | 'skeleton';
   specSource?: string;
   description?: string;
 }

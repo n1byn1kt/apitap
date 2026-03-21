@@ -59,8 +59,8 @@ Every endpoint tracks how it was discovered:
 | Source | Confidence | Meaning |
 |--------|-----------|---------|
 | Captured with response body | 1.0 | Full capture — response shape verified |
-| CDP skeleton (real traffic, no body) | 0.8 | Endpoint exists, body was evicted from Chrome buffer |
 | OpenAPI import, high quality | 0.85 | Spec has response examples |
+| CDP skeleton (real traffic, no body) | 0.8 | Endpoint exists, body was evicted from Chrome buffer |
 | OpenAPI import, base | 0.6 | Thin spec, no examples |
 
 Imported endpoints auto-upgrade to confidence 1.0 on first successful replay. The merge is additive — captured data is never overwritten by imports, imports fill gaps that capture missed.

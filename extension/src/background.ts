@@ -511,7 +511,26 @@ function onCdpEvent(
         pendingRequests.delete(requestId);
         pendingResponses.delete(requestId);
 
-        if (chrome.runtime.lastError || !result) return;
+        if (chrome.runtime.lastError || !result) {
+          // Body evicted from Chrome buffer — write skeleton
+          const reqDomain = extractDomain(req.url);
+          if (reqDomain) {
+            const gen = generators.getOrCreate(reqDomain);
+            const endpoint = gen.addSkeleton({
+              url: req.url,
+              method: req.method,
+              headers: req.headers,
+              postData: req.postData,
+            });
+            if (endpoint) {
+              capturedDomains.push(reqDomain);
+              state.domain = pickPrimaryDomain(capturedDomains);
+              state.endpointCount = generators.totalEndpoints;
+            }
+          }
+          broadcastState();
+          return;
+        }
 
         let body: string;
         try {
@@ -519,7 +538,25 @@ function onCdpEvent(
             ? atob((result as any).body)
             : (result as any).body;
         } catch {
-          // Invalid base64 — skip this response
+          // Base64 decode failed — body was available but unreadable, write skeleton
+          const reqDomain = extractDomain(req.url);
+          if (reqDomain) {
+            const gen = generators.getOrCreate(reqDomain);
+            const endpoint = gen.addSkeleton({
+              url: req.url,
+              method: req.method,
+              headers: req.headers,
+              postData: req.postData,
+            });
+            if (endpoint) {
+              capturedDomains.push(reqDomain);
+              state.domain = pickPrimaryDomain(capturedDomains);
+              state.endpointCount = generators.totalEndpoints;
+            }
+          }
+          pendingRequests.delete(requestId);
+          pendingResponses.delete(requestId);
+          broadcastState();
           return;
         }
 

@@ -30,6 +30,7 @@ import { attach, parseDomainPatterns } from './capture/cdp-attach.js';
 import { isOpenAPISpec, convertOpenAPISpec } from './skill/openapi-converter.js';
 import { mergeSkillFile } from './skill/merge.js';
 import { fetchApisGuruList, filterEntries, fetchSpec } from './skill/apis-guru.js';
+import { buildIndex, removeFromIndex } from './skill/index.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
@@ -92,6 +93,7 @@ function printUsage(): void {
     apitap audit               Audit stored skill files and credentials
     apitap forget <domain>     Remove skill file and credentials for a domain
     apitap stats               Show token savings report
+    apitap index build         Rebuild search index (run after manual edits)
     apitap extension install   Register native messaging host for Chrome
 
   Discover options:
@@ -367,7 +369,8 @@ async function handleShow(positional: string[], flags: Record<string, string | b
     process.exit(1);
   }
 
-  const skill = await readSkillFile(domain, SKILLS_DIR, { trustUnsigned: true });
+  // Intentionally skip HMAC for browse-only — verification happens at replay time
+  const skill = await readSkillFile(domain, SKILLS_DIR, { verifySignature: false });
   if (!skill) {
     console.error(`Error: No skill file found for "${domain}". Run \`apitap capture\` first.`);
     process.exit(1);
@@ -1599,6 +1602,7 @@ async function handleForget(positional: string[]): Promise<void> {
     notFound = false;
     await unlink(skillFilePath);
     skillRemoved = true;
+    try { await removeFromIndex(domain, skillsDir); } catch {}
   } catch {}
 
   // Remove stored auth
@@ -1626,6 +1630,22 @@ async function handleForget(positional: string[]): Promise<void> {
   if (skillRemoved) parts.push('skill file');
   if (authRemoved) parts.push('credentials');
   console.log(`Forgot ${domain} — ${parts.join(' and ')} removed`);
+}
+
+async function handleIndex(positional: string[]): Promise<void> {
+  const subcommand = positional[0];
+  if (subcommand !== 'build') {
+    console.error('Usage: apitap index build');
+    console.error('  Force rebuild the search index from all skill files on disk.');
+    console.error('  Run this after manually editing skill files outside of apitap commands.');
+    process.exit(1);
+  }
+
+  const skillsDir = SKILLS_DIR || join(APITAP_DIR, 'skills');
+  console.log('\n  Rebuilding search index...');
+  const index = await buildIndex(skillsDir);
+  const endpointCount = Object.values(index.domains).reduce((sum, d) => sum + d.endpointCount, 0);
+  console.log(`  Done: ${Object.keys(index.domains).length} domains, ${endpointCount.toLocaleString()} endpoints indexed\n`);
 }
 
 async function handleExtension(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
@@ -1753,6 +1773,9 @@ async function main(): Promise<void> {
       break;
     case 'attach':
       await handleAttach(positional, flags);
+      break;
+    case 'index':
+      await handleIndex(positional);
       break;
     default:
       printUsage();

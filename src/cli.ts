@@ -766,6 +766,7 @@ async function handleApisGuruImport(flags: Record<string, string | boolean>): Pr
   const force = flags.force === true;
   const limit = typeof flags.limit === 'string' ? parseInt(flags.limit, 10) : 100;
   const search = typeof flags.search === 'string' ? flags.search : undefined;
+  const noAuthOnly = flags['no-auth-only'] === true;
   const skillsDir = SKILLS_DIR || join(APITAP_DIR, 'skills');
 
   if (!json) {
@@ -829,6 +830,16 @@ async function handleApisGuruImport(flags: Record<string, string | boolean>): Pr
       if (endpoints.length === 0) {
         if (!json) {
           console.log(`  [${idx}/${total}] SKIP ${domain.padEnd(24)} 0 endpoints  (${entry.title})`);
+        }
+        results.push({ index: i + 1, status: 'skip', domain, title: entry.title, endpointsAdded: 0 });
+        skippedApis++;
+        continue;
+      }
+
+      // Skip auth-required APIs when --no-auth-only is set
+      if (noAuthOnly && meta.requiresAuth) {
+        if (!json) {
+          console.log(`  [${idx}/${total}] SKIP ${domain.padEnd(24)} requires auth  (${entry.title})`);
         }
         results.push({ index: i + 1, status: 'skip', domain, title: entry.title, endpointsAdded: 0 });
         skippedApis++;

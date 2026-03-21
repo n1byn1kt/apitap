@@ -1,29 +1,31 @@
 # ApiTap
 
 [![npm version](https://img.shields.io/npm/v/@apitap/core)](https://www.npmjs.com/package/@apitap/core)
-[![tests](https://img.shields.io/badge/tests-1195%20passing-brightgreen)](https://github.com/n1byn1kt/apitap)
+[![tests](https://img.shields.io/badge/tests-1299%20passing-brightgreen)](https://github.com/n1byn1kt/apitap)
 [![license](https://img.shields.io/badge/license-BSL--1.1-blue)](./LICENSE)
 
 **The MCP server that turns any website into an API — no docs, no SDK, no browser.**
 
-ApiTap is an MCP server that lets AI agents browse the web through APIs instead of browsers. When an agent needs data from a website, ApiTap automatically detects the site's framework (WordPress, Next.js, Shopify, etc.), discovers its internal API endpoints, and calls them directly — returning clean JSON instead of forcing the agent to render and parse HTML. For sites that need authentication, it opens a browser window for a human to log in, captures the session tokens, and hands control back to the agent. Every site visited generates a reusable "skill file" that maps the site's APIs, so the first visit is a discovery step and every subsequent visit is a direct, instant API call. It works with any MCP-compatible LLM client and reduces token costs by 20-100x compared to browser automation.
+ApiTap is an MCP server that lets AI agents browse the web through APIs instead of browsers. It ships with **6,400+ pre-mapped endpoints** across 280+ APIs (Stripe, GitHub, Twilio, Slack, Spotify, and more) — ready to query on install. For sites not in the database, it captures API traffic from any website, generates reusable "skill files," and replays them directly with `fetch()`. No DOM, no selectors, no flaky waits. Token costs drop 20-100x compared to browser automation.
 
 The web was built for human eyes; ApiTap makes it native to machines.
 
 ```bash
-# One tool call: discover the API + replay it
-apitap browse https://techcrunch.com
-  ✓ Discovery: WordPress detected (medium confidence)
-  ✓ Replay: GET /wp-json/wp/v2/posts → 200 (10 articles)
+# Import 280+ APIs instantly — no browser needed
+apitap import --from apis-guru --limit 100
+  Done: 87 imported, 3 failed, 10 skipped
+       1,847 endpoints added across 87 APIs
 
-# Or read content directly — no browser needed
+# Replay any imported endpoint immediately
+apitap replay api.stripe.com get-listcharges limit=5
+
+# Or capture a site's private API
+apitap capture https://polymarket.com
+apitap replay gamma-api.polymarket.com get-events
+
+# Or read content directly
 apitap read https://en.wikipedia.org/wiki/Node.js
   ✓ Wikipedia decoder: ~127 tokens (vs ~4,900 raw HTML)
-
-# Or step by step:
-apitap capture https://polymarket.com    # Watch API traffic
-apitap show gamma-api.polymarket.com     # See what was captured
-apitap replay gamma-api.polymarket.com get-events  # Call the API directly
 ```
 
 No scraping. No browser. Just the API.
@@ -34,16 +36,34 @@ No scraping. No browser. Just the API.
 
 ## How It Works
 
-1. **Capture** — Launch a Playwright browser, visit a site, browse normally. ApiTap intercepts all network traffic via CDP. Or use `apitap attach` to capture from your already-running Chrome.
-2. **Filter** — Scoring engine separates signal from noise. Analytics, tracking pixels, and framework internals are filtered out. Only real API endpoints survive.
-3. **Generate** — Captured endpoints are grouped by domain, URLs are parameterized (`/users/123` → `/users/:id` with context-aware semantic names), and a JSON skill file is written to `~/.apitap/skills/`.
-4. **Replay** — Read the skill file, substitute parameters, call the API with `fetch()`. Zero dependencies in the replay path.
+ApiTap has three ways to build its API knowledge:
+
+1. **Import** (instant) — Import OpenAPI/Swagger specs from the [APIs.guru](https://apis.guru) directory of 2,500+ public APIs, or from any spec URL/file. Endpoints get a confidence score based on spec quality. No browser needed.
+2. **Capture** (30 seconds) — Launch a browser, visit a site, browse normally. ApiTap intercepts all network traffic via CDP, filters noise, and generates a skill file. Or use `apitap attach` to capture from your already-running Chrome.
+3. **Discover** (automatic) — ApiTap auto-detects frameworks (WordPress, Next.js, Shopify) and probes for OpenAPI specs at common paths. Works without a browser.
+
+All three paths produce the same artifact: a **skill file** — a portable JSON map of an API's endpoints, stored at `~/.apitap/skills/`.
 
 ```
-Capture:  Browser → Playwright/CDP listener → Filter → Skill Generator → skill.json
-Attach:   Running Chrome → CDP attach → Filter → Skill Generator → skill.json
+Import:   OpenAPI spec → Converter → Merge → skill.json (confidence 0.6-0.85)
+Capture:  Browser → CDP listener → Filter → Skill Generator → skill.json (confidence 1.0)
+Attach:   Running Chrome → CDP attach → Filter → skill.json (confidence 0.8-1.0)
 Replay:   Agent → Replay Engine (skill.json) → fetch() → API → JSON response
+                                                ↑ no browser in this path
 ```
+
+### Confidence Model
+
+Every endpoint tracks how it was discovered:
+
+| Source | Confidence | Meaning |
+|--------|-----------|---------|
+| Captured with response body | 1.0 | Full capture — response shape verified |
+| CDP skeleton (real traffic, no body) | 0.8 | Endpoint exists, body was evicted from Chrome buffer |
+| OpenAPI import, high quality | 0.85 | Spec has response examples |
+| OpenAPI import, base | 0.6 | Thin spec, no examples |
+
+Imported endpoints auto-upgrade to confidence 1.0 on first successful replay. The merge is additive — captured data is never overwritten by imports, imports fill gaps that capture missed.
 
 ## Install
 
@@ -63,9 +83,49 @@ That's it. 12 MCP tools, ready to go. Requires Node.js 20+.
 > ```bash
 > npx playwright install chromium
 > ```
-> The `read`, `peek`, and `discover` tools work without it.
+> The `read`, `peek`, `discover`, and `import` tools work without it.
 
 ## Quick Start
+
+### Import APIs instantly
+
+```bash
+# Import from the APIs.guru directory (2,500+ public APIs)
+apitap import --from apis-guru --limit 100
+
+# Import a specific API by name
+apitap import --from apis-guru --search stripe
+
+# Import a single OpenAPI spec from URL
+apitap import https://api.apis.guru/v2/specs/stripe.com/2022-11-15/openapi.json
+
+# Import a local spec file (JSON or YAML)
+apitap import ./my-api-spec.json
+
+# Skip auth-required APIs (open endpoints only)
+apitap import --from apis-guru --limit 500 --no-auth-only
+
+# Preview what would be imported
+apitap import --from apis-guru --search twilio --dry-run
+
+# Update previously imported APIs (skip unchanged)
+apitap import --from apis-guru --update
+```
+
+Import produces a diff showing what changed:
+
+```
+Importing api.stripe.com from OpenAPI 3.0 spec...
+
+  ✓ 12 existing captured endpoints preserved
+  + 34 new endpoints added from OpenAPI spec
+  ~ 8 endpoints enriched with spec metadata
+  · 0 skipped (already imported)
+
+  Skill file: ~/.apitap/skills/api.stripe.com.json (54 endpoints)
+```
+
+Captured endpoints are never overwritten. Import fills gaps and adds metadata (descriptions, response schemas, query param enums) from the spec.
 
 ### Capture API traffic
 
@@ -88,7 +148,8 @@ ApiTap opens a browser window. Browse the site normally — click around, scroll
 ### Attach to a running Chrome
 
 ```bash
-# Enable remote debugging in Chrome: Settings → Remote debugging → toggle on
+# Launch Chrome with remote debugging enabled
+google-chrome --remote-debugging-port=9222
 
 # Attach to your signed-in Chrome — captures all tabs
 apitap attach --port 9222
@@ -99,23 +160,25 @@ apitap attach --port 9222 --domain *.github.com
 # Ctrl+C to stop — generates signed skill files for each captured domain
 ```
 
-No separate browser, no re-login. Captures from your real Chrome sessions with all your cookies and auth tokens.
+No separate browser, no re-login. Captures from your real Chrome sessions with all your cookies and auth tokens. When response bodies are evicted from Chrome's buffer (common on high-traffic pages), skeleton endpoints are written at confidence 0.8 instead of being dropped.
 
-### List and explore captured APIs
+### List and explore APIs
 
 ```bash
 # List all skill files
 apitap list
-  ✓ gamma-api.polymarket.com       3 endpoints   2m ago
-  ✓ www.reddit.com                 2 endpoints   1h ago
+  ✓ api.stripe.com             446 endpoints   5m ago   [imported-signed]
+  ✓ gamma-api.polymarket.com     3 endpoints   2h ago   [signed]
+  ✓ api.github.com             499 endpoints   1h ago   [imported-signed]
 
 # Show endpoints for a domain
-apitap show gamma-api.polymarket.com
-  [green] ✓ GET    /events                        object (3 fields)
-  [green] ✓ GET    /teams                         array (12 fields)
+apitap show api.stripe.com
+  [ ] GET    /v1/account                    object (22 fields)
+  [ ] GET    /v1/charges                    object (4 fields)
+  [ ] GET    /v1/customers/:customer        object (30 fields)
 
 # Search across all skill files
-apitap search polymarket
+apitap search stripe
 ```
 
 ### Replay an endpoint
@@ -141,7 +204,7 @@ ApiTap includes a text-mode browsing pipeline — `peek` and `read` — that let
 | YouTube | `youtube` | ~36 | 99% smaller |
 | Wikipedia | `wikipedia` | ~127 | 97% smaller |
 | Hacker News | `hackernews` | ~200 | 90% smaller |
-| Grokipedia | `grokipedia` | ~150–5000+ | varies by article length |
+| Grokipedia | `grokipedia` | ~150-5000+ | varies by article length |
 | Twitter/X | `twitter` | ~80 | 95% smaller |
 | Any other site | `generic` | varies | ~74% avg |
 
@@ -162,21 +225,35 @@ apitap read https://example.com/blog/post
 
 For MCP agents, `apitap_peek` and `apitap_read` are the fastest way to consume web content — use them before reaching for `apitap_browse` or `apitap_capture`.
 
-## Tested Sites
+## Pre-Loaded APIs
 
-ApiTap has been tested against real-world sites:
+ApiTap can instantly import from the [APIs.guru](https://apis.guru) directory of 2,500+ public API specs. A single command populates your local pattern database:
 
-| Site | Endpoints | Tier | Replay |
-|------|-----------|------|--------|
-| Polymarket | 3 | Green | 200 |
-| Reddit | 2 | Green | 200 |
-| Discord | 4 | Green | 200 |
-| GitHub | 1 | Green | 200 |
-| HN (Algolia) | 1 | Yellow | 200 |
-| dev.to | 2 | Green | 200 |
-| CoinGecko | 6 | Green | 200 |
+```bash
+apitap import --from apis-guru --limit 500
+```
 
-78% overall replay success rate across 9 tested sites (green tier: 100%).
+Some of the APIs available out of the box:
+
+| API | Endpoints | Auth |
+|-----|-----------|------|
+| Stripe | 446 | API Key |
+| GitHub | 499 | OAuth |
+| Jira/Atlassian | 487 | API Key |
+| Twilio | 199+ | API Key |
+| Slack | 175 | OAuth |
+| DigitalOcean | 290 | Bearer |
+| Linode | 350 | Bearer |
+| SendGrid | 334 | API Key |
+| Spotify | 90 | OAuth |
+| Square | 200 | OAuth |
+| Plaid | 198 | API Key |
+| Asana | 167 | Bearer |
+| Twitter | 163 | OAuth |
+| Vimeo | 326 | OAuth |
+| OpenAI | 28 | API Key |
+
+Auth-required APIs import as endpoint maps with response schemas — you can explore what's available and see response shapes before setting up credentials. First successful replay with real auth auto-upgrades the endpoint to full captured status.
 
 ## Why ApiTap?
 
@@ -185,6 +262,8 @@ ApiTap has been tested against real-world sites:
 **Why not just use Playwright/Puppeteer?** Browser automation costs 50-200K tokens per page for an AI agent. ApiTap captures the API once, then your agent calls it directly at 1-5K tokens. No DOM, no selectors, no flaky waits.
 
 **Why not reverse-engineer the API manually?** You could open DevTools and copy headers by hand. ApiTap does it in 30 seconds and gives you a portable file any agent can use.
+
+**Why not just use an OpenAPI spec?** You can! `apitap import` converts OpenAPI/Swagger specs directly into skill files. But many sites don't publish specs — ApiTap captures their APIs from live traffic.
 
 **Isn't this just a MITM proxy?** No. ApiTap is read-only — it uses Chrome DevTools Protocol to observe responses. No certificate setup, no request modification, no code injection.
 
@@ -316,33 +395,23 @@ apitap index discord.com
 
 The index lives at `~/.apitap/index.json` and is automatically read by the `apitap_discover` MCP tool — so your agents can ask "what do you know about Discord's API?" and get a useful answer without triggering a full capture.
 
-Agents see something like:
-
-```
-discord.com — 8 endpoints mapped, Bearer auth, last seen 2h ago
-  GET /api/v10/channels/:id  (hits: 47, JSON, paginated)
-  GET /api/v10/guilds/:id/members  (hits: 12, JSON)
-  POST /api/v10/channels/:id/messages  (hits: 8, JSON)
-  ...
-```
-
 ### Promoting to a Full Skill File
 
 The index is a map — it knows what endpoints exist but not their response shapes. To get a full replayable skill file, promote a domain:
 
-**From the popup:** Click the ApiTap icon → find the domain → **Generate skill file**
+**From the popup:** Click the ApiTap icon -> find the domain -> **Generate skill file**
 
 **Via agent:** Your agent can request a capture automatically. You'll get a notification to approve, the extension briefly attaches CDP, captures response shapes, then detaches. The full skill file saves to `~/.apitap/skills/`.
 
-**Auto-learn (opt-in):** In the extension popup → Settings → enable **Auto-learn**. The extension will automatically promote domains you visit frequently. Off by default.
+**Auto-learn (opt-in):** In the extension popup -> Settings -> enable **Auto-learn**. The extension will automatically promote domains you visit frequently. Off by default.
 
 ### Manual Capture
 
 For one-off captures without the passive index:
 
-1. Click the ApiTap icon → **Start Capture**
+1. Click the ApiTap icon -> **Start Capture**
 2. Browse the site — extension records API traffic
-3. Click **Stop** → skill file auto-saves to `~/.apitap/skills/`
+3. Click **Stop** -> skill file auto-saves to `~/.apitap/skills/`
 
 The popup shows CLI connection status and live capture stats. Auth tokens are encrypted with AES-256-GCM in session storage and automatically persisted to `~/.apitap/auth.enc` via the native host, with `[stored]` placeholders in the exported skill files.
 
@@ -377,7 +446,7 @@ Skill files are JSON documents stored at `~/.apitap/skills/<domain>.json`. They 
 
 ```json
 {
-  "version": 2,
+  "version": "1.2",
   "domain": "gamma-api.polymarket.com",
   "baseUrl": "https://gamma-api.polymarket.com",
   "endpoints": [
@@ -387,7 +456,9 @@ Skill files are JSON documents stored at `~/.apitap/skills/<domain>.json`. They 
       "path": "/events",
       "queryParams": { "limit": { "type": "string", "example": "10" } },
       "headers": {},
-      "responseShape": { "type": "object", "fields": ["id", "title", "slug"] }
+      "responseShape": { "type": "object", "fields": ["id", "title", "slug"] },
+      "confidence": 1.0,
+      "endpointProvenance": "captured"
     }
   ]
 }
@@ -401,10 +472,14 @@ Skill files are portable and shareable. Auth credentials are stored separately i
 # Import a skill file from someone else
 apitap import ./reddit-skills.json
 
-# Import validates: signature check → SSRF scan → confirmation
+# Import an OpenAPI spec (JSON or YAML)
+apitap import ./stripe-openapi.json
+apitap import https://api.apis.guru/v2/specs/stripe.com/2022-11-15/openapi.json
+
+# Import validates: signature check / SSRF scan / format detection / confirmation
 ```
 
-Imported files are re-signed with your local key and marked with `imported` provenance.
+Imported files are re-signed with your local key. OpenAPI specs are automatically detected and converted using the same merge logic — captured endpoints are preserved, imports fill gaps.
 
 ## Security
 
@@ -418,7 +493,11 @@ ApiTap handles untrusted skill files from the internet and replays HTTP requests
 - **Header injection protection** — Allowlist prevents skill files from injecting dangerous HTTP headers (`Host`, `X-Forwarded-For`, `Cookie`, `Authorization`)
 - **Redirect validation** — Manual redirect handling with SSRF re-check prevents redirect-to-internal-IP attacks
 - **DNS rebinding prevention** — Resolved IPs are pinned to prevent TOCTOU attacks where DNS returns different IPs on second lookup
-- **Skill signing** — HMAC-SHA256 signatures detect tampering; three-state provenance tracking (self/imported/unsigned)
+- **Skill signing** — HMAC-SHA256 signatures detect tampering; four-state provenance tracking (self/imported/imported-signed/unsigned)
+- **Atomic writes** — Skill files are written to a temp file then renamed, preventing corruption from mid-write crashes
+- **Safe JSON parsing** — Server responses parsed with `safeParseJson()` that returns raw text on malformed JSON instead of crashing
+- **Spec fetch hardening** — OpenAPI spec imports are SSRF-validated, size-limited (10MB), timeout-limited (30s), and reject redirects
+- **External $ref rejection** — Only local document `#/` references are resolved; `file://` and remote `$ref` pointers are blocked
 - **No phone-home** — Everything runs locally. No external services, no telemetry
 - **Read-only capture** — Playwright intercepts responses only. No request modification or code injection
 
@@ -432,14 +511,19 @@ Since skill files can come from anywhere — shared by colleagues, downloaded fr
 
 ```
 Skill file imported
-  → validateUrl(): block private IPs, internal hostnames, non-HTTP schemes
-  → validateSkillFileUrls(): scan baseUrl + all endpoint example URLs
+  -> validateUrl(): block private IPs, internal hostnames, non-HTTP schemes
+  -> validateSkillFileUrls(): scan baseUrl + all endpoint example URLs
+
+OpenAPI spec imported
+  -> resolveAndValidateUrl(): SSRF check on spec URL before fetching
+  -> resolveAndValidateUrl(): SSRF check on extracted API domain
+  -> validateSkillFile(): validate merged skill file before writing
 
 Endpoint replayed
-  → resolveAndValidateUrl(): DNS lookup + verify resolved IP isn't private
-  → IP pinning: fetch uses resolved IP directly (prevents DNS rebinding)
-  → Header filtering: strip dangerous headers from skill file
-  → Redirect check: if server redirects, validate new target before following
+  -> resolveAndValidateUrl(): DNS lookup + verify resolved IP isn't private
+  -> IP pinning: fetch uses resolved IP directly (prevents DNS rebinding)
+  -> Header filtering: strip dangerous headers from skill file
+  -> Redirect check: if server redirects, validate new target before following
 ```
 
 **Blocked ranges:** `127.0.0.0/8`, `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `169.254.0.0/16` (cloud metadata), `100.64.0.0/10` (CGNAT/Tailscale), `198.18.0.0/15` (benchmarking), `240.0.0.0/4` (reserved), `0.0.0.0`, IPv6 equivalents (`::1`, `fe80::/10`, `fc00::/7`, `::ffff:` mapped addresses), `localhost`, `.local`, `.internal`, `file://`, `javascript:` schemes. Alternative IP representations (decimal integer, octal, hex) are normalized before checking.
@@ -460,11 +544,12 @@ All commands support `--json` for machine-readable output.
 | `apitap discover <url>` | Detect APIs without launching a browser |
 | `apitap capture <url>` | Capture API traffic from a website |
 | `apitap attach --port <port>` | Attach to running Chrome and capture API traffic |
+| `apitap import <url-or-file>` | Import OpenAPI spec or skill file |
+| `apitap import --from apis-guru` | Bulk import from APIs.guru directory |
 | `apitap list` | List available skill files |
 | `apitap show <domain>` | Show endpoints for a domain |
 | `apitap search <query>` | Search skill files by domain or endpoint |
 | `apitap replay <domain> <id> [key=val...]` | Replay an API endpoint |
-| `apitap import <file>` | Import a skill file with safety validation |
 | `apitap refresh <domain>` | Refresh auth tokens via browser |
 | `apitap auth [domain]` | View or manage stored auth |
 | `apitap serve <domain>` | Serve a skill file as an MCP server |
@@ -474,6 +559,18 @@ All commands support `--json` for machine-readable output.
 | `apitap audit` | Audit stored skill files and credentials |
 | `apitap forget <domain>` | Remove skill file and credentials for a domain |
 | `apitap --version` | Print version |
+
+### Import flags
+
+| Flag | Description |
+|------|-------------|
+| `--from apis-guru` | Bulk import from APIs.guru directory |
+| `--search <query>` | Filter APIs.guru by provider or title |
+| `--limit <N>` | Max APIs to import (default: 100) |
+| `--no-auth-only` | Skip APIs requiring authentication |
+| `--dry-run` | Show what would be imported without writing |
+| `--update` | Skip APIs unchanged since last import |
+| `--force` | Always reimport regardless of history |
 
 ### Capture flags
 
@@ -495,7 +592,7 @@ All commands support `--json` for machine-readable output.
 git clone https://github.com/n1byn1kt/apitap.git
 cd apitap
 npm install
-npm test          # ~1195 tests, Node built-in test runner
+npm test          # ~1299 tests, Node built-in test runner
 npm run typecheck # Type checking
 npm run build     # Compile to dist/
 npx tsx src/cli.ts capture <url>  # Run from source
@@ -503,7 +600,7 @@ npx tsx src/cli.ts capture <url>  # Run from source
 
 ## Contact
 
-Questions, feedback, or issues? → **[hello@apitap.io](mailto:hello@apitap.io)**
+Questions, feedback, or issues? -> **[hello@apitap.io](mailto:hello@apitap.io)**
 
 ## License
 

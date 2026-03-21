@@ -564,6 +564,52 @@ export class SkillGenerator {
     return endpoint;
   }
 
+  /** Add a skeleton endpoint (request data only, no response body). Confidence 0.8. */
+  addSkeleton(request: {
+    url: string;
+    method: string;
+    headers: Record<string, string>;
+    postData?: string;
+  }): SkillEndpoint | null {
+    const prep = this._prepareEndpoint(request);
+    if (!prep) return null;
+
+    const { key, paramPath, queryParams, safeHeaders, exampleUrl,
+            endpointId, entropyDetected, isSkeletonReplacement } = prep;
+
+    // If a skeleton already occupies this key, don't overwrite with another skeleton
+    if (isSkeletonReplacement) return null;
+
+    const endpoint: SkillEndpoint = {
+      id: endpointId,
+      method: request.method,
+      path: paramPath,
+      queryParams,
+      headers: safeHeaders,
+      responseShape: { type: 'unknown' },
+      examples: {
+        request: {
+          url: exampleUrl,
+          headers: stripAuth(filterHeaders(request.headers)),
+        },
+        responsePreview: null,
+      },
+      confidence: 0.8,
+      endpointProvenance: 'skeleton',
+      responseBytes: 0,
+    };
+
+    // Also strip entropy-detected tokens from example headers
+    if (entropyDetected.size > 0) {
+      endpoint.examples.request.headers = stripAuth(
+        filterHeaders(request.headers), entropyDetected
+      );
+    }
+
+    this.endpoints.set(key, endpoint);
+    return endpoint;
+  }
+
   /** Record a filtered-out request (for metadata tracking). */
   recordFiltered(): void {
     this.filteredCount++;

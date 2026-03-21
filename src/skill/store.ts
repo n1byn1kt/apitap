@@ -114,6 +114,24 @@ export async function readSkillFile(
   }
 }
 
+/**
+ * Fault-tolerant wrapper around readSkillFile — returns null instead of
+ * throwing on validation errors, bad signatures, etc.  ENOENT (missing
+ * file) also returns null.  Use this when iterating many files where one
+ * bad file should not abort the whole operation.
+ */
+export async function safeReadSkillFile(
+  domain: string,
+  skillsDir: string = DEFAULT_SKILLS_DIR,
+  options?: Parameters<typeof readSkillFile>[2],
+): Promise<SkillFile | null> {
+  try {
+    return await readSkillFile(domain, skillsDir, options);
+  } catch {
+    return null;
+  }
+}
+
 export async function listSkillFiles(
   skillsDir: string = DEFAULT_SKILLS_DIR,
 ): Promise<SkillSummary[]> {
@@ -131,19 +149,15 @@ export async function listSkillFiles(
     if (!file.endsWith('.json')) continue;
     const domain = file.replace(/\.json$/, '');
     if (!DOMAIN_RE.test(domain)) continue; // skip non-conforming filenames
-    try {
-      const skill = await readSkillFile(domain, skillsDir, { trustUnsigned: true });
-      if (skill) {
-        summaries.push({
-          domain: skill.domain,
-          skillFile: join(skillsDir, file),
-          endpointCount: skill.endpoints.length,
-          capturedAt: skill.capturedAt,
-          provenance: skill.provenance ?? 'unsigned',
-        });
-      }
-    } catch {
-      // Skip files that fail to load (bad signature, validation error, etc.)
+    const skill = await safeReadSkillFile(domain, skillsDir, { trustUnsigned: true });
+    if (skill) {
+      summaries.push({
+        domain: skill.domain,
+        skillFile: join(skillsDir, file),
+        endpointCount: skill.endpoints.length,
+        capturedAt: skill.capturedAt,
+        provenance: skill.provenance ?? 'unsigned',
+      });
     }
   }
 

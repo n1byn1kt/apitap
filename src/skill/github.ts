@@ -312,6 +312,123 @@ export async function searchOrgSpecs(
   return allItems;
 }
 
+// ─── Topic Search — Repo Discovery + Spec Probing ─────────────────────────────
+
+export const CANONICAL_TOPICS = ['openapi-specification', 'openapi', 'openapi3', 'swagger-api'];
+
+const PROBE_DIRS = ['', 'api', 'spec', 'docs'];
+
+async function probeForSpecs(
+  owner: string,
+  repo: string,
+  token: string | null,
+): Promise<Array<{ path: string; htmlUrl: string }>> {
+  const found: Array<{ path: string; htmlUrl: string }> = [];
+
+  for (const dir of PROBE_DIRS) {
+    const contentsPath = dir
+      ? `/repos/${owner}/${repo}/contents/${dir}`
+      : `/repos/${owner}/${repo}/contents`;
+
+    try {
+      const { data } = await githubFetch(contentsPath, token);
+      if (!Array.isArray(data)) continue;
+
+      for (const entry of data) {
+        if (SPEC_FILENAMES.includes(entry.name)) {
+          found.push({
+            path: entry.path,
+            htmlUrl: entry.html_url,
+          });
+        }
+      }
+    } catch {
+      // Directory doesn't exist or 404 — continue to next
+      continue;
+    }
+
+    // If we found specs in this dir, don't probe deeper
+    if (found.length > 0) break;
+  }
+
+  return found;
+}
+
+export async function searchTopicSpecs(
+  topics: string[],
+  token: string | null,
+  options: { minStars: number; query?: string },
+): Promise<GitHubSpecResult[]> {
+  // Fan out topic queries in parallel — repository search has more
+  // generous secondary rate limits than code search.
+  const responses = await Promise.all(
+    topics.map(topic =>
+      githubFetch(
+        `/search/repositories?q=${encodeURIComponent(`topic:${topic}`)}&sort=stars&order=desc&per_page=100`,
+        token,
+      )
+    ),
+  );
+
+  // Dedup by full_name
+  const seen = new Set<string>();
+  const repos: Array<{ owner: string; repo: string; fullName: string; stars: number; isFork: boolean; isArchived: boolean; pushedAt: string; description: string; defaultBranch: string }> = [];
+
+  for (const { data } of responses) {
+    for (const item of data.items ?? []) {
+      if (seen.has(item.full_name)) continue;
+      seen.add(item.full_name);
+
+      if (item.stargazers_count < options.minStars) continue;
+
+      if (options.query) {
+        const q = options.query.toLowerCase();
+        const name = (item.name ?? '').toLowerCase();
+        const desc = (item.description ?? '').toLowerCase();
+        if (!name.includes(q) && !desc.includes(q)) continue;
+      }
+
+      repos.push({
+        owner: item.owner?.login,
+        repo: item.name,
+        fullName: item.full_name,
+        stars: item.stargazers_count ?? 0,
+        isFork: item.fork ?? false,
+        isArchived: item.archived ?? false,
+        pushedAt: item.pushed_at ?? '',
+        description: item.description ?? '',
+        defaultBranch: item.default_branch ?? 'main',
+      });
+    }
+  }
+
+  // Probe each repo for spec files
+  const results: GitHubSpecResult[] = [];
+  for (const repo of repos) {
+    const specs = await probeForSpecs(repo.owner, repo.repo, token);
+    for (const spec of specs) {
+      results.push({
+        owner: repo.owner,
+        repo: repo.repo,
+        repoFullName: repo.fullName,
+        filePath: spec.path,
+        htmlUrl: spec.htmlUrl,
+        specUrl: `https://raw.githubusercontent.com/${repo.fullName}/${repo.defaultBranch}/${spec.path}`,
+        stars: repo.stars,
+        isFork: repo.isFork,
+        isArchived: repo.isArchived,
+        pushedAt: repo.pushedAt,
+        description: repo.description,
+      });
+    }
+  }
+
+  // Sort by stars desc
+  results.sort((a, b) => b.stars - a.stars);
+
+  return results;
+}
+
 // ─── Spec content predicates ──────────────────────────────────────────────────
 
 /**

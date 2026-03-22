@@ -897,3 +897,275 @@ describe('searchOrgSpecs', () => {
     assert.ok(Array.isArray(results));
   });
 });
+
+// ─── searchTopicSpecs ─────────────────────────────────────────────────────────
+
+/** Build a minimal GitHub Repository Search API item. */
+function makeRepoSearchItem(
+  overrides: {
+    fullName?: string;
+    stars?: number;
+    fork?: boolean;
+    archived?: boolean;
+    pushedAt?: string;
+    defaultBranch?: string;
+    description?: string;
+  } = {},
+) {
+  const fullName = overrides.fullName ?? 'acme/api-spec';
+  const [ownerLogin, repoName] = fullName.split('/');
+  return {
+    name: repoName,
+    full_name: fullName,
+    owner: { login: ownerLogin },
+    stargazers_count: overrides.stars ?? 100,
+    fork: overrides.fork ?? false,
+    archived: overrides.archived ?? false,
+    pushed_at: overrides.pushedAt ?? '2025-01-01T00:00:00Z',
+    default_branch: overrides.defaultBranch ?? 'main',
+    description: overrides.description ?? 'Test repo',
+  };
+}
+
+/** Build a mock Response for the repo search API. */
+function makeRepoSearchResponse(items: unknown[]): Response {
+  return new Response(
+    JSON.stringify({ total_count: items.length, incomplete_results: false, items }),
+    {
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+        'x-ratelimit-remaining': '25',
+        'x-ratelimit-limit': '30',
+        'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 60),
+      },
+    },
+  );
+}
+
+/** Build a mock Response for the contents API (directory listing). */
+function makeContentsResponse(entries: Array<{ name: string; path: string; html_url: string }>): Response {
+  return new Response(
+    JSON.stringify(entries),
+    {
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+        'x-ratelimit-remaining': '25',
+        'x-ratelimit-limit': '30',
+        'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 60),
+      },
+    },
+  );
+}
+
+/** Build a 404 Response for contents API (directory doesn't exist). */
+function make404Response(): Response {
+  return new Response('{"message":"Not Found"}', {
+    status: 404,
+    statusText: 'Not Found',
+    headers: {
+      'content-type': 'application/json',
+      'x-ratelimit-remaining': '25',
+      'x-ratelimit-limit': '30',
+      'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 60),
+    },
+  });
+}
+
+describe('searchTopicSpecs', () => {
+  let origFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    origFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = origFetch;
+  });
+
+  it('searches all 4 canonical topics when given all', async () => {
+    const capturedUrls: string[] = [];
+
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      capturedUrls.push(url);
+      if (url.includes('/search/repositories')) {
+        return makeRepoSearchResponse([]);
+      }
+      return makeContentsResponse([]);
+    };
+
+    await github.searchTopicSpecs(github.CANONICAL_TOPICS, 'tok', { minStars: 0 });
+
+    const searchUrls = capturedUrls.filter(u => u.includes('/search/repositories'));
+    assert.strictEqual(searchUrls.length, 4, `Expected 4 topic search calls, got ${searchUrls.length}`);
+    assert.ok(searchUrls.some(u => u.includes('openapi-specification')), 'Missing openapi-specification topic');
+    assert.ok(searchUrls.some(u => u.includes('topic%3Aopenapi')), 'Missing openapi topic');
+    assert.ok(searchUrls.some(u => u.includes('openapi3')), 'Missing openapi3 topic');
+    assert.ok(searchUrls.some(u => u.includes('swagger-api')), 'Missing swagger-api topic');
+  });
+
+  it('searches single topic when given one', async () => {
+    const capturedUrls: string[] = [];
+
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      capturedUrls.push(url);
+      if (url.includes('/search/repositories')) {
+        return makeRepoSearchResponse([]);
+      }
+      return makeContentsResponse([]);
+    };
+
+    await github.searchTopicSpecs(['openapi'], 'tok', { minStars: 0 });
+
+    const searchUrls = capturedUrls.filter(u => u.includes('/search/repositories'));
+    assert.strictEqual(searchUrls.length, 1, `Expected 1 search call, got ${searchUrls.length}`);
+    assert.ok(searchUrls[0].includes('topic%3Aopenapi'), `URL should contain topic:openapi, got: ${searchUrls[0]}`);
+  });
+
+  it('deduplicates repos by fullName across topics', async () => {
+    const sharedRepo = makeRepoSearchItem({ fullName: 'acme/shared-repo', stars: 200 });
+    let searchCallCount = 0;
+    let contentsCallCount = 0;
+
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url.includes('/search/repositories')) {
+        searchCallCount++;
+        // Both topics return the same repo
+        return makeRepoSearchResponse([sharedRepo]);
+      }
+      // Contents calls — return a spec at root
+      contentsCallCount++;
+      if (!url.includes('/contents/')) {
+        // Root contents
+        return makeContentsResponse([
+          { name: 'openapi.json', path: 'openapi.json', html_url: 'https://github.com/acme/shared-repo/blob/main/openapi.json' },
+        ]);
+      }
+      return make404Response();
+    };
+
+    const results = await github.searchTopicSpecs(['openapi', 'openapi3'], 'tok', { minStars: 0 });
+
+    // Should only probe once despite appearing in 2 topic results
+    assert.strictEqual(results.length, 1, `Expected 1 result (deduped), got ${results.length}`);
+    assert.strictEqual(results[0].repoFullName, 'acme/shared-repo');
+    assert.strictEqual(searchCallCount, 2, 'Should have made 2 search calls (one per topic)');
+  });
+
+  it('filters by minStars', async () => {
+    const lowStarRepo = makeRepoSearchItem({ fullName: 'acme/low-stars', stars: 3 });
+    const highStarRepo = makeRepoSearchItem({ fullName: 'acme/high-stars', stars: 500 });
+
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url.includes('/search/repositories')) {
+        return makeRepoSearchResponse([lowStarRepo, highStarRepo]);
+      }
+      // Contents for high-stars repo only
+      if (url.includes('high-stars') && !url.includes('/contents/')) {
+        return makeContentsResponse([
+          { name: 'openapi.json', path: 'openapi.json', html_url: 'https://github.com/acme/high-stars/blob/main/openapi.json' },
+        ]);
+      }
+      return make404Response();
+    };
+
+    const results = await github.searchTopicSpecs(['openapi'], 'tok', { minStars: 10 });
+
+    assert.ok(results.every(r => r.stars >= 10), 'All results should meet minStars threshold');
+    assert.ok(results.every(r => r.repoFullName !== 'acme/low-stars'), 'Low-star repo should be excluded');
+  });
+
+  it('applies client-side query filter on name and description', async () => {
+    const matchByName = makeRepoSearchItem({ fullName: 'acme/stripe-api', description: 'General API' });
+    const matchByDesc = makeRepoSearchItem({ fullName: 'acme/payments', description: 'stripe integration' });
+    const noMatch = makeRepoSearchItem({ fullName: 'acme/unrelated', description: 'Something else entirely' });
+
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url.includes('/search/repositories')) {
+        return makeRepoSearchResponse([matchByName, matchByDesc, noMatch]);
+      }
+      // Return a spec file for any repo that makes it past the filter
+      if (!url.includes('/contents/')) {
+        const repoMatch = url.match(/\/repos\/[^/]+\/([^/]+)\/contents/);
+        const repoName = repoMatch?.[1] ?? '';
+        return makeContentsResponse([
+          { name: 'openapi.json', path: 'openapi.json', html_url: `https://github.com/acme/${repoName}/blob/main/openapi.json` },
+        ]);
+      }
+      return make404Response();
+    };
+
+    const results = await github.searchTopicSpecs(['openapi'], 'tok', { minStars: 0, query: 'stripe' });
+
+    const repoNames = results.map(r => r.repoFullName);
+    assert.ok(repoNames.includes('acme/stripe-api'), 'Should match by repo name');
+    assert.ok(repoNames.includes('acme/payments'), 'Should match by description');
+    assert.ok(!repoNames.includes('acme/unrelated'), 'Should exclude non-matching repo');
+  });
+
+  it('probes repos for spec files at root and common subdirs', async () => {
+    const repo = makeRepoSearchItem({ fullName: 'acme/spec-in-docs', stars: 100 });
+    const probedPaths: string[] = [];
+
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url.includes('/search/repositories')) {
+        return makeRepoSearchResponse([repo]);
+      }
+      // Track contents API calls
+      probedPaths.push(url);
+      if (url.endsWith('/contents')) {
+        // Root — no spec files
+        return makeContentsResponse([{ name: 'README.md', path: 'README.md', html_url: 'https://github.com/acme/spec-in-docs/blob/main/README.md' }]);
+      }
+      if (url.endsWith('/contents/api')) {
+        return makeContentsResponse([]);
+      }
+      if (url.endsWith('/contents/spec')) {
+        return makeContentsResponse([]);
+      }
+      if (url.endsWith('/contents/docs')) {
+        // Spec found in docs/
+        return makeContentsResponse([
+          { name: 'openapi.yaml', path: 'docs/openapi.yaml', html_url: 'https://github.com/acme/spec-in-docs/blob/main/docs/openapi.yaml' },
+        ]);
+      }
+      return make404Response();
+    };
+
+    const results = await github.searchTopicSpecs(['openapi'], 'tok', { minStars: 0 });
+
+    assert.strictEqual(results.length, 1, `Expected 1 result, got ${results.length}`);
+    assert.strictEqual(results[0].filePath, 'docs/openapi.yaml');
+    // Should have probed root, api, spec, docs (stopped after finding in docs)
+    assert.ok(probedPaths.some(p => p.endsWith('/contents')), 'Should probe root');
+    assert.ok(probedPaths.some(p => p.endsWith('/contents/api')), 'Should probe api/');
+    assert.ok(probedPaths.some(p => p.endsWith('/contents/spec')), 'Should probe spec/');
+    assert.ok(probedPaths.some(p => p.endsWith('/contents/docs')), 'Should probe docs/');
+  });
+
+  it('skips repos where no spec file is found', async () => {
+    const repo = makeRepoSearchItem({ fullName: 'acme/no-specs', stars: 100 });
+
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url.includes('/search/repositories')) {
+        return makeRepoSearchResponse([repo]);
+      }
+      // Return non-spec files everywhere
+      return makeContentsResponse([
+        { name: 'README.md', path: 'README.md', html_url: 'https://github.com/acme/no-specs/blob/main/README.md' },
+      ]);
+    };
+
+    const results = await github.searchTopicSpecs(['openapi'], 'tok', { minStars: 0 });
+
+    assert.strictEqual(results.length, 0, `Expected 0 results, got ${results.length}`);
+  });
+});

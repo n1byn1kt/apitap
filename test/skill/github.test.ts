@@ -726,46 +726,81 @@ describe('searchOrgSpecs', () => {
     globalThis.fetch = origFetch;
   });
 
+  // Helper: URL-aware fetch mock that returns empty org repos for the heuristic phase
+  function makeOrgAwareFetch(codeSearchResponses: Response[]) {
+    let codeSearchIndex = 0;
+    return async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      // Code search queries
+      if (url.includes('/search/code')) {
+        return codeSearchResponses[codeSearchIndex++] ?? makeCodeSearchResponse([]);
+      }
+      // Org repos listing (heuristic phase) — return empty
+      if (url.includes('/orgs/') && url.includes('/repos')) {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { 'content-type': 'application/json', 'x-ratelimit-remaining': '100', 'x-ratelimit-limit': '5000', 'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 3600) },
+        });
+      }
+      // Contents probe — return empty array
+      if (url.includes('/contents')) {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { 'content-type': 'application/json', 'x-ratelimit-remaining': '100', 'x-ratelimit-limit': '5000', 'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 3600) },
+        });
+      }
+      return makeCodeSearchResponse([]);
+    };
+  }
+
   it('queries 4 filename patterns and deduplicates by htmlUrl', async () => {
     const capturedUrls: string[] = [];
 
     // Return one item per query, but make the openapi.yaml item share an htmlUrl
     // with the openapi.json item to verify dedup.
     const sharedHtmlUrl = 'https://github.com/acme/api-spec/blob/main/openapi.json';
-    const callResponses = [
-      // openapi.json → 1 item
+    const codeSearchResponses = [
       makeCodeSearchResponse([
         makeCodeSearchItem({ htmlUrl: sharedHtmlUrl, path: 'openapi.json' }),
       ]),
-      // openapi.yaml → 1 item with the SAME htmlUrl (simulate duplicate)
       makeCodeSearchResponse([
         makeCodeSearchItem({ htmlUrl: sharedHtmlUrl, path: 'openapi.json' }),
       ]),
-      // swagger.json → 1 fresh item
       makeCodeSearchResponse([
         makeCodeSearchItem({
           htmlUrl: 'https://github.com/acme/api-spec/blob/main/swagger.json',
           path: 'swagger.json',
         }),
       ]),
-      // swagger.yaml → empty
       makeCodeSearchResponse([]),
     ];
-    let callIndex = 0;
+    let codeSearchIndex = 0;
 
     globalThis.fetch = async (input: RequestInfo | URL) => {
-      capturedUrls.push(input.toString());
-      return callResponses[callIndex++];
+      const url = input.toString();
+      capturedUrls.push(url);
+      if (url.includes('/search/code')) {
+        return codeSearchResponses[codeSearchIndex++] ?? makeCodeSearchResponse([]);
+      }
+      // Org repos listing — return empty (no heuristic matches)
+      if (url.includes('/orgs/') && url.includes('/repos')) {
+        return new Response(JSON.stringify([]), {
+          status: 200,
+          headers: { 'content-type': 'application/json', 'x-ratelimit-remaining': '100', 'x-ratelimit-limit': '5000', 'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 3600) },
+        });
+      }
+      return makeCodeSearchResponse([]);
     };
 
     const results = await github.searchOrgSpecs('acme', 'tok');
 
-    // 4 queries should have been made
-    assert.strictEqual(capturedUrls.length, 4);
-    assert.ok(capturedUrls[0].includes('filename%3Aopenapi.json'), `q0: ${capturedUrls[0]}`);
-    assert.ok(capturedUrls[1].includes('filename%3Aopenapi.yaml'), `q1: ${capturedUrls[1]}`);
-    assert.ok(capturedUrls[2].includes('filename%3Aswagger.json'), `q2: ${capturedUrls[2]}`);
-    assert.ok(capturedUrls[3].includes('filename%3Aswagger.yaml'), `q3: ${capturedUrls[3]}`);
+    // 4 code search queries should have been made
+    const codeSearchUrls = capturedUrls.filter(u => u.includes('/search/code'));
+    assert.strictEqual(codeSearchUrls.length, 4);
+    assert.ok(codeSearchUrls[0].includes('filename%3Aopenapi.json'), `q0: ${codeSearchUrls[0]}`);
+    assert.ok(codeSearchUrls[1].includes('filename%3Aopenapi.yaml'), `q1: ${codeSearchUrls[1]}`);
+    assert.ok(codeSearchUrls[2].includes('filename%3Aswagger.json'), `q2: ${codeSearchUrls[2]}`);
+    assert.ok(codeSearchUrls[3].includes('filename%3Aswagger.yaml'), `q3: ${codeSearchUrls[3]}`);
 
     // Dedup: 2 items with sharedHtmlUrl → 1, plus the swagger.json → total 2
     assert.strictEqual(results.length, 2);
@@ -774,8 +809,6 @@ describe('searchOrgSpecs', () => {
   });
 
   it('ranks by stars descending then path depth ascending', async () => {
-    // Returns items in a shuffled order: low-stars-shallow, high-stars-deep,
-    // high-stars-shallow, low-stars-deep — expect sorted: high-stars-shallow first.
     const items = [
       makeCodeSearchItem({
         htmlUrl: 'https://github.com/acme/low-stars-shallow/blob/main/openapi.json',
@@ -802,11 +835,7 @@ describe('searchOrgSpecs', () => {
         stars: 10,
       }),
     ];
-    let callIndex = 0;
-    globalThis.fetch = async () => {
-      // Return all items on the first call, empty for remaining 3
-      return callIndex++ === 0 ? makeCodeSearchResponse(items) : makeCodeSearchResponse([]);
-    };
+    globalThis.fetch = makeOrgAwareFetch([makeCodeSearchResponse(items)]);
 
     const results = await github.searchOrgSpecs('acme', 'tok');
 
@@ -839,9 +868,7 @@ describe('searchOrgSpecs', () => {
       ownerLogin: 'cloudflare',
     });
 
-    let callIndex = 0;
-    globalThis.fetch = async () =>
-      callIndex++ === 0 ? makeCodeSearchResponse([item]) : makeCodeSearchResponse([]);
+    globalThis.fetch = makeOrgAwareFetch([makeCodeSearchResponse([item])]);
 
     const results = await github.searchOrgSpecs('cloudflare', 'tok');
 
@@ -889,12 +916,123 @@ describe('searchOrgSpecs', () => {
   });
 
   it('returns empty array when no specs found', async () => {
-    globalThis.fetch = async () => makeCodeSearchResponse([]);
+    globalThis.fetch = makeOrgAwareFetch([]);
 
     const results = await github.searchOrgSpecs('empty-org', 'tok');
 
     assert.strictEqual(results.length, 0);
     assert.ok(Array.isArray(results));
+  });
+
+  it('finds specs via name-heuristic when code search returns nothing', async () => {
+    // Code search returns nothing, but org has a repo named "api-schemas"
+    // with openapi.json at root — name heuristic should find it.
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      const url = input.toString();
+
+      // Code search — return empty for all 4 patterns
+      if (url.includes('/search/code')) {
+        return makeCodeSearchResponse([]);
+      }
+
+      // Org repos listing — return one repo matching the name heuristic
+      if (url.includes('/orgs/acme/repos')) {
+        return new Response(JSON.stringify([
+          {
+            name: 'api-schemas',
+            full_name: 'acme/api-schemas',
+            owner: { login: 'acme' },
+            stargazers_count: 160,
+            fork: false,
+            archived: false,
+            pushed_at: '2026-03-01T00:00:00Z',
+            default_branch: 'main',
+            description: 'Public API schemas',
+          },
+        ]), {
+          status: 200,
+          headers: { 'content-type': 'application/json', 'x-ratelimit-remaining': '100', 'x-ratelimit-limit': '5000', 'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 3600) },
+        });
+      }
+
+      // Contents probe for api-schemas root — has openapi.json
+      if (url.includes('/repos/acme/api-schemas/contents') && !url.includes('/contents/')) {
+        return new Response(JSON.stringify([
+          { name: 'openapi.json', path: 'openapi.json', html_url: 'https://github.com/acme/api-schemas/blob/main/openapi.json' },
+          { name: 'README.md', path: 'README.md', html_url: 'https://github.com/acme/api-schemas/blob/main/README.md' },
+        ]), {
+          status: 200,
+          headers: { 'content-type': 'application/json', 'x-ratelimit-remaining': '100', 'x-ratelimit-limit': '5000', 'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 3600) },
+        });
+      }
+
+      return makeCodeSearchResponse([]);
+    };
+
+    const results = await github.searchOrgSpecs('acme', 'tok');
+
+    assert.strictEqual(results.length, 1);
+    assert.strictEqual(results[0].repoFullName, 'acme/api-schemas');
+    assert.strictEqual(results[0].filePath, 'openapi.json');
+    assert.strictEqual(results[0].stars, 160);
+  });
+
+  it('deduplicates between code search and name-heuristic results', async () => {
+    // Code search finds a spec, name heuristic finds the same repo — should dedup
+    const htmlUrl = 'https://github.com/acme/openapi/blob/main/openapi.json';
+
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      const url = input.toString();
+
+      if (url.includes('/search/code')) {
+        return makeCodeSearchResponse([
+          makeCodeSearchItem({ htmlUrl, path: 'openapi.json', repoFullName: 'acme/openapi' }),
+        ]);
+      }
+
+      if (url.includes('/orgs/acme/repos')) {
+        return new Response(JSON.stringify([
+          { name: 'openapi', full_name: 'acme/openapi', owner: { login: 'acme' }, stargazers_count: 50, fork: false, archived: false, pushed_at: '2026-01-01T00:00:00Z', default_branch: 'main', description: '' },
+        ]), {
+          status: 200,
+          headers: { 'content-type': 'application/json', 'x-ratelimit-remaining': '100', 'x-ratelimit-limit': '5000', 'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 3600) },
+        });
+      }
+
+      if (url.includes('/repos/acme/openapi/contents')) {
+        return new Response(JSON.stringify([
+          { name: 'openapi.json', path: 'openapi.json', html_url: htmlUrl },
+        ]), {
+          status: 200,
+          headers: { 'content-type': 'application/json', 'x-ratelimit-remaining': '100', 'x-ratelimit-limit': '5000', 'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 3600) },
+        });
+      }
+
+      return makeCodeSearchResponse([]);
+    };
+
+    const results = await github.searchOrgSpecs('acme', 'tok');
+    assert.strictEqual(results.length, 1, 'Should dedup code search + heuristic results');
+  });
+
+  it('skips repos whose names do not match heuristic patterns', async () => {
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url.includes('/search/code')) return makeCodeSearchResponse([]);
+      if (url.includes('/orgs/acme/repos')) {
+        return new Response(JSON.stringify([
+          { name: 'website', full_name: 'acme/website', owner: { login: 'acme' }, stargazers_count: 5000, fork: false, archived: false, pushed_at: '2026-01-01T00:00:00Z', default_branch: 'main', description: '' },
+          { name: 'docs', full_name: 'acme/docs', owner: { login: 'acme' }, stargazers_count: 3000, fork: false, archived: false, pushed_at: '2026-01-01T00:00:00Z', default_branch: 'main', description: '' },
+        ]), {
+          status: 200,
+          headers: { 'content-type': 'application/json', 'x-ratelimit-remaining': '100', 'x-ratelimit-limit': '5000', 'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 3600) },
+        });
+      }
+      return makeCodeSearchResponse([]);
+    };
+
+    const results = await github.searchOrgSpecs('acme', 'tok');
+    assert.strictEqual(results.length, 0, 'Non-matching repo names should not be probed');
   });
 });
 

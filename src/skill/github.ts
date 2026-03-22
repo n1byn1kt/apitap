@@ -250,14 +250,25 @@ export function filterResults(
   return { passed, skips };
 }
 
-// ─── Org Scan — Code Search ───────────────────────────────────────────────────
+// ─── Org Scan — Hybrid: Code Search + Name-Heuristic Probe ───────────────────
 
 export const SPEC_FILENAMES = ['openapi.json', 'openapi.yaml', 'swagger.json', 'swagger.yaml'];
 
+// Repo name patterns that likely contain OpenAPI specs
+const SPEC_REPO_PATTERNS = /(?:api-spec|api-schema|openapi|swagger|rest-api|api-schemas|openapi-spec)/i;
+
+// Max repo pages to fetch for name-heuristic scan (100 repos/page)
+const MAX_REPO_PAGES = 3;
+
 /**
- * Uses GitHub's Code Search API to find OpenAPI spec files across an org's repos.
- * Queries run sequentially — GitHub's code search has a secondary rate limit of
- * 30 req/min (authenticated). Parallel fan-out risks immediate 403.
+ * Hybrid org scan: code search results UNION name-heuristic matches.
+ *
+ * Code search (GitHub /search/code) is unreliable — GitHub doesn't index all
+ * files, so repos like cloudflare/api-schemas are invisible to it. The
+ * name-heuristic pass lists the org's repos (sorted by stars, capped at 300)
+ * and probes repos whose names match API-spec patterns for spec files.
+ *
+ * Both sources dedup by htmlUrl before returning.
  */
 export async function searchOrgSpecs(
   org: string,
@@ -266,6 +277,7 @@ export async function searchOrgSpecs(
   const allItems: GitHubSpecResult[] = [];
   const seen = new Set<string>();
 
+  // ── Phase 1: Code search (may return sparse results) ──────────────────────
   // Sequential queries — GitHub's code search has a secondary rate limit
   // of 30 req/min (authenticated). Parallel fan-out risks immediate 403.
   for (const filename of SPEC_FILENAMES) {
@@ -277,6 +289,9 @@ export async function searchOrgSpecs(
       if (err.status === 422) {
         throw new Error(`GitHub org '${org}' not found.`);
       }
+      // Code search rate limit or other transient error — continue to
+      // name-heuristic phase rather than failing entirely.
+      if (err.status === 403 || err.status === 429) break;
       throw err;
     }
 
@@ -299,6 +314,55 @@ export async function searchOrgSpecs(
         pushedAt: repo.pushed_at ?? '',
         description: repo.description ?? '',
       });
+    }
+  }
+
+  // ── Phase 2: Name-heuristic probe ─────────────────────────────────────────
+  // List org repos (sorted by stars, up to 300), find those whose names
+  // match API-spec patterns, probe each for spec files via contents API.
+  const probed = new Set<string>(); // repos already found by code search
+  for (const item of allItems) probed.add(item.repoFullName);
+
+  for (let page = 1; page <= MAX_REPO_PAGES; page++) {
+    let repos;
+    try {
+      const { data } = await githubFetch(
+        `/orgs/${org}/repos?per_page=100&sort=stars&direction=desc&page=${page}`,
+        token,
+      );
+      repos = data;
+    } catch {
+      break; // org listing failed — we already have code search results
+    }
+
+    if (!Array.isArray(repos) || repos.length === 0) break;
+
+    for (const repo of repos) {
+      const fullName: string = repo.full_name;
+      if (probed.has(fullName)) continue;
+
+      if (!SPEC_REPO_PATTERNS.test(repo.name)) continue;
+      probed.add(fullName);
+
+      const specs = await probeForSpecs(repo.owner?.login ?? org, repo.name, token);
+      for (const spec of specs) {
+        if (seen.has(spec.htmlUrl)) continue;
+        seen.add(spec.htmlUrl);
+
+        allItems.push({
+          owner: repo.owner?.login ?? org,
+          repo: repo.name,
+          repoFullName: fullName,
+          filePath: spec.path,
+          htmlUrl: spec.htmlUrl,
+          specUrl: `https://raw.githubusercontent.com/${fullName}/${repo.default_branch ?? 'main'}/${spec.path}`,
+          stars: repo.stargazers_count ?? 0,
+          isFork: repo.fork ?? false,
+          isArchived: repo.archived ?? false,
+          pushedAt: repo.pushed_at ?? '',
+          description: repo.description ?? '',
+        });
+      }
     }
   }
 

@@ -35,10 +35,12 @@ function sortKeysDeep(value: unknown): unknown {
  * Sign a skill file. Returns a new object with signature and provenance: 'self'.
  */
 export function signSkillFile(skill: SkillFile, key: Buffer): SkillFile {
-  const payload = canonicalize(skill);
+  const signedAt = new Date().toISOString();
+  const payload = canonicalize({ ...skill, signedAt } as SkillFile);
   const signature = hmacSign(payload, key);
   return {
     ...skill,
+    signedAt,
     provenance: 'self',
     signature,
   };
@@ -53,9 +55,10 @@ export function signSkillFileAs(
   key: Buffer,
   provenance: 'self' | 'imported-signed',
 ): SkillFile {
-  const payload = canonicalize(skill);
+  const signedAt = new Date().toISOString();
+  const payload = canonicalize({ ...skill, signedAt } as SkillFile);
   const signature = hmacSign(payload, key);
-  return { ...skill, provenance, signature };
+  return { ...skill, signedAt, provenance, signature };
 }
 
 /**

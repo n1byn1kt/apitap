@@ -36,6 +36,7 @@ describe('skill file signing', () => {
     const signed = signSkillFile(skill, key);
 
     assert.equal(signed.provenance, 'self');
+    assert.ok(typeof signed.signedAt === 'string');
     assert.ok(signed.signature?.startsWith('hmac-sha256:'));
   });
 

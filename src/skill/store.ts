@@ -13,6 +13,8 @@ auth.enc
 *.key
 `;
 
+const MAX_SIGNATURE_AGE_DAYS = 180;
+
 function skillPath(domain: string, skillsDir: string): string {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(domain)) {
     throw new Error(`Invalid domain: ${domain}`);
@@ -124,6 +126,20 @@ export async function readSkillFile(
         }
         if (!verified) {
           throw new Error(`Skill file signature verification failed for ${domain} — file may be tampered`);
+        }
+
+        if (skill.signedAt) {
+          const signedAtMs = Date.parse(skill.signedAt);
+          if (!Number.isNaN(signedAtMs)) {
+            const ageMs = Date.now() - signedAtMs;
+            const maxAgeMs = MAX_SIGNATURE_AGE_DAYS * 24 * 60 * 60 * 1000;
+            if (ageMs > maxAgeMs) {
+              throw new Error(
+                `Skill file signature is stale for ${domain} (signed ${skill.signedAt}). ` +
+                `Re-capture or re-import to refresh signature.`
+              );
+            }
+          }
         }
       }
     }

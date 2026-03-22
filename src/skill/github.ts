@@ -249,6 +249,69 @@ export function filterResults(
   return { passed, skips };
 }
 
+// ─── Org Scan — Code Search ───────────────────────────────────────────────────
+
+export const SPEC_FILENAMES = ['openapi.json', 'openapi.yaml', 'swagger.json', 'swagger.yaml'];
+
+/**
+ * Uses GitHub's Code Search API to find OpenAPI spec files across an org's repos.
+ * Queries run sequentially — GitHub's code search has a secondary rate limit of
+ * 30 req/min (authenticated). Parallel fan-out risks immediate 403.
+ */
+export async function searchOrgSpecs(
+  org: string,
+  token: string | null,
+): Promise<GitHubSpecResult[]> {
+  const allItems: GitHubSpecResult[] = [];
+  const seen = new Set<string>();
+
+  // Sequential queries — GitHub's code search has a secondary rate limit
+  // of 30 req/min (authenticated). Parallel fan-out risks immediate 403.
+  for (const filename of SPEC_FILENAMES) {
+    const q = encodeURIComponent(`filename:${filename} org:${org}`);
+    let response;
+    try {
+      response = await githubFetch(`/search/code?q=${q}&per_page=100`, token);
+    } catch (err: any) {
+      if (err.status === 422) {
+        throw new Error(`GitHub org '${org}' not found.`);
+      }
+      throw err;
+    }
+
+    for (const item of response.data.items ?? []) {
+      const htmlUrl: string = item.html_url;
+      if (seen.has(htmlUrl)) continue;
+      seen.add(htmlUrl);
+
+      const repo = item.repository;
+      allItems.push({
+        owner: repo.owner?.login ?? org,
+        repo: repo.name,
+        repoFullName: repo.full_name,
+        filePath: item.path,
+        htmlUrl,
+        specUrl: `https://raw.githubusercontent.com/${repo.full_name}/${repo.default_branch ?? 'main'}/${item.path}`,
+        stars: repo.stargazers_count ?? 0,
+        isFork: repo.fork ?? false,
+        isArchived: repo.archived ?? false,
+        pushedAt: repo.pushed_at ?? '',
+        description: repo.description ?? '',
+      });
+    }
+  }
+
+  // Rank: stars desc, then path depth asc (shallower = more likely canonical)
+  allItems.sort((a, b) => {
+    if (b.stars !== a.stars) return b.stars - a.stars;
+    const depthA = a.filePath.split('/').length;
+    const depthB = b.filePath.split('/').length;
+    return depthA - depthB;
+  });
+
+  return allItems;
+}
+
 // ─── Spec content predicates ──────────────────────────────────────────────────
 
 /**

@@ -661,3 +661,239 @@ describe('GitHubSpecResult interface', () => {
     assert.strictEqual(typeof result.description, 'string');
   });
 });
+
+// ─── searchOrgSpecs ───────────────────────────────────────────────────────────
+
+/** Build a minimal GitHub Code Search API item for a given filename. */
+function makeCodeSearchItem(
+  overrides: {
+    path?: string;
+    htmlUrl?: string;
+    repoFullName?: string;
+    stars?: number;
+    fork?: boolean;
+    archived?: boolean;
+    pushedAt?: string;
+    defaultBranch?: string;
+    description?: string;
+    ownerLogin?: string;
+  } = {},
+) {
+  const repoFullName = overrides.repoFullName ?? 'acme/api-spec';
+  const [ownerLogin, repoName] = repoFullName.split('/');
+  const path = overrides.path ?? 'openapi.json';
+  return {
+    path,
+    html_url: overrides.htmlUrl ?? `https://github.com/${repoFullName}/blob/main/${path}`,
+    repository: {
+      name: repoName,
+      full_name: repoFullName,
+      owner: { login: overrides.ownerLogin ?? ownerLogin },
+      stargazers_count: overrides.stars ?? 100,
+      fork: overrides.fork ?? false,
+      archived: overrides.archived ?? false,
+      pushed_at: overrides.pushedAt ?? '2025-01-01T00:00:00Z',
+      default_branch: overrides.defaultBranch ?? 'main',
+      description: overrides.description ?? 'Test repo',
+    },
+  };
+}
+
+/** Build a mock Response for the code search API. */
+function makeCodeSearchResponse(items: unknown[]): Response {
+  return new Response(
+    JSON.stringify({ total_count: items.length, incomplete_results: false, items }),
+    {
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+        'x-ratelimit-remaining': '25',
+        'x-ratelimit-limit': '30',
+        'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 60),
+      },
+    },
+  );
+}
+
+describe('searchOrgSpecs', () => {
+  let origFetch: typeof globalThis.fetch;
+
+  beforeEach(() => {
+    origFetch = globalThis.fetch;
+  });
+
+  afterEach(() => {
+    globalThis.fetch = origFetch;
+  });
+
+  it('queries 4 filename patterns and deduplicates by htmlUrl', async () => {
+    const capturedUrls: string[] = [];
+
+    // Return one item per query, but make the openapi.yaml item share an htmlUrl
+    // with the openapi.json item to verify dedup.
+    const sharedHtmlUrl = 'https://github.com/acme/api-spec/blob/main/openapi.json';
+    const callResponses = [
+      // openapi.json → 1 item
+      makeCodeSearchResponse([
+        makeCodeSearchItem({ htmlUrl: sharedHtmlUrl, path: 'openapi.json' }),
+      ]),
+      // openapi.yaml → 1 item with the SAME htmlUrl (simulate duplicate)
+      makeCodeSearchResponse([
+        makeCodeSearchItem({ htmlUrl: sharedHtmlUrl, path: 'openapi.json' }),
+      ]),
+      // swagger.json → 1 fresh item
+      makeCodeSearchResponse([
+        makeCodeSearchItem({
+          htmlUrl: 'https://github.com/acme/api-spec/blob/main/swagger.json',
+          path: 'swagger.json',
+        }),
+      ]),
+      // swagger.yaml → empty
+      makeCodeSearchResponse([]),
+    ];
+    let callIndex = 0;
+
+    globalThis.fetch = async (input: RequestInfo | URL) => {
+      capturedUrls.push(input.toString());
+      return callResponses[callIndex++];
+    };
+
+    const results = await github.searchOrgSpecs('acme', 'tok');
+
+    // 4 queries should have been made
+    assert.strictEqual(capturedUrls.length, 4);
+    assert.ok(capturedUrls[0].includes('filename%3Aopenapi.json'), `q0: ${capturedUrls[0]}`);
+    assert.ok(capturedUrls[1].includes('filename%3Aopenapi.yaml'), `q1: ${capturedUrls[1]}`);
+    assert.ok(capturedUrls[2].includes('filename%3Aswagger.json'), `q2: ${capturedUrls[2]}`);
+    assert.ok(capturedUrls[3].includes('filename%3Aswagger.yaml'), `q3: ${capturedUrls[3]}`);
+
+    // Dedup: 2 items with sharedHtmlUrl → 1, plus the swagger.json → total 2
+    assert.strictEqual(results.length, 2);
+    const htmlUrls = results.map(r => r.htmlUrl);
+    assert.strictEqual(new Set(htmlUrls).size, 2, 'All htmlUrls must be unique after dedup');
+  });
+
+  it('ranks by stars descending then path depth ascending', async () => {
+    // Returns items in a shuffled order: low-stars-shallow, high-stars-deep,
+    // high-stars-shallow, low-stars-deep — expect sorted: high-stars-shallow first.
+    const items = [
+      makeCodeSearchItem({
+        htmlUrl: 'https://github.com/acme/low-stars-shallow/blob/main/openapi.json',
+        repoFullName: 'acme/low-stars-shallow',
+        path: 'openapi.json',
+        stars: 10,
+      }),
+      makeCodeSearchItem({
+        htmlUrl: 'https://github.com/acme/high-stars-deep/blob/main/specs/v2/openapi.json',
+        repoFullName: 'acme/high-stars-deep',
+        path: 'specs/v2/openapi.json',
+        stars: 1000,
+      }),
+      makeCodeSearchItem({
+        htmlUrl: 'https://github.com/acme/high-stars-shallow/blob/main/openapi.json',
+        repoFullName: 'acme/high-stars-shallow',
+        path: 'openapi.json',
+        stars: 1000,
+      }),
+      makeCodeSearchItem({
+        htmlUrl: 'https://github.com/acme/low-stars-deep/blob/main/specs/openapi.json',
+        repoFullName: 'acme/low-stars-deep',
+        path: 'specs/openapi.json',
+        stars: 10,
+      }),
+    ];
+    let callIndex = 0;
+    globalThis.fetch = async () => {
+      // Return all items on the first call, empty for remaining 3
+      return callIndex++ === 0 ? makeCodeSearchResponse(items) : makeCodeSearchResponse([]);
+    };
+
+    const results = await github.searchOrgSpecs('acme', 'tok');
+
+    assert.strictEqual(results.length, 4);
+    // High stars first
+    assert.strictEqual(results[0].stars, 1000);
+    assert.strictEqual(results[1].stars, 1000);
+    // Among high-stars: shallower path first (depth 1 < depth 3)
+    assert.strictEqual(results[0].filePath, 'openapi.json');
+    assert.strictEqual(results[1].filePath, 'specs/v2/openapi.json');
+    // Low stars last
+    assert.strictEqual(results[2].stars, 10);
+    assert.strictEqual(results[3].stars, 10);
+    // Among low-stars: shallower path first
+    assert.strictEqual(results[2].filePath, 'openapi.json');
+    assert.strictEqual(results[3].filePath, 'specs/openapi.json');
+  });
+
+  it('maps code search response to GitHubSpecResult', async () => {
+    const item = makeCodeSearchItem({
+      path: 'specs/openapi.json',
+      htmlUrl: 'https://github.com/cloudflare/api-schemas/blob/main/specs/openapi.json',
+      repoFullName: 'cloudflare/api-schemas',
+      stars: 1200,
+      fork: false,
+      archived: false,
+      pushedAt: '2026-01-15T10:00:00Z',
+      defaultBranch: 'main',
+      description: 'Cloudflare public API schemas',
+      ownerLogin: 'cloudflare',
+    });
+
+    let callIndex = 0;
+    globalThis.fetch = async () =>
+      callIndex++ === 0 ? makeCodeSearchResponse([item]) : makeCodeSearchResponse([]);
+
+    const results = await github.searchOrgSpecs('cloudflare', 'tok');
+
+    assert.strictEqual(results.length, 1);
+    const r = results[0];
+    assert.strictEqual(r.owner, 'cloudflare');
+    assert.strictEqual(r.repo, 'api-schemas');
+    assert.strictEqual(r.repoFullName, 'cloudflare/api-schemas');
+    assert.strictEqual(r.filePath, 'specs/openapi.json');
+    assert.strictEqual(r.htmlUrl, 'https://github.com/cloudflare/api-schemas/blob/main/specs/openapi.json');
+    assert.strictEqual(r.specUrl, 'https://raw.githubusercontent.com/cloudflare/api-schemas/main/specs/openapi.json');
+    assert.strictEqual(r.stars, 1200);
+    assert.strictEqual(r.isFork, false);
+    assert.strictEqual(r.isArchived, false);
+    assert.strictEqual(r.pushedAt, '2026-01-15T10:00:00Z');
+    assert.strictEqual(r.description, 'Cloudflare public API schemas');
+  });
+
+  it('throws descriptive error for nonexistent org (422)', async () => {
+    globalThis.fetch = async () =>
+      new Response('{}', {
+        status: 422,
+        statusText: 'Unprocessable Entity',
+        headers: {
+          'x-ratelimit-remaining': '29',
+          'x-ratelimit-limit': '30',
+          'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 60),
+        },
+      });
+
+    await assert.rejects(
+      () => github.searchOrgSpecs('nonexistent-org-xyz', 'tok'),
+      (err: Error) => {
+        assert.ok(
+          err.message.includes('nonexistent-org-xyz'),
+          `Expected org name in error message, got: ${err.message}`,
+        );
+        assert.ok(
+          err.message.toLowerCase().includes('not found'),
+          `Expected "not found" in error message, got: ${err.message}`,
+        );
+        return true;
+      },
+    );
+  });
+
+  it('returns empty array when no specs found', async () => {
+    globalThis.fetch = async () => makeCodeSearchResponse([]);
+
+    const results = await github.searchOrgSpecs('empty-org', 'tok');
+
+    assert.strictEqual(results.length, 0);
+    assert.ok(Array.isArray(results));
+  });
+});

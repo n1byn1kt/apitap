@@ -1169,3 +1169,175 @@ describe('searchTopicSpecs', () => {
     assert.strictEqual(results.length, 0, `Expected 0 results, got ${results.length}`);
   });
 });
+
+// ─── fetchGitHubSpec ──────────────────────────────────────────────────────────
+
+describe('fetchGitHubSpec', () => {
+  const TEST_URL = 'https://raw.githubusercontent.com/acme/api-spec/main/openapi.json';
+
+  let origFetch: typeof globalThis.fetch;
+  let restoreSsrf: ReturnType<typeof github._setResolveAndValidateUrl>;
+
+  beforeEach(() => {
+    origFetch = globalThis.fetch;
+    // Inject a fake SSRF validator that always returns safe — avoids real DNS in tests.
+    restoreSsrf = github._setResolveAndValidateUrl(async (_url: string) => ({ safe: true }));
+  });
+
+  afterEach(() => {
+    globalThis.fetch = origFetch;
+    github._setResolveAndValidateUrl(restoreSsrf);
+  });
+
+  it('fetches and parses JSON spec from specUrl', async () => {
+    const spec = { openapi: '3.0.0', info: { title: 'Test API' }, paths: {} };
+
+    globalThis.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+      return new Response(JSON.stringify(spec), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    const result = await github.fetchGitHubSpec(TEST_URL, 'my-token');
+
+    assert.deepStrictEqual(result, spec);
+  });
+
+  it('fetches and parses YAML spec', async () => {
+    const yamlBody = [
+      'openapi: "3.0.0"',
+      'info:',
+      '  title: YAML API',
+      'paths: {}',
+    ].join('\n');
+
+    globalThis.fetch = async () =>
+      new Response(yamlBody, {
+        status: 200,
+        headers: { 'content-type': 'application/yaml' },
+      });
+
+    const result = await github.fetchGitHubSpec(TEST_URL, null);
+
+    assert.strictEqual(result.openapi, '3.0.0');
+    assert.deepStrictEqual(result.info, { title: 'YAML API' });
+  });
+
+  it('throws on response > 10MB (content-length header)', async () => {
+    const elevenMB = (11 * 1024 * 1024).toString();
+
+    globalThis.fetch = async () =>
+      new Response('{}', {
+        status: 200,
+        headers: { 'content-length': elevenMB },
+      });
+
+    await assert.rejects(
+      () => github.fetchGitHubSpec(TEST_URL, null),
+      /too large/i,
+    );
+  });
+
+  it('throws on response body > 10MB (body size check)', async () => {
+    const bigBody = 'x'.repeat(11 * 1024 * 1024);
+
+    globalThis.fetch = async () =>
+      new Response(bigBody, { status: 200 });
+
+    await assert.rejects(
+      () => github.fetchGitHubSpec(TEST_URL, null),
+      /too large/i,
+    );
+  });
+
+  it('does not use githubFetch (uses direct fetch to raw.githubusercontent.com)', async () => {
+    const spec = { openapi: '3.0.0', paths: {} };
+    const capturedUrls: string[] = [];
+
+    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      capturedUrls.push(input.toString());
+      return new Response(JSON.stringify(spec), { status: 200 });
+    };
+
+    await github.fetchGitHubSpec(TEST_URL, 'tok');
+
+    // Must call raw.githubusercontent.com directly, NOT api.github.com
+    assert.strictEqual(capturedUrls.length, 1, 'Expected exactly one fetch call');
+    assert.ok(
+      capturedUrls[0].startsWith('https://raw.githubusercontent.com/'),
+      `Expected raw.githubusercontent.com URL, got: ${capturedUrls[0]}`,
+    );
+    assert.ok(
+      !capturedUrls[0].includes('api.github.com'),
+      'Must not use api.github.com (githubFetch)',
+    );
+  });
+
+  it('sends Authorization header when token is provided', async () => {
+    const spec = { openapi: '3.0.0', paths: {} };
+    let capturedHeaders: Record<string, string> = {};
+
+    globalThis.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+      capturedHeaders = { ...(init?.headers as Record<string, string>) };
+      return new Response(JSON.stringify(spec), { status: 200 });
+    };
+
+    await github.fetchGitHubSpec(TEST_URL, 'ghp_mytoken');
+
+    assert.strictEqual(capturedHeaders['Authorization'], 'Bearer ghp_mytoken');
+    assert.strictEqual(capturedHeaders['User-Agent'], 'apitap-import');
+  });
+
+  it('omits Authorization header when token is null', async () => {
+    const spec = { openapi: '3.0.0', paths: {} };
+    let capturedHeaders: Record<string, string> = {};
+
+    globalThis.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+      capturedHeaders = { ...(init?.headers as Record<string, string>) };
+      return new Response(JSON.stringify(spec), { status: 200 });
+    };
+
+    await github.fetchGitHubSpec(TEST_URL, null);
+
+    assert.ok(
+      !('Authorization' in capturedHeaders),
+      'Authorization header must not be present for null token',
+    );
+  });
+
+  it('throws on non-OK HTTP response', async () => {
+    globalThis.fetch = async () =>
+      new Response('Not Found', { status: 404, statusText: 'Not Found' });
+
+    await assert.rejects(
+      () => github.fetchGitHubSpec(TEST_URL, null),
+      /HTTP 404/,
+    );
+  });
+
+  it('throws when SSRF check fails', async () => {
+    // Override to return unsafe
+    github._setResolveAndValidateUrl(async (_url: string) => ({
+      safe: false,
+      reason: 'DNS rebinding: raw.githubusercontent.com resolves to 127.0.0.1',
+    }));
+
+    await assert.rejects(
+      () => github.fetchGitHubSpec(TEST_URL, null),
+      /SSRF check failed/,
+    );
+  });
+
+  it('throws when content is neither valid JSON nor a YAML object (bare scalar)', async () => {
+    // "just a string" fails JSON.parse, then YAML parses it as a string (not an object)
+    // → triggers the "Invalid JSON/YAML" guard
+    globalThis.fetch = async () =>
+      new Response('just a string', { status: 200 });
+
+    await assert.rejects(
+      () => github.fetchGitHubSpec(TEST_URL, null),
+      /Invalid JSON\/YAML/,
+    );
+  });
+});

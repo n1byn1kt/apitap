@@ -1,5 +1,6 @@
 // src/skill/github.ts
 import { execFileSync as _execFileSync } from 'node:child_process';
+import { resolveAndValidateUrl as _resolveAndValidateUrl } from './ssrf.js';
 
 // ─── Token resolution ─────────────────────────────────────────────────────────
 
@@ -441,6 +442,79 @@ export function hasServerUrl(spec: Record<string, any>): boolean {
     return true;
   }
   return false;
+}
+
+// ─── SSRF DI hook ─────────────────────────────────────────────────────────────
+
+// Indirection so tests can inject a fake resolveAndValidateUrl without network.
+let _resolveAndValidateUrlImpl: typeof _resolveAndValidateUrl = _resolveAndValidateUrl;
+
+/**
+ * Override the resolveAndValidateUrl implementation — for testing only.
+ * Returns the previous implementation so callers can restore it.
+ */
+export function _setResolveAndValidateUrl(
+  impl: typeof _resolveAndValidateUrl,
+): typeof _resolveAndValidateUrl {
+  const prev = _resolveAndValidateUrlImpl;
+  _resolveAndValidateUrlImpl = impl;
+  return prev;
+}
+
+// ─── Spec content fetching ────────────────────────────────────────────────────
+
+const MAX_SPEC_SIZE = 10 * 1024 * 1024; // 10 MB
+
+/**
+ * Fetch an OpenAPI spec from raw.githubusercontent.com.
+ * Uses direct fetch() — does NOT use githubFetch() since this is a different host.
+ * raw.githubusercontent.com requests do not count against the GitHub API rate limit.
+ * Auth token is sent to raw.githubusercontent.com (GitHub-controlled domain) for private repo support.
+ */
+export async function fetchGitHubSpec(
+  specUrl: string,
+  token: string | null,
+): Promise<Record<string, any>> {
+  const ssrf = await _resolveAndValidateUrlImpl(specUrl);
+  if (!ssrf.safe) {
+    throw new Error(`SSRF check failed for spec URL ${specUrl}: ${ssrf.reason}`);
+  }
+
+  const headers: Record<string, string> = { 'User-Agent': 'apitap-import' };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const response = await fetch(specUrl, {
+    headers,
+    signal: AbortSignal.timeout(30_000),
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status} ${response.statusText} for ${specUrl}`);
+  }
+
+  const contentLength = response.headers.get('content-length');
+  if (contentLength && parseInt(contentLength, 10) > MAX_SPEC_SIZE) {
+    throw new Error(`Spec too large: ${contentLength} bytes (limit: ${MAX_SPEC_SIZE})`);
+  }
+
+  const text = await response.text();
+  if (text.length > MAX_SPEC_SIZE) {
+    throw new Error(`Spec body too large: ${text.length} bytes`);
+  }
+
+  // Try JSON first, then YAML
+  try {
+    return JSON.parse(text) as Record<string, any>;
+  } catch {
+    const yaml = await import('js-yaml');
+    const parsed = yaml.load(text);
+    if (typeof parsed !== 'object' || parsed === null) {
+      throw new Error(`Invalid JSON/YAML from ${specUrl}`);
+    }
+    return parsed as Record<string, any>;
+  }
 }
 
 /** Placeholder domains that indicate a spec is not pointing at a real API. */

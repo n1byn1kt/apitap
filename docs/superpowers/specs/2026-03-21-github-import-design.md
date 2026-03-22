@@ -59,7 +59,7 @@ This is the first optional-value flag in the CLI — document the behavior in th
 
 ### `--update` semantics
 
-The `--update` flag skips specs that were already imported from the same `specUrl` (the `raw.githubusercontent.com` URL) and whose `importHistory[].importedAt` is newer than the repo's `pushedAt`. This uses the same `importHistory` comparison as the APIs.guru handler. Note: if the default branch changes or the file moves, the `specUrl` won't match and the spec will be re-imported (correct behavior — treat it as a new source).
+The `--update` flag skips specs that were already imported from the same `specUrl` (the `raw.githubusercontent.com` URL) AND whose `importHistory[].importedAt` is newer than the repo's `pushedAt`. This combines the approaches of the two existing handlers: specUrl matching (from the single-URL handler) + timestamp comparison (from the APIs.guru handler). Neither existing handler does both — the GitHub handler is stricter. Note: if the default branch changes or the file moves, the `specUrl` won't match and the spec will be re-imported (correct behavior — treat it as a new source).
 
 ## Module Architecture
 
@@ -231,7 +231,9 @@ Applied after fetching and parsing the OpenAPI spec.
 export function normalizeTemplatedDomain(domain: string): string {
   let d = domain;
   while (d.startsWith('{')) {
-    d = d.replace(/^\{[^}]+\}\./, '');
+    const next = d.replace(/^\{[^}]+\}\./, '');
+    if (next === d) break;  // malformed template (e.g. "{unclosed") — stop
+    d = next;
   }
   return d;
 }

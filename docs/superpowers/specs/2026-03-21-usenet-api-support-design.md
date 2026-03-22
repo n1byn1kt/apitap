@@ -226,6 +226,53 @@ The agent must construct the NZB download URL manually: `https://<baseUrl>/api?t
 
 This is a known limitation of the current auth model. The agent can work around it with clear prompting instructions. Not addressed in v1.
 
+## Feature 4: `--allow-local` Flag on Stamp
+
+### Problem
+
+SABnzbd and NZBGet typically run on the local network (`http://192.168.1.x:8080`). APITAP's SSRF checks block private IPs by default. Without a per-domain opt-out, users must pass `--danger-disable-ssrf` on every replay — an unsafe global bypass.
+
+### Solution
+
+A per-domain `allowLocal` flag, stored in the skill file metadata and checked by the replay engine before SSRF validation.
+
+### Stamp flag
+
+```
+apitap stamp sabnzbd --domain 192.168.1.50:8080 --apikey XXX --allow-local --tags sabnzbd
+```
+
+`--allow-local` sets `metadata.allowLocal: true` in the generated skill file.
+
+### Type change
+
+In `src/types.ts`, add to `SkillFile.metadata`:
+
+```typescript
+allowLocal?: boolean;  // Skip SSRF private-IP checks for this domain
+```
+
+### Replay engine behavior
+
+In `src/replay/engine.ts`, before SSRF validation:
+
+- If `skillFile.metadata.allowLocal === true`, skip the private-IP check for this request.
+- All other SSRF checks remain (protocol validation, redirect following, DNS rebinding). Only the private/reserved IP range check is bypassed.
+- This is a targeted exemption, not a global disable.
+
+### Security note
+
+`allowLocal` is included in the HMAC signature (via `canonicalize()`). An attacker cannot flip this flag without invalidating the signature. The flag is set at stamp time by the user — it requires explicit intent.
+
+### baseUrl for local services
+
+When `--allow-local` is provided, `stamp` should accept `--scheme http` (default is `https`). SABnzbd on a local network uses plain HTTP. The `baseUrl` becomes `http://<domain>`.
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--allow-local` | boolean | false | Store `allowLocal: true` in skill file metadata |
+| `--scheme <http\|https>` | string | `https` | URL scheme for baseUrl construction |
+
 ## Changes Summary
 
 ### Files modified
@@ -236,6 +283,7 @@ This is a known limitation of the current auth model. The agent can work around 
 | `src/skill/store.ts` | Validate tags in `writeSkillFile()`, include tags in index update |
 | `src/skill/signing.ts` | No change needed — `canonicalize()` already includes all non-excluded fields |
 | `src/skill/search.ts` | Add `tags` filter parameter to `searchSkillFiles()` |
+| `src/replay/engine.ts` | Check `metadata.allowLocal` before SSRF private-IP validation |
 | `src/cli.ts` | Add `stamp` command, add `--tag` flag to `search` |
 | `src/mcp.ts` | Add `tags` parameter to `apitap_search` tool schema |
 
@@ -252,7 +300,8 @@ This is a known limitation of the current auth model. The agent can work around 
 
 | Test file | Coverage |
 |-----------|----------|
-| `test/skill/stamp.test.ts` | Spec resolution (alias vs URL vs file), auth wiring (query param fallback), tag validation, output format |
+| `test/skill/stamp.test.ts` | Spec resolution (alias vs URL vs file), auth wiring (query param fallback), tag validation, allowLocal flag, output format |
+| `test/replay/engine.test.ts` | allowLocal bypasses private-IP check, other SSRF checks still enforced |
 | `test/skill/search.test.ts` | Tag filtering (AND semantics, empty tags, no tags), tag + text combined search |
 | `test/skill/store.test.ts` | Tag validation regex, max length, tags in index update |
 | `test/skill/signing.test.ts` | Verify tags are included in signature via existing canonicalize() |

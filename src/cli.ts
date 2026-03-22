@@ -30,6 +30,7 @@ import { attach, parseDomainPatterns } from './capture/cdp-attach.js';
 import { isOpenAPISpec, convertOpenAPISpec } from './skill/openapi-converter.js';
 import { mergeSkillFile } from './skill/merge.js';
 import { fetchApisGuruList, filterEntries, fetchSpec } from './skill/apis-guru.js';
+import { searchSwaggerHub, fetchSwaggerHubSpec } from './skill/swaggerhub.js';
 import { buildIndex, removeFromIndex } from './skill/index.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
@@ -83,6 +84,8 @@ function printUsage(): void {
     apitap import <file|url>   Import a skill file or OpenAPI spec
     apitap import --from apis-guru
                                Bulk-import from APIs.guru directory
+    apitap import --from swaggerhub --query <term>
+                               Import from SwaggerHub (785K+ public specs)
     apitap refresh <domain>    Refresh auth tokens via browser
     apitap auth [domain]       View or manage stored auth
     apitap mcp                 Run the full ApiTap MCP server over stdio
@@ -138,8 +141,12 @@ function printUsage(): void {
     --dry-run                  Show what would change without writing
     --json                     Output machine-readable JSON
     --from apis-guru           Bulk-import from APIs.guru directory
+    --from swaggerhub          Import from SwaggerHub (785K+ public specs)
+    --query <term>             Search term (required for SwaggerHub)
     --search <term>            Filter APIs.guru entries by name/title
     --limit <n>                Max APIs to import (default: 100)
+    --no-auth-only             Skip APIs that require authentication
+    --force                    Import even if skill file already exists
 
   Serve options:
     --json                     Output tool list as JSON on stderr
@@ -496,6 +503,12 @@ async function handleImport(positional: string[], flags: Record<string, string |
   // --from apis-guru: bulk import mode
   if (flags['from'] === 'apis-guru') {
     await handleApisGuruImport(flags);
+    return;
+  }
+
+  // --from swaggerhub: SwaggerHub import mode
+  if (flags['from'] === 'swaggerhub') {
+    await handleSwaggerHubImport(flags);
     return;
   }
 
@@ -944,6 +957,166 @@ async function handleApisGuruImport(flags: Record<string, string | boolean>): Pr
     if (dryRun) {
       console.log('  (dry run — no changes written)');
     }
+    console.log();
+  }
+}
+
+async function handleSwaggerHubImport(flags: Record<string, string | boolean>): Promise<void> {
+  const json = flags.json === true;
+  const force = flags.force === true;
+  const limit = typeof flags.limit === 'string' ? parseInt(flags.limit, 10) : 20;
+  const query = typeof flags.query === 'string' ? flags.query : undefined;
+  const noAuthOnly = flags['no-auth-only'] === true;
+  const skillsDir = SKILLS_DIR || join(APITAP_DIR, 'skills');
+
+  if (!query) {
+    const msg = 'Error: --query required for SwaggerHub import. Usage: apitap import --from swaggerhub --query <term>';
+    if (json) {
+      console.log(JSON.stringify({ success: false, reason: msg }));
+    } else {
+      console.error(msg);
+    }
+    process.exit(1);
+  }
+
+  if (!json) {
+    console.log(`\n  Searching SwaggerHub for "${query}" (limit: ${limit})...\n`);
+  }
+
+  // Search SwaggerHub
+  let entries;
+  let totalCount;
+  try {
+    const result = await searchSwaggerHub({ query, limit, sort: 'BEST_MATCH' });
+    entries = result.entries;
+    totalCount = result.totalCount;
+  } catch (err: any) {
+    const msg = `Failed to search SwaggerHub: ${err.message}`;
+    if (json) {
+      console.log(JSON.stringify({ success: false, reason: msg }));
+    } else {
+      console.error(`Error: ${msg}`);
+    }
+    process.exit(1);
+  }
+
+  if (!json) {
+    console.log(`  Found ${totalCount.toLocaleString()} specs on SwaggerHub, importing top ${entries.length}...\n`);
+  }
+
+  if (entries.length === 0) {
+    if (json) {
+      console.log(JSON.stringify({ success: true, imported: 0, failed: 0, skipped: 0, totalEndpoints: 0 }));
+    } else {
+      console.log('  No matching APIs found.\n');
+    }
+    return;
+  }
+
+  const total = entries.length;
+  let imported = 0;
+  let failed = 0;
+  let skippedApis = 0;
+  let totalEndpointsAdded = 0;
+
+  const machineId = await getMachineId();
+  const key = deriveSigningKey(machineId);
+
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    const idx = String(i + 1).padStart(String(total).length, ' ');
+    const label = `${entry.owner}/${entry.name}`;
+
+    try {
+      // Fetch spec
+      const spec = await fetchSwaggerHubSpec(entry.specUrl);
+
+      // Convert
+      const importResult = convertOpenAPISpec(spec, entry.specUrl);
+      const { domain, endpoints, meta } = importResult;
+
+      if (endpoints.length === 0) {
+        if (!json) {
+          console.log(`  [${idx}/${total}] SKIP ${label.padEnd(40)} 0 endpoints`);
+        }
+        skippedApis++;
+        continue;
+      }
+
+      // Skip auth-required APIs when --no-auth-only is set
+      if (noAuthOnly && meta.requiresAuth) {
+        if (!json) {
+          console.log(`  [${idx}/${total}] SKIP ${label.padEnd(40)} requires auth`);
+        }
+        skippedApis++;
+        continue;
+      }
+
+      // SSRF validate
+      const dnsCheck = await resolveAndValidateUrl(`https://${domain}`);
+      if (!dnsCheck.safe) {
+        if (!json) {
+          console.log(`  [${idx}/${total}] SKIP ${label.padEnd(40)} SSRF risk`);
+        }
+        skippedApis++;
+        continue;
+      }
+
+      // Read existing — skip HMAC since we only need endpoints for merge
+      let existing = null;
+      try {
+        existing = await readSkillFile(domain, skillsDir, { verifySignature: false });
+      } catch (err: any) {
+        if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+          if (!json) console.error(`  Warning: could not read existing skill file for ${domain}: ${err.message}`);
+        }
+      }
+
+      // Skip if already exists and not --force
+      if (!force && existing?.endpoints.length) {
+        if (!json) {
+          console.log(`  [${idx}/${total}] SKIP ${domain.padEnd(40)} already exists (${existing.endpoints.length} endpoints)`);
+        }
+        skippedApis++;
+        continue;
+      }
+
+      // Merge
+      const { skillFile, diff } = mergeSkillFile(existing, endpoints, meta);
+      skillFile.domain = domain;
+      skillFile.baseUrl = `https://${domain}`;
+
+      // Sign and write
+      const hasCaptured = skillFile.endpoints.some(
+        ep => !ep.endpointProvenance || ep.endpointProvenance === 'captured'
+      );
+      const signed = signSkillFileAs(skillFile, key, hasCaptured ? 'self' : 'imported-signed');
+      await writeSkillFile(signed, skillsDir);
+
+      if (!json) {
+        console.log(`  [${idx}/${total}] OK   ${domain.padEnd(40)} +${diff.added} endpoints  (${entry.name})`);
+      }
+      imported++;
+      totalEndpointsAdded += diff.added;
+    } catch (err: any) {
+      if (!json) {
+        console.log(`  [${idx}/${total}] FAIL ${label.padEnd(40)} ${err.message.slice(0, 60)}`);
+      }
+      failed++;
+    }
+
+    // Rate limit — be polite to SwaggerHub
+    if (i < entries.length - 1) {
+      await new Promise(r => setTimeout(r, 200));
+    }
+  }
+
+  if (json) {
+    console.log(JSON.stringify({ success: true, imported, failed, skipped: skippedApis, totalEndpoints: totalEndpointsAdded }));
+  } else {
+    console.log();
+    console.log(`  Done: ${imported} imported, ${failed} failed, ${skippedApis} skipped`);
+    console.log(`       ${totalEndpointsAdded.toLocaleString()} endpoints added across ${imported} APIs`);
     console.log();
   }
 }

@@ -1153,3 +1153,109 @@ describe('replayEndpoint contract validation', () => {
     assert.equal(result.contractWarnings, undefined);
   });
 });
+
+describe('replayEndpoint redirect auth stripping', () => {
+  let originServer: Server;
+  let redirectServer: Server;
+  let originBaseUrl: string;
+  let redirectBaseUrl: string;
+  let receivedHeaders: Record<string, string | undefined> = {};
+
+  before(async () => {
+    redirectServer = createServer((req, res) => {
+      receivedHeaders = {
+        authorization: req.headers['authorization'] as string | undefined,
+        'x-api-key': req.headers['x-api-key'] as string | undefined,
+        'x-api-token': req.headers['x-api-token'] as string | undefined,
+        cookie: req.headers['cookie'] as string | undefined,
+        'set-cookie': req.headers['set-cookie'] as string | undefined,
+        'x-custom-token': req.headers['x-custom-token'] as string | undefined,
+        'x-custom-secret': req.headers['x-custom-secret'] as string | undefined,
+        'x-custom-key': req.headers['x-custom-key'] as string | undefined,
+      };
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true }));
+    });
+    await new Promise<void>(resolve => redirectServer.listen(0, '127.0.0.1', resolve));
+    const redirectPort = (redirectServer.address() as AddressInfo).port;
+    redirectBaseUrl = `http://127.0.0.1:${redirectPort}`;
+
+    originServer = createServer((req, res) => {
+      if (req.url === '/start') {
+        res.writeHead(302, { location: `${redirectBaseUrl}/sink` });
+        res.end();
+        return;
+      }
+      res.writeHead(404);
+      res.end('not found');
+    });
+    await new Promise<void>(resolve => originServer.listen(0, 'localhost', resolve));
+    const originPort = (originServer.address() as AddressInfo).port;
+    originBaseUrl = `http://localhost:${originPort}`;
+  });
+
+  after(async () => {
+    await new Promise<void>(resolve => originServer.close(() => resolve()));
+    await new Promise<void>(resolve => redirectServer.close(() => resolve()));
+  });
+
+  it('strips auth-related headers on cross-domain redirect', async () => {
+    const skill: SkillFile = {
+      version: '1.2',
+      domain: 'localhost',
+      capturedAt: new Date().toISOString(),
+      baseUrl: originBaseUrl,
+      endpoints: [{
+        id: 'get-start',
+        method: 'GET',
+        path: '/start',
+        queryParams: {},
+        headers: {},
+        responseShape: { type: 'object' },
+        examples: {
+          request: { url: `${originBaseUrl}/start`, headers: {} },
+          responsePreview: null,
+        },
+      }],
+      metadata: { captureCount: 1, filteredCount: 0, toolVersion: '1.0.0' },
+      provenance: 'self',
+    };
+
+    const testDir = await mkdtemp(join(tmpdir(), 'apitap-redirect-auth-'));
+    try {
+      const authManager = new AuthManager(testDir, 'test-machine-id');
+      await authManager.store('localhost', {
+        type: 'custom',
+        header: 'authorization',
+        value: 'Bearer SECRET_AUTH',
+        headers: [
+          { header: 'authorization', value: 'Bearer SECRET_AUTH' },
+          { header: 'x-api-key', value: 'SECRET_API_KEY' },
+          { header: 'x-api-token', value: 'SECRET_API_TOKEN' },
+          { header: 'cookie', value: 'session=SECRET_COOKIE' },
+          { header: 'set-cookie', value: 'server=SECRET_SET_COOKIE' },
+          { header: 'x-custom-token', value: 'SECRET_CUSTOM_TOKEN' },
+          { header: 'x-custom-secret', value: 'SECRET_CUSTOM_SECRET' },
+          { header: 'x-custom-key', value: 'SECRET_CUSTOM_KEY' },
+        ],
+      });
+
+      await replayEndpoint(skill, 'get-start', {
+        authManager,
+        domain: 'localhost',
+        _skipSsrfCheck: true,
+      });
+
+      assert.equal(receivedHeaders.authorization, undefined);
+      assert.equal(receivedHeaders['x-api-key'], undefined);
+      assert.equal(receivedHeaders['x-api-token'], undefined);
+      assert.equal(receivedHeaders.cookie, undefined);
+      assert.equal(receivedHeaders['set-cookie'], undefined);
+      assert.equal(receivedHeaders['x-custom-token'], undefined);
+      assert.equal(receivedHeaders['x-custom-secret'], undefined);
+      assert.equal(receivedHeaders['x-custom-key'], undefined);
+    } finally {
+      await rm(testDir, { recursive: true, force: true });
+    }
+  });
+});

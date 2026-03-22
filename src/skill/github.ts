@@ -381,7 +381,7 @@ export async function searchOrgSpecs(
 
 export const CANONICAL_TOPICS = ['openapi-specification', 'openapi', 'openapi3', 'swagger-api'];
 
-const PROBE_DIRS = ['', 'api', 'spec', 'docs'];
+const PROBE_DIRS = ['', 'api', 'spec', 'specs', 'docs', 'reference', 'openapi'];
 
 async function probeForSpecs(
   owner: string,

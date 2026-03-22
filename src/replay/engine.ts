@@ -175,9 +175,20 @@ function stripAuthForRedirect(
 ): Record<string, string> {
   const redirectHeaders = { ...headers };
   if (!isSafeAuthRedirectHost(originalHost, redirectHost)) {
-    delete redirectHeaders['authorization'];
     for (const key of Object.keys(redirectHeaders)) {
-      if (key.toLowerCase() === 'authorization' || redirectHeaders[key] === '[stored]') {
+      const lower = key.toLowerCase();
+      const isNamedAuthHeader =
+        lower === 'authorization' ||
+        lower === 'x-api-key' ||
+        lower === 'x-api-token' ||
+        lower === 'cookie' ||
+        lower === 'set-cookie';
+      const isAuthLikeHeader =
+        isNamedAuthHeader ||
+        lower.includes('token') ||
+        lower.includes('secret') ||
+        lower.includes('key');
+      if (isAuthLikeHeader || redirectHeaders[key] === '[stored]') {
         delete redirectHeaders[key];
       }
     }

@@ -60,18 +60,22 @@ export async function searchSwaggerHub(options: SwaggerHubSearchOptions): Promis
   const totalCount: number = data.totalCount ?? 0;
 
   for (const api of (data.apis ?? [])) {
+    // SwaggerHub API response shape is undocumented — reverse-engineered from
+    // the public registry API. Properties are type/value or type/url pairs.
     const props = api.properties ?? [];
-    const getProperty = (type: string): string | undefined =>
-      props.find((p: any) => p.type === type)?.value ?? props.find((p: any) => p.type === type)?.url;
+    const propMap = new Map<string, string>();
+    for (const p of props) {
+      propMap.set(p.type, p.value ?? p.url ?? '');
+    }
 
-    const specUrl = getProperty('Swagger');
+    const specUrl = propMap.get('Swagger');
     if (!specUrl) continue;
 
     // Skip private APIs
-    if (getProperty('X-Private') === 'true') continue;
+    if (propMap.get('X-Private') === 'true') continue;
 
-    const oasVersion = getProperty('X-OASVersion') ?? getProperty('X-Specification') ?? '';
-    const updated = getProperty('X-Modified') ?? getProperty('X-Created') ?? '';
+    const oasVersion = propMap.get('X-OASVersion') ?? propMap.get('X-Specification') ?? '';
+    const updated = propMap.get('X-Modified') ?? propMap.get('X-Created') ?? '';
     const name = api.name ?? '';
     const title = api.description ?? name;
 

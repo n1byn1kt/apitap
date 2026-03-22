@@ -141,8 +141,12 @@ function printUsage(): void {
     --dry-run                  Show what would change without writing
     --json                     Output machine-readable JSON
     --from apis-guru           Bulk-import from APIs.guru directory
+    --from swaggerhub          Import from SwaggerHub (785K+ public specs)
+    --query <term>             Search term (required for SwaggerHub)
     --search <term>            Filter APIs.guru entries by name/title
     --limit <n>                Max APIs to import (default: 100)
+    --no-auth-only             Skip APIs that require authentication
+    --force                    Import even if skill file already exists
 
   Serve options:
     --json                     Output tool list as JSON on stderr
@@ -1058,13 +1062,10 @@ async function handleSwaggerHubImport(flags: Record<string, string | boolean>): 
         continue;
       }
 
-      // Read existing
+      // Read existing — skip HMAC since we only need endpoints for merge
       let existing = null;
       try {
-        existing = await readSkillFile(domain, skillsDir, {
-          verifySignature: true,
-          trustUnsigned: true,
-        });
+        existing = await readSkillFile(domain, skillsDir, { verifySignature: false });
       } catch (err: any) {
         if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') {
           if (!json) console.error(`  Warning: could not read existing skill file for ${domain}: ${err.message}`);

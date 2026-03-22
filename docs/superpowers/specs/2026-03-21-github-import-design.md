@@ -49,6 +49,18 @@ apitap import --from github --topic openapi --query payments --min-stars 10 --li
 - `--query` is only valid with `--topic`.
 - `--min-stars` defaults differ by mode (documented in help text).
 
+### `--topic` flag parsing
+
+The existing hand-rolled arg parser in `src/cli.ts` produces `Record<string, string | boolean>`. Bare `--topic` (no value) parses as `true` (boolean); `--topic openapi` parses as `"openapi"` (string). The handler distinguishes these:
+- `typeof flags.topic === 'string'` → search only that specific topic
+- `flags.topic === true` → search all four canonical topics
+
+This is the first optional-value flag in the CLI — document the behavior in the help text.
+
+### `--update` semantics
+
+The `--update` flag skips specs that were already imported from the same `specUrl` (the `raw.githubusercontent.com` URL) and whose `importHistory[].importedAt` is newer than the repo's `pushedAt`. This uses the same `importHistory` comparison as the APIs.guru handler. Note: if the default branch changes or the file moves, the `specUrl` won't match and the spec will be re-imported (correct behavior — treat it as a new source).
+
 ## Module Architecture
 
 ### New file: `src/skill/github.ts`
@@ -74,6 +86,10 @@ Resolution chain:
 
 The 2s timeout on `execFileSync` prevents CLI stalls if `gh` hangs. Any throw falls through to the env var.
 
+**Auth requirement by mode:**
+- `--org` mode uses the Code Search API (`/search/code`), which **requires authentication**. If `resolveGitHubToken()` returns `null`, exit with error: `"--org requires a GitHub token. Run 'gh auth login' or set GITHUB_TOKEN."` Do not attempt unauthenticated code search — it returns 401.
+- `--topic` mode uses the Repository Search API (`/search/repositories`), which works unauthenticated at 10 req/min. Token is recommended but not required.
+
 ### GitHub API Helper
 
 ```typescript
@@ -86,11 +102,12 @@ export async function githubFetch(
 - Prefixes `https://api.github.com`
 - Sets `Authorization: Bearer <token>` if token present
 - Sets `Accept: application/vnd.github+json`
+- Sets `User-Agent: apitap-import` (required by GitHub API — requests without it are rejected)
 - Parses `X-RateLimit-Remaining` and `X-RateLimit-Reset` from response headers
 - On 403 with rate limit exhausted: throw with message including reset time
 - Before each batch of parallel requests: check `X-RateLimit-Remaining`, early-stop if 0
 - 30s timeout, 10MB response cap (consistent with other importers)
-- SSRF validation on URL
+- No SSRF validation needed on `api.github.com` itself — it's a hardcoded trusted host
 
 ```typescript
 export interface RateLimit {
@@ -109,14 +126,16 @@ export async function searchOrgSpecs(
 ): Promise<GitHubSpecResult[]>
 ```
 
-1. Fan out 4 code search queries in parallel via `Promise.all`:
+1. Run 4 code search queries **sequentially** (not parallel — GitHub's search API has a secondary rate limit of 30 req/min for authenticated users, 10 req/min unauthenticated; parallel fan-out risks hitting it immediately):
    - `filename:openapi.json org:<org>`
    - `filename:openapi.yaml org:<org>`
    - `filename:swagger.json org:<org>`
    - `filename:swagger.yaml org:<org>`
+   - Each query uses `per_page=100` (max allowed). GitHub caps code search at 1,000 total results per query, but for a single org this is rarely a concern.
 2. Dedup results by `htmlUrl`.
 3. Rank: repo stars descending, then file path depth ascending (shallower = more likely canonical).
 4. Return spec locations with repo metadata.
+5. On 422 response (org not found): throw with clear error: `"GitHub org '<org>' not found."` Do not continue to other queries.
 
 ### Topic Search
 
@@ -134,7 +153,7 @@ Canonical topics (used when `--topic` has no value):
 - `openapi3`
 - `swagger-api`
 
-1. Fan out topic queries in parallel via `Promise.all`: `topic:<topic> sort:stars order:desc` for each topic.
+1. Fan out topic queries in parallel via `Promise.all`: `topic:<topic> sort:stars order:desc` for each topic. (Repository search has more generous secondary rate limits than code search, so parallel is fine here.)
 2. Dedup by repo `fullName`.
 3. Filter by `minStars`.
 4. Client-side filter by `--query` (substring match on repo name + description, case-insensitive).
@@ -155,10 +174,11 @@ export async function fetchGitHubSpec(
 ): Promise<Record<string, any>>
 ```
 
-- Fetches from `raw.githubusercontent.com` URL
+- Fetches from `raw.githubusercontent.com` URL using direct `fetch()` — does NOT use `githubFetch()` since this is a different host
+- `raw.githubusercontent.com` requests do **not** count against the GitHub API rate limit, so spec fetches don't consume the API budget
 - Parses JSON or YAML (js-yaml)
-- 10MB size cap
-- 30s timeout
+- 10MB size cap, 30s timeout
+- SSRF validation on the `raw.githubusercontent.com` URL
 
 ### Core Type
 
@@ -199,8 +219,8 @@ Applied after fetching and parsing the OpenAPI spec.
 
 | # | Filter | Condition | Output |
 |---|--------|-----------|--------|
-| 5 | No server URL | No `servers[0].url` and no `host` | `SKIP "spec has no server URL, cannot determine API domain"` |
-| 6 | Localhost/example | `servers[0].url` matches `localhost`, `127.0.0.1`, `example.com`, `petstore.swagger.io` | Silent skip (high volume, zero signal) |
+| 5 | No server URL | No `servers[0].url` and no `host` field in raw spec (checked **before** `convertOpenAPISpec()` to avoid fallback to `raw.githubusercontent.com`) | `SKIP "spec has no server URL, cannot determine API domain"` |
+| 6 | Localhost/example | `servers[0].url` matches `localhost`, `127.0.0.1`, `example.com`, `petstore.swagger.io` (also checked on raw spec before conversion) | Silent skip (high volume, zero signal) |
 | 7 | SSRF validation | Domain resolves to private IP | `SKIP "domain resolves to private address"` |
 | 8 | Templated domain | Domain contains `{var}` segments | Normalize + warn: `"normalized {region}.sentry.io -> sentry.io"`. Continue to import. |
 | 9 | >500 endpoints | Spec exceeds 500-endpoint cap | Truncate + note: `"truncated to 500 endpoints (spec has N)"`. Handled by existing `convertOpenAPISpec()` cap. |
@@ -215,9 +235,36 @@ export function normalizeTemplatedDomain(domain: string): string {
   }
   return d;
 }
+
+// Pre-process spec's server URL before conversion
+export function normalizeSpecServerUrls(spec: Record<string, any>): void {
+  if (spec.servers) {
+    for (const server of spec.servers) {
+      if (server.url && server.url.includes('{')) {
+        try {
+          const url = new URL(server.url);
+          url.hostname = normalizeTemplatedDomain(url.hostname);
+          server.url = url.toString();
+        } catch {
+          // URL with leading template like https://{region}.sentry.io
+          // fails new URL(). Extract hostname manually.
+          const match = server.url.match(/^(https?:\/\/)([^/]+)(.*)/);
+          if (match) {
+            const normalized = normalizeTemplatedDomain(match[2]);
+            server.url = match[1] + normalized + match[3];
+          }
+        }
+      }
+    }
+  }
+}
 ```
 
-Applied after `extractDomainAndBasePath()`, before SSRF validation. The normalized domain becomes the skill file key.
+**Critical: applied BEFORE `convertOpenAPISpec()`**, not after. The problem: `extractDomainAndBasePath()` inside `convertOpenAPISpec()` calls `new URL(server.url)`, which throws on URLs like `https://{region}.sentry.io`. The template variable makes it an invalid URL, causing fallback to the `specUrl` hostname (`raw.githubusercontent.com` — wrong).
+
+The GitHub handler calls `normalizeSpecServerUrls(spec)` to mutate the raw spec object before passing it to `convertOpenAPISpec()`. This way the converter sees a clean URL like `https://sentry.io` and extracts the correct domain.
+
+Only handles leading template segments (`{region}.sentry.io` -> `sentry.io`). Mid-position templates (`api.{region}.sentry.io`) are out of scope — they're rare and would need per-provider logic.
 
 Lives in `github.ts` for now. Can be moved to the converter if other importers need it later.
 
@@ -235,14 +282,16 @@ New function `handleGitHubImport()` in `src/cli.ts`. Same pattern as `handleApis
 4. Cap to `--limit`.
 5. For each surviving result:
    a. Fetch spec via `fetchGitHubSpec()`.
-   b. Apply content filters (no-server, localhost, SSRF, template).
-   c. `convertOpenAPISpec()`.
-   d. Check `--no-auth-only`, `--update`, `--force` (same logic as apis-guru).
-   e. Read existing skill file.
-   f. `mergeSkillFile()`.
-   g. If `--dry-run`: print line, continue.
-   h. `signSkillFile()` + `writeSkillFile()`.
-   i. 100ms polite delay between fetches.
+   b. Pre-conversion content filters on raw spec: no-server-URL check (#5), localhost/example check (#6).
+   c. `normalizeSpecServerUrls(spec)` — fix templated domains before conversion.
+   d. `convertOpenAPISpec()`.
+   e. Post-conversion filters: SSRF validation (#7) on extracted domain.
+   f. Check `--no-auth-only`, `--update`, `--force` (same logic as apis-guru).
+   g. Read existing skill file.
+   h. `mergeSkillFile()`.
+   i. If `--dry-run`: print line, continue.
+   j. `signSkillFile()` + `writeSkillFile()`.
+   k. 100ms polite delay between fetches.
 6. Print summary.
 
 ### Output Format
@@ -295,6 +344,9 @@ Same `{ success, imported, failed, skipped, results[] }` shape as other importer
   "repoSkips": [
     { "repo": "cloudflare/cloudflare-docs", "reason": "fork" }
   ],
+  "specSkips": [
+    { "domain": "gateway.cloudflare.com", "reason": "no server URL" }
+  ],
   "results": [
     {
       "index": 1,
@@ -340,5 +392,5 @@ Same `{ success, imported, failed, skipped, results[] }` shape as other importer
 ## What This Does NOT Change
 
 - No changes to `convertOpenAPISpec()`, `mergeSkillFile()`, `signSkillFile()`, `writeSkillFile()`, or the search index. The GitHub importer feeds into the existing pipeline unchanged.
-- The templated domain normalizer is applied before the existing pipeline, not inside it.
+- The templated domain normalizer mutates the raw spec object before passing to `convertOpenAPISpec()` — it does not modify the converter itself.
 - No new dependencies. Uses `node:child_process` `execFileSync` (already available, no shell injection risk) for `gh auth token` and stdlib `fetch()` for GitHub API calls.

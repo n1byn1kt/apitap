@@ -262,6 +262,83 @@ chrome.storage.local.get(['excludedDomains'], (result) => {
   renderExcludedDomains(result.excludedDomains ?? []);
 });
 
+// --- Approved-domain consent list ---
+
+interface ApprovedDomainEntry {
+  domain: string;
+  approvedAt: string;
+  expiresAt: string;
+}
+
+function formatTimeAgo(iso: string): string {
+  const deltaMs = Date.now() - Date.parse(iso);
+  if (!Number.isFinite(deltaMs)) return 'unknown';
+  const sec = Math.floor(deltaMs / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const days = Math.floor(hr / 24);
+  return `${days}d ago`;
+}
+
+function formatExpiry(iso: string): string {
+  const deltaMs = Date.parse(iso) - Date.now();
+  if (!Number.isFinite(deltaMs)) return 'unknown';
+  if (deltaMs <= 0) return 'expired';
+  const min = Math.floor(deltaMs / (60 * 1000));
+  if (min < 60) return `expires in ${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `expires in ${hr}h`;
+  const days = Math.floor(hr / 24);
+  return `expires in ${days}d`;
+}
+
+function renderApprovedDomains(entries: ApprovedDomainEntry[]) {
+  const list = document.getElementById('approved-domains-list')!;
+  while (list.firstChild) list.removeChild(list.firstChild);
+  if (entries.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'current-site-empty';
+    empty.textContent = 'No active approvals.';
+    list.appendChild(empty);
+    return;
+  }
+  for (const entry of entries) {
+    const item = document.createElement('div');
+    item.className = 'excluded-item';
+
+    const left = document.createElement('div');
+    const domain = document.createElement('div');
+    domain.textContent = entry.domain;
+    const meta = document.createElement('div');
+    meta.className = 'index-meta';
+    meta.textContent = `approved ${formatTimeAgo(entry.approvedAt)} · ${formatExpiry(entry.expiresAt)}`;
+    left.appendChild(domain);
+    left.appendChild(meta);
+
+    const btn = document.createElement('button');
+    btn.className = 'btn-remove';
+    btn.textContent = '×';
+    btn.title = 'Revoke approval';
+    btn.addEventListener('click', () => {
+      chrome.runtime.sendMessage({ type: 'REMOVE_APPROVED_DOMAIN', domain: entry.domain }, (response: any) => {
+        const approved = response?.approvedDomains as ApprovedDomainEntry[] | undefined;
+        renderApprovedDomains(approved ?? []);
+      });
+    });
+
+    item.appendChild(left);
+    item.appendChild(btn);
+    list.appendChild(item);
+  }
+}
+
+chrome.runtime.sendMessage({ type: 'GET_APPROVED_DOMAINS' }, (response: any) => {
+  renderApprovedDomains((response?.approvedDomains ?? []) as ApprovedDomainEntry[]);
+});
+
 document.getElementById('btn-exclude-domain')!.addEventListener('click', () => {
   chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
     const tab = tabs[0];

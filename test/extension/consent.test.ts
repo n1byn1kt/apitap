@@ -22,7 +22,13 @@ const mockStorage: Record<string, any> = {};
 };
 
 // Import after mock is set up
-const { isApproved, addApprovedDomain, removeApprovedDomain, getApprovedDomains } = await import('../../extension/src/consent.js');
+const {
+  isApproved,
+  addApprovedDomain,
+  removeApprovedDomain,
+  getApprovedDomains,
+  getApprovedDomainEntries,
+} = await import('../../extension/src/consent.js');
 
 describe('consent management', () => {
   beforeEach(() => {
@@ -54,5 +60,30 @@ describe('consent management', () => {
     await addApprovedDomain('discord.com');
     const domains = await getApprovedDomains();
     assert.equal(domains.length, 1);
+  });
+
+  it('stores approval metadata with timestamps', async () => {
+    await addApprovedDomain('discord.com');
+    const entries = await getApprovedDomainEntries();
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].domain, 'discord.com');
+    assert.ok(typeof entries[0].approvedAt === 'string');
+    assert.ok(typeof entries[0].expiresAt === 'string');
+    assert.ok(Date.parse(entries[0].expiresAt) > Date.parse(entries[0].approvedAt));
+  });
+
+  it('migrates legacy string[] storage and filters expired entries', async () => {
+    const expired = new Date(Date.now() - 60_000).toISOString();
+    const future = new Date(Date.now() + 60_000).toISOString();
+    mockStorage.approvedAgentDomains = [
+      'legacy.com',
+      { domain: 'fresh.com', approvedAt: new Date().toISOString(), expiresAt: future },
+      { domain: 'expired.com', approvedAt: new Date().toISOString(), expiresAt: expired },
+    ];
+
+    const domains = await getApprovedDomains();
+    assert.ok(domains.includes('legacy.com'));
+    assert.ok(domains.includes('fresh.com'));
+    assert.ok(!domains.includes('expired.com'));
   });
 });

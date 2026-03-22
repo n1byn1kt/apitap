@@ -12,7 +12,7 @@ export interface CaptureState {
 // Messages from popup → background
 export interface CaptureMessage {
   type: 'START_CAPTURE' | 'STOP_CAPTURE' | 'GET_STATE' | 'DOWNLOAD_SKILL'
-    | 'PROMOTE_DOMAIN' | 'GET_INDEX';
+    | 'PROMOTE_DOMAIN' | 'GET_INDEX' | 'GET_APPROVED_DOMAINS' | 'REMOVE_APPROVED_DOMAIN';
   domain?: string; // for PROMOTE_DOMAIN
 }
 

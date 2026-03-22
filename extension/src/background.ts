@@ -126,7 +126,7 @@ async function saveViaBridge(skills: Array<{ domain: string; skillJson: string }
 
 // --- Agent-initiated capture ---
 
-import { isApproved, addApprovedDomain } from './consent.js';
+import { isApproved, addApprovedDomain, removeApprovedDomain, getApprovedDomainEntries } from './consent.js';
 
 // Pending consent callbacks — keyed by domain
 const pendingConsent = new Map<string, {
@@ -1177,6 +1177,25 @@ chrome.runtime.onMessage.addListener(
       case 'GET_INDEX': {
         sendResponse({ type: 'STATE_UPDATE', index: passiveIndex } as any);
         break;
+      }
+
+      case 'GET_APPROVED_DOMAINS': {
+        getApprovedDomainEntries().then((entries) => {
+          sendResponse({ type: 'STATE_UPDATE', approvedDomains: entries } as any);
+        });
+        return true;
+      }
+
+      case 'REMOVE_APPROVED_DOMAIN': {
+        if (!message.domain || !isValidDomain(message.domain)) {
+          sendResponse({ type: 'ERROR', error: 'Invalid domain' } as CaptureResponse);
+          break;
+        }
+        removeApprovedDomain(message.domain).then(async () => {
+          const entries = await getApprovedDomainEntries();
+          sendResponse({ type: 'STATE_UPDATE', approvedDomains: entries } as any);
+        });
+        return true;
       }
     }
   },

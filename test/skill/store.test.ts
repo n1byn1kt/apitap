@@ -1,11 +1,14 @@
 // test/skill/store.test.ts
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeSkillFile, readSkillFile, listSkillFiles } from '../../src/skill/store.js';
 import type { SkillFile } from '../../src/types.js';
+import { randomBytes } from 'node:crypto';
+import { canonicalize } from '../../src/skill/signing.js';
+import { hmacSign } from '../../src/auth/crypto.js';
 
 const makeSkill = (domain: string): SkillFile => ({
   version: '1.1',
@@ -98,5 +101,25 @@ describe('skill store', () => {
 
     const gitignore = await rf(join(baseDir, '.gitignore'), 'utf-8');
     assert.equal(gitignore, 'custom content\n');
+  });
+
+  it('rejects stale signed skill files', async () => {
+    const signingKey = randomBytes(32);
+    const staleBase = {
+      ...makeSkill('example.com'),
+      provenance: 'self' as const,
+      signedAt: '2020-01-01T00:00:00.000Z',
+    };
+    const stale = {
+      ...staleBase,
+      signature: hmacSign(canonicalize(staleBase as SkillFile), signingKey),
+    };
+    const filePath = join(testDir, 'example.com.json');
+    await writeFile(filePath, JSON.stringify(stale, null, 2));
+
+    await assert.rejects(
+      () => readSkillFile('example.com', testDir, { verifySignature: true, signingKey }),
+      /signature is stale/i,
+    );
   });
 });

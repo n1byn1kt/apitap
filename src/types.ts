@@ -143,6 +143,8 @@ export interface SkillFile {
   version: string;
   domain: string;
   capturedAt: string;
+  /** Signature timestamp (ISO) used for anti-replay staleness checks */
+  signedAt?: string;
   baseUrl: string;
   endpoints: SkillEndpoint[];
   metadata: {

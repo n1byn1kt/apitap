@@ -121,4 +121,38 @@ describe('auth scrubbing from exported skill JSON', () => {
     assert.equal(scrubbed.endpoints[0].headers['content-type'], 'application/json');
     assert.equal(scrubbed.endpoints[0].headers.accept, '*/*');
   });
+
+  it('replaces sensitive values in examples.request.headers', () => {
+    const input = JSON.stringify({
+      endpoints: [{
+        examples: {
+          request: {
+            headers: {
+              authorization: 'Bearer live-token',
+              cookie: 'session=live-secret',
+              accept: 'application/json',
+            },
+          },
+        },
+      }],
+    });
+    const scrubbed = JSON.parse(scrubAuthFromSkillJson(input));
+    assert.equal(scrubbed.endpoints[0].examples.request.headers.authorization, '[stored]');
+    assert.equal(scrubbed.endpoints[0].examples.request.headers.cookie, '[stored]');
+    assert.equal(scrubbed.endpoints[0].examples.request.headers.accept, 'application/json');
+  });
+
+  it('still scrubs legacy exampleRequestHeaders for backward compatibility', () => {
+    const input = JSON.stringify({
+      endpoints: [{
+        exampleRequestHeaders: {
+          authorization: 'Bearer legacy-live-token',
+          'x-api-key': 'legacy-secret',
+        },
+      }],
+    });
+    const scrubbed = JSON.parse(scrubAuthFromSkillJson(input));
+    assert.equal(scrubbed.endpoints[0].exampleRequestHeaders.authorization, '[stored]');
+    assert.equal(scrubbed.endpoints[0].exampleRequestHeaders['x-api-key'], '[stored]');
+  });
 });

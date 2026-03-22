@@ -38,12 +38,13 @@ tags?: string[];  // e.g., ["newznab", "usenet-indexer"]
 
 - Regex: `^[a-z0-9-]+$`
 - Max length per tag: 32 characters
+- Max tags per skill file: 16
 - Validated at write time in `writeSkillFile()`
 - Optional field, defaults to `undefined` (backward-compatible, no migration)
 
 ### Signing
 
-Tags are included in the HMAC signature input. Tampering with tags changes the hash.
+Tags are automatically included in the HMAC signature via the existing `canonicalize()` function, which serializes all fields except `signature` and `provenance`. No change to `signing.ts` is needed — adding `tags` to the `SkillFile` type is sufficient.
 
 ### Search index
 
@@ -123,12 +124,18 @@ apitap stamp <spec-source> --domain <host> --apikey <key> [--tags <csv>] [--limi
    - Check OpenAPI `securitySchemes` for the auth mechanism (header vs. query param).
    - **Fallback:** if no `securitySchemes` detected and `--apikey` is provided, default to query-param auth (`?apikey=<key>`). Newznab and SABnzbd both use this pattern, and community specs often have incomplete `securitySchemes`.
    - Store via `authManager.store()`.
-6. **Sign, validate, write** — existing pipeline: `signSkillFile()` → `writeSkillFile()`.
+6. **Sign, validate, write** — existing pipeline: `signSkillFileAs('imported-signed')` → `writeSkillFile()`. Provenance is `imported-signed` (not `self`) since stamp imports a spec onto a new domain.
 7. **Output** — domain, endpoint count, tags, provenance.
 
 ### known-specs.json integration
 
-The existing `known-specs.json` design (issue #43) is an array of entries. Add a `protocol` field to relevant entries:
+`known-specs.json` does not exist yet (issue #43 tracks it as a proposal). This spec includes creating it as new work.
+
+**File location:** `src/data/known-specs.json` (bundled with the package, not user-editable).
+
+**Loading:** `stamp` reads this file at startup via a simple `JSON.parse(readFileSync(...))`. No caching, no hot-reload — it's a small static file.
+
+**Structure:** array of entries, each with an optional `protocol` field for alias resolution:
 
 ```jsonc
 [
@@ -145,7 +152,7 @@ The existing `known-specs.json` design (issue #43) is an array of entries. Add a
 ]
 ```
 
-If no entry matches, `stamp` falls back to treating `<spec-source>` as a URL or file path.
+**Resolution:** `entries.find(e => e.protocol === input)`. If no entry matches, `stamp` falls back to treating `<spec-source>` as a URL or file path.
 
 ### Deferred auth flags
 
@@ -161,9 +168,9 @@ If no entry matches, `stamp` falls back to treating `<spec-source>` as a URL or 
 
 Before writing a spec from scratch, search for existing community OpenAPI specs:
 
-1. `apitap import --from github --query newznab openapi`
+1. `apitap import --from github --topic openapi --query newznab`
 2. `apitap import --from swaggerhub --query newznab`
-3. Manual search of known Newznab documentation repos
+3. Manual GitHub search for Newznab OpenAPI specs
 
 If a usable spec is found, import it directly. If not (or incomplete), write a minimal OpenAPI 3.0 spec covering core endpoints only. Same approach for SABnzbd.
 
@@ -227,7 +234,7 @@ This is a known limitation of the current auth model. The agent can work around 
 |------|--------|
 | `src/types.ts` | Add `tags?: string[]` to `SkillFile` |
 | `src/skill/store.ts` | Validate tags in `writeSkillFile()`, include tags in index update |
-| `src/skill/signing.ts` | Include `tags` in HMAC signature input |
+| `src/skill/signing.ts` | No change needed — `canonicalize()` already includes all non-excluded fields |
 | `src/skill/search.ts` | Add `tags` filter parameter to `searchSkillFiles()` |
 | `src/cli.ts` | Add `stamp` command, add `--tag` flag to `search` |
 | `src/mcp.ts` | Add `tags` parameter to `apitap_search` tool schema |
@@ -237,6 +244,7 @@ This is a known limitation of the current auth model. The agent can work around 
 | File | Purpose |
 |------|---------|
 | `src/skill/stamp.ts` | `stamp` command logic (resolve spec source, import, wire auth, set tags) |
+| `src/data/known-specs.json` | Protocol alias registry (new — issue #43). Initial entries: Newznab, SABnzbd. |
 | `specs/newznab.yaml` | Newznab OpenAPI 3.0 spec (if no usable community spec found) |
 | `specs/sabnzbd.yaml` | SABnzbd OpenAPI 3.0 spec (if no usable community spec found) |
 
@@ -247,5 +255,5 @@ This is a known limitation of the current auth model. The agent can work around 
 | `test/skill/stamp.test.ts` | Spec resolution (alias vs URL vs file), auth wiring (query param fallback), tag validation, output format |
 | `test/skill/search.test.ts` | Tag filtering (AND semantics, empty tags, no tags), tag + text combined search |
 | `test/skill/store.test.ts` | Tag validation regex, max length, tags in index update |
-| `test/skill/signing.test.ts` | Tags included in signature, signature changes when tags change |
+| `test/skill/signing.test.ts` | Verify tags are included in signature via existing canonicalize() |
 | `test/mcp/search.test.ts` | `apitap_search` with tags parameter |

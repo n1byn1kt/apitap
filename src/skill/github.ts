@@ -136,6 +136,45 @@ export async function githubFetch(
   return { data: JSON.parse(text), rateLimit };
 }
 
+// ─── Template domain normalizer ───────────────────────────────────────────────
+
+/**
+ * Strips leading `{var}.` template segments from a domain name.
+ * e.g. "{region}.api.example.com" → "api.example.com"
+ */
+export function normalizeTemplatedDomain(domain: string): string {
+  let d = domain;
+  while (d.startsWith('{')) {
+    const next = d.replace(/^\{[^}]+\}\./, '');
+    if (next === d) break; // malformed template — stop
+    d = next;
+  }
+  return d;
+}
+
+/**
+ * Pre-process spec's server URLs to normalize templated domains.
+ * Mutates the spec object in place — intentional, called before convertOpenAPISpec() consumes it.
+ */
+export function normalizeSpecServerUrls(spec: Record<string, any>): void {
+  if (!spec.servers) return;
+  for (const server of spec.servers) {
+    if (!server.url || !server.url.includes('{')) continue;
+    try {
+      const url = new URL(server.url);
+      url.hostname = normalizeTemplatedDomain(url.hostname);
+      server.url = url.toString();
+    } catch {
+      // URL with leading template like https://{region}.sentry.io fails new URL()
+      const match = server.url.match(/^(https?:\/\/)([^/]+)(.*)/);
+      if (match) {
+        const normalized = normalizeTemplatedDomain(match[2]);
+        server.url = match[1] + normalized + match[3];
+      }
+    }
+  }
+}
+
 // ─── Result types shared across GitHub import tasks ───────────────────────────
 
 /**
@@ -154,4 +193,96 @@ export interface GitHubSpecResult {
   isArchived: boolean;
   pushedAt: string;     // ISO timestamp
   description: string;
+}
+
+// ─── Filter pipeline ──────────────────────────────────────────────────────────
+
+export interface FilterOptions {
+  includeStale?: boolean;
+  minStars?: number;
+}
+
+export interface FilterResult {
+  passed: GitHubSpecResult[];
+  skips: Array<{ repo: string; reason: string }>;
+}
+
+/** Repos not pushed to in 3 years are considered stale. */
+const STALE_THRESHOLD_MS = 3 * 365 * 24 * 60 * 60 * 1000;
+
+/**
+ * Run results through the metadata filter pipeline.
+ * Skips forks, archived repos, stale repos (>3 years, unless includeStale),
+ * and repos below the minStars threshold.
+ */
+export function filterResults(
+  results: GitHubSpecResult[],
+  options: FilterOptions,
+): FilterResult {
+  const passed: GitHubSpecResult[] = [];
+  const skips: Array<{ repo: string; reason: string }> = [];
+
+  for (const result of results) {
+    if (result.isFork) {
+      skips.push({ repo: result.repoFullName, reason: 'fork' });
+      continue;
+    }
+    if (result.isArchived) {
+      skips.push({ repo: result.repoFullName, reason: 'archived' });
+      continue;
+    }
+    if (!options.includeStale) {
+      const pushedMs = new Date(result.pushedAt).getTime();
+      if (Date.now() - pushedMs > STALE_THRESHOLD_MS) {
+        const pushedDate = new Date(result.pushedAt).toISOString().slice(0, 10);
+        skips.push({ repo: result.repoFullName, reason: `stale, last push ${pushedDate}` });
+        continue;
+      }
+    }
+    if (options.minStars !== undefined && result.stars < options.minStars) {
+      skips.push({ repo: result.repoFullName, reason: `${result.stars} stars, below --min-stars ${options.minStars}` });
+      continue;
+    }
+    passed.push(result);
+  }
+
+  return { passed, skips };
+}
+
+// ─── Spec content predicates ──────────────────────────────────────────────────
+
+/**
+ * Returns true if the spec has a usable server URL —
+ * either OpenAPI 3.x `servers[0].url` or Swagger 2.0 `host`.
+ */
+export function hasServerUrl(spec: Record<string, any>): boolean {
+  if (spec.host) return true;
+  if (Array.isArray(spec.servers) && spec.servers.length > 0 && spec.servers[0].url) {
+    return true;
+  }
+  return false;
+}
+
+/** Placeholder domains that indicate a spec is not pointing at a real API. */
+const PLACEHOLDER_HOSTS = ['localhost', '127.0.0.1', 'example.com', 'petstore.swagger.io'];
+
+/**
+ * Returns true if the spec's server URL points at localhost, a loopback address,
+ * or a well-known placeholder domain (example.com, petstore.swagger.io).
+ */
+export function isLocalhostSpec(spec: Record<string, any>): boolean {
+  const urls: string[] = [];
+
+  if (spec.host) {
+    urls.push(spec.host);
+  }
+  if (Array.isArray(spec.servers)) {
+    for (const server of spec.servers) {
+      if (server.url) urls.push(server.url);
+    }
+  }
+
+  return urls.some(u =>
+    PLACEHOLDER_HOSTS.some(ph => u.includes(ph)),
+  );
 }

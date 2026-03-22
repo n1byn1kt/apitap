@@ -32,6 +32,18 @@ import { mergeSkillFile } from './skill/merge.js';
 import { fetchApisGuruList, filterEntries, fetchSpec } from './skill/apis-guru.js';
 import { searchSwaggerHub, fetchSwaggerHubSpec } from './skill/swaggerhub.js';
 import { buildIndex, removeFromIndex } from './skill/index.js';
+import {
+  resolveGitHubToken,
+  searchOrgSpecs,
+  searchTopicSpecs,
+  fetchGitHubSpec,
+  filterResults,
+  hasServerUrl,
+  isLocalhostSpec,
+  normalizeSpecServerUrls,
+  CANONICAL_TOPICS,
+  type RateLimit,
+} from './skill/github.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
@@ -86,6 +98,10 @@ function printUsage(): void {
                                Bulk-import from APIs.guru directory
     apitap import --from swaggerhub --query <term>
                                Import from SwaggerHub (785K+ public specs)
+    apitap import --from github --org <name>
+                               Import specs from a GitHub org's repos
+    apitap import --from github --topic [name]
+                               Import from topic-tagged repos (--query to filter)
     apitap refresh <domain>    Refresh auth tokens via browser
     apitap auth [domain]       View or manage stored auth
     apitap mcp                 Run the full ApiTap MCP server over stdio
@@ -519,6 +535,12 @@ async function handleImport(positional: string[], flags: Record<string, string |
   // --from swaggerhub: SwaggerHub import mode
   if (flags['from'] === 'swaggerhub') {
     await handleSwaggerHubImport(flags);
+    return;
+  }
+
+  // --from github: GitHub import mode
+  if (flags['from'] === 'github') {
+    await handleGitHubImport(flags);
     return;
   }
 
@@ -1127,6 +1149,352 @@ async function handleSwaggerHubImport(flags: Record<string, string | boolean>): 
     console.log();
     console.log(`  Done: ${imported} imported, ${failed} failed, ${skippedApis} skipped`);
     console.log(`       ${totalEndpointsAdded.toLocaleString()} endpoints added across ${imported} APIs`);
+    console.log();
+  }
+}
+
+async function handleGitHubImport(flags: Record<string, string | boolean>): Promise<void> {
+  const json = flags.json === true;
+  const force = flags.force === true;
+  const update = flags.update === true;
+  const dryRun = flags['dry-run'] === true;
+  const noAuthOnly = flags['no-auth-only'] === true;
+  const includeStale = flags['include-stale'] === true;
+  const limit = typeof flags.limit === 'string' ? parseInt(flags.limit, 10) : 20;
+  const org = typeof flags.org === 'string' ? flags.org : undefined;
+  const topicFlag = flags.topic;
+  const query = typeof flags.query === 'string' ? flags.query : undefined;
+  const skillsDir = SKILLS_DIR || join(APITAP_DIR, 'skills');
+
+  // Mutual exclusion
+  if (org && topicFlag) {
+    const msg = '--org and --topic are mutually exclusive';
+    if (json) {
+      console.log(JSON.stringify({ success: false, reason: msg }));
+    } else {
+      console.error(`Error: ${msg}`);
+    }
+    process.exit(1);
+  }
+  if (!org && !topicFlag) {
+    const msg = '--org or --topic required. Usage: apitap import --from github --org <name> OR --topic [name]';
+    if (json) {
+      console.log(JSON.stringify({ success: false, reason: msg }));
+    } else {
+      console.error(`Error: ${msg}`);
+    }
+    process.exit(1);
+  }
+
+  // --min-stars: different defaults per mode
+  const minStarsDefault = org ? 0 : 10;
+  const minStars = typeof flags['min-stars'] === 'string'
+    ? parseInt(flags['min-stars'], 10) : minStarsDefault;
+
+  // --topic parsing: bare --topic = all four topics, --topic openapi = just that one
+  const topics = typeof topicFlag === 'string'
+    ? [topicFlag]
+    : CANONICAL_TOPICS;
+
+  // Auth requirement for --org
+  const token = await resolveGitHubToken();
+  if (org && token === null) {
+    const msg = "--org requires a GitHub token. Run 'gh auth login' or set GITHUB_TOKEN.";
+    if (json) {
+      console.log(JSON.stringify({ success: false, reason: msg }));
+    } else {
+      console.error(`Error: ${msg}`);
+    }
+    process.exit(1);
+  }
+
+  // Discovery phase
+  if (!json) {
+    if (org) {
+      console.log(`\n  Scanning GitHub org "${org}" for OpenAPI specs (limit: ${limit})...\n`);
+    } else {
+      const topicStr = topics.join(', ');
+      console.log(`\n  Searching GitHub topics [${topicStr}] (min-stars: ${minStars}, limit: ${limit})...\n`);
+    }
+  }
+
+  let rawResults: import('./skill/github.js').GitHubSpecResult[];
+  // Rate limit tracking: stored in a mutable container so TypeScript doesn't
+  // narrow to `null` based on control flow. Currently not populated because
+  // searchOrgSpecs/searchTopicSpecs don't expose rate limit info, but the
+  // plumbing is in place for when they do.
+  const rateLimitRef: { value: RateLimit | null } = { value: null };
+
+  try {
+    if (org) {
+      rawResults = await searchOrgSpecs(org, token);
+    } else {
+      rawResults = await searchTopicSpecs(topics, token, { minStars, query });
+    }
+  } catch (err: any) {
+    const msg = `GitHub discovery failed: ${err.message}`;
+    if (json) {
+      console.log(JSON.stringify({ success: false, reason: msg }));
+    } else {
+      console.error(`Error: ${msg}`);
+    }
+    process.exit(1);
+  }
+
+  // Filter: forks, archived, stale, min-stars
+  const { passed, skips: repoSkips } = filterResults(rawResults, { includeStale, minStars });
+
+  if (!json && repoSkips.length > 0) {
+    for (const skip of repoSkips) {
+      console.log(`  SKIP repo  ${skip.repo.padEnd(40)} ${skip.reason}`);
+    }
+    console.log();
+  }
+
+  // Cap to limit
+  const capped = passed.slice(0, limit);
+
+  if (capped.length === 0) {
+    if (json) {
+      console.log(JSON.stringify({
+        success: true,
+        imported: 0,
+        failed: 0,
+        skipped: 0,
+        totalEndpoints: 0,
+        repoSkips,
+        specSkips: [],
+        results: [],
+      }));
+    } else {
+      console.log('  No matching specs found.\n');
+    }
+    return;
+  }
+
+  if (!json) {
+    console.log(`  Found ${passed.length} specs, importing top ${capped.length}...\n`);
+  }
+
+  const total = capped.length;
+  let imported = 0;
+  let failed = 0;
+  let skippedSpecs = 0;
+  let totalEndpointsAdded = 0;
+  const specSkips: Array<{ domain: string; reason: string }> = [];
+
+  const machineId = await getMachineId();
+  const key = deriveSigningKey(machineId);
+
+  const results: Array<{
+    index: number;
+    status: 'ok' | 'fail' | 'skip';
+    domain: string;
+    title: string;
+    endpointsAdded: number;
+    htmlUrl: string;
+    error?: string;
+  }> = [];
+
+  for (let i = 0; i < capped.length; i++) {
+    const result = capped[i];
+    const idx = String(i + 1).padStart(String(total).length, ' ');
+
+    try {
+      // Fetch spec
+      const spec = await fetchGitHubSpec(result.specUrl, token);
+
+      // Pre-conversion content filters
+      if (!hasServerUrl(spec)) {
+        if (!json) {
+          console.log(`  [${idx}/${total}] SKIP ${result.repoFullName.padEnd(40)} no server URL`);
+        }
+        specSkips.push({ domain: result.repoFullName, reason: 'no server URL' });
+        skippedSpecs++;
+        continue;
+      }
+
+      if (isLocalhostSpec(spec)) {
+        specSkips.push({ domain: result.repoFullName, reason: 'localhost/placeholder' });
+        skippedSpecs++;
+        continue;
+      }
+
+      // Normalize templated domains before conversion
+      normalizeSpecServerUrls(spec);
+
+      // Convert
+      const importResult = convertOpenAPISpec(spec, result.specUrl);
+      const { domain, endpoints, meta } = importResult;
+
+      if (endpoints.length === 0) {
+        if (!json) {
+          console.log(`  [${idx}/${total}] SKIP ${domain.padEnd(40)} 0 endpoints`);
+        }
+        specSkips.push({ domain, reason: '0 endpoints' });
+        skippedSpecs++;
+        continue;
+      }
+
+      // SSRF validate
+      const dnsCheck = await resolveAndValidateUrl(`https://${domain}`);
+      if (!dnsCheck.safe) {
+        if (!json) {
+          console.log(`  [${idx}/${total}] SKIP ${domain.padEnd(40)} SSRF risk`);
+        }
+        specSkips.push({ domain, reason: 'SSRF risk' });
+        skippedSpecs++;
+        continue;
+      }
+
+      // Skip auth-required APIs when --no-auth-only is set
+      if (noAuthOnly && meta.requiresAuth) {
+        if (!json) {
+          console.log(`  [${idx}/${total}] SKIP ${domain.padEnd(40)} requires auth`);
+        }
+        specSkips.push({ domain, reason: 'requires auth' });
+        skippedSpecs++;
+        continue;
+      }
+
+      // Read existing — skip HMAC since we only need endpoints for merge
+      let existing = null;
+      try {
+        existing = await readSkillFile(domain, skillsDir, { verifySignature: false });
+      } catch (err: any) {
+        if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+          if (!json) console.error(`  Warning: could not read existing skill file for ${domain}: ${err.message}`);
+        }
+      }
+
+      // --update check: skip if existing import from same specUrl is newer than repo push
+      if (!force && update && existing?.metadata.importHistory?.some(
+        (h: any) => h.specUrl === result.specUrl && h.importedAt >= result.pushedAt
+      )) {
+        if (!json) console.log(`  [${idx}/${total}] SKIP ${domain.padEnd(40)} up to date`);
+        skippedSpecs++;
+        specSkips.push({ domain, reason: 'up to date' });
+        continue;
+      }
+
+      // Skip if already exists and not --force and not --update
+      if (!force && !update && existing?.endpoints.length) {
+        if (!json) {
+          console.log(`  [${idx}/${total}] SKIP ${domain.padEnd(40)} already exists (${existing.endpoints.length} endpoints)`);
+        }
+        specSkips.push({ domain, reason: 'already exists' });
+        skippedSpecs++;
+        continue;
+      }
+
+      // Merge
+      const { skillFile, diff } = mergeSkillFile(existing, endpoints, meta);
+      skillFile.domain = domain;
+      skillFile.baseUrl = `https://${domain}`;
+
+      if (dryRun) {
+        if (!json) {
+          console.log(`  (dry run) [${idx}/${total}]  OK   ${domain.padEnd(40)} +${diff.added} endpoints`);
+          console.log(`                 -> ${result.htmlUrl}`);
+        }
+        results.push({
+          index: i + 1,
+          status: 'ok',
+          domain,
+          title: meta.title || result.description,
+          endpointsAdded: diff.added,
+          htmlUrl: result.htmlUrl,
+        });
+        imported++;
+        totalEndpointsAdded += diff.added;
+        continue;
+      }
+
+      // Sign and write
+      const hasCaptured = skillFile.endpoints.some(
+        ep => !ep.endpointProvenance || ep.endpointProvenance === 'captured'
+      );
+      const signed = signSkillFileAs(skillFile, key, hasCaptured ? 'self' : 'imported-signed');
+      await writeSkillFile(signed, skillsDir);
+
+      if (!json) {
+        console.log(`  [${idx}/${total}] OK   ${domain.padEnd(40)} +${diff.added} endpoints  (${result.repoFullName})`);
+      }
+      results.push({
+        index: i + 1,
+        status: 'ok',
+        domain,
+        title: meta.title || result.description,
+        endpointsAdded: diff.added,
+        htmlUrl: result.htmlUrl,
+      });
+      imported++;
+      totalEndpointsAdded += diff.added;
+    } catch (err: any) {
+      if (!json) {
+        console.log(`  [${idx}/${total}] FAIL ${result.repoFullName.padEnd(40)} ${err.message.slice(0, 60)}`);
+      }
+      results.push({
+        index: i + 1,
+        status: 'fail',
+        domain: result.repoFullName,
+        title: result.description,
+        endpointsAdded: 0,
+        htmlUrl: result.htmlUrl,
+        error: err.message,
+      });
+      failed++;
+    }
+
+    // Polite delay between spec fetches
+    if (i < capped.length - 1) {
+      await new Promise(r => setTimeout(r, 100));
+    }
+  }
+
+  if (json) {
+    console.log(JSON.stringify({
+      success: true,
+      imported,
+      failed,
+      skipped: skippedSpecs,
+      totalEndpoints: totalEndpointsAdded,
+      repoSkips,
+      specSkips,
+      results,
+      ...(rateLimitRef.value ? {
+        githubApiUsage: {
+          used: rateLimitRef.value.limit - rateLimitRef.value.remaining,
+          limit: rateLimitRef.value.limit,
+          resetAt: rateLimitRef.value.resetAt.toISOString(),
+        },
+      } : {}),
+    }));
+  } else {
+    console.log(`\n  Imported ${imported} specs: ${totalEndpointsAdded.toLocaleString()} endpoints across ${imported} domains`);
+    if (repoSkips.length) {
+      const reasons = new Map<string, number>();
+      for (const s of repoSkips) reasons.set(s.reason, (reasons.get(s.reason) ?? 0) + 1);
+      const parts = [...reasons.entries()].map(([r, n]) => `${n} ${r}`);
+      console.log(`  Repo skips: ${repoSkips.length} (${parts.join(', ')})`);
+    }
+    if (specSkips.length) {
+      const reasons = new Map<string, number>();
+      for (const s of specSkips) reasons.set(s.reason, (reasons.get(s.reason) ?? 0) + 1);
+      const parts = [...reasons.entries()].map(([r, n]) => `${n} ${r}`);
+      console.log(`  Spec skips: ${specSkips.length} (${parts.join(', ')})`);
+    }
+    if (rateLimitRef.value) {
+      const used = rateLimitRef.value.limit - rateLimitRef.value.remaining;
+      let rateLine = `  GitHub API: ${used}/${rateLimitRef.value.limit} requests used`;
+      if (rateLimitRef.value.remaining < 100) {
+        rateLine += ` (resets ${rateLimitRef.value.resetAt.toLocaleTimeString()})`;
+      }
+      console.log(rateLine);
+    }
+    if (dryRun) {
+      console.log('  (dry run — no changes written)');
+    }
     console.log();
   }
 }

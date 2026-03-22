@@ -438,17 +438,27 @@ async function handleReplay(positional: string[], flags: Record<string, string |
 
   // Check for [stored] placeholders and warn if auth missing
   const endpoint = skill.endpoints.find(e => e.id === endpointId);
+  let replaySkill = skill;
   if (endpoint) {
-    const hasStoredPlaceholder = Object.values(endpoint.headers).some(v => v === '[stored]');
+    const replayEndpoint = {
+      ...endpoint,
+      headers: { ...endpoint.headers },
+    };
+    const hasStoredPlaceholder = Object.values(replayEndpoint.headers).some(v => v === '[stored]');
     if (hasStoredPlaceholder && !storedAuth) {
       console.error(`Warning: Endpoint requires auth but no stored credentials found for "${domain}".`);
       console.error(`  Run \`apitap capture ${domain}\` to capture fresh credentials.\n`);
     }
 
-    // Inject stored auth into a copy of the skill for replay
+    // Inject stored auth into replay-only endpoint headers (never mutate persisted skill template)
     if (storedAuth) {
-      endpoint.headers[storedAuth.header] = storedAuth.value;
+      replayEndpoint.headers[storedAuth.header] = storedAuth.value;
     }
+
+    replaySkill = {
+      ...skill,
+      endpoints: skill.endpoints.map(e => e.id === endpointId ? replayEndpoint : e),
+    };
   }
 
   const fresh = flags.fresh === true;
@@ -459,7 +469,7 @@ async function handleReplay(positional: string[], flags: Record<string, string |
     console.error('[apitap] WARNING: SSRF protection is disabled via --danger-disable-ssrf');
   }
 
-  const result = await replayEndpoint(skill, endpointId, {
+  const result = await replayEndpoint(replaySkill, endpointId, {
     params: Object.keys(params).length > 0 ? params : undefined,
     authManager,
     domain,

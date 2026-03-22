@@ -12,6 +12,11 @@ import { mergeObservation, createEmptyIndex } from './index-store.js';
 import { markPromoted } from './promotion.js';
 import { applyLifecycle } from './lifecycle.js';
 import { encrypt, decrypt } from './crypto.js';
+import {
+  PASSIVE_INDEX_DEFAULT_ENABLED,
+  resolvePassiveIndexEnabled,
+  canObservePassiveIndex,
+} from './passive-index-settings.js';
 import type { IndexFile, IndexEntry } from './types.js';
 
 // --- Native messaging bridge (persistent port) ---
@@ -626,6 +631,7 @@ chrome.storage.session.get(['captureState', 'lastSkillJson'], (result) => {
 
 let passiveIndex: IndexFile = createEmptyIndex();
 let indexDirty = false; // tracks whether index has unsaved changes
+let passiveIndexEnabled = PASSIVE_INDEX_DEFAULT_ENABLED;
 
 // --- Excluded domains (cached in memory, synced from chrome.storage.local) ---
 let excludedDomains: Set<string> = new Set();
@@ -634,9 +640,16 @@ chrome.storage.local.get(['excludedDomains'], (result) => {
   excludedDomains = new Set(result.excludedDomains ?? []);
 });
 
+chrome.storage.local.get(['passiveIndexEnabled'], (result) => {
+  passiveIndexEnabled = resolvePassiveIndexEnabled(result.passiveIndexEnabled);
+});
+
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes.excludedDomains) {
     excludedDomains = new Set(changes.excludedDomains.newValue ?? []);
+  }
+  if (area === 'local' && changes.passiveIndexEnabled) {
+    passiveIndexEnabled = resolvePassiveIndexEnabled(changes.passiveIndexEnabled.newValue);
   }
 });
 
@@ -657,7 +670,7 @@ chrome.storage.local.get(['passiveIndex'], (result) => {
 // Capture request headers (for auth detection) — fires before request is sent
 chrome.webRequest.onSendHeaders.addListener(
   (details) => {
-    if (details.tabId < 0) return; // ignore non-tab requests
+    if (!canObservePassiveIndex(passiveIndexEnabled, details.tabId)) return;
     const headers: Record<string, string> = {};
     for (const h of details.requestHeaders ?? []) {
       if (h.name && h.value) headers[h.name.toLowerCase()] = h.value;
@@ -682,7 +695,7 @@ chrome.webRequest.onSendHeaders.addListener(
 // Process completed requests — this is the main observation point
 chrome.webRequest.onCompleted.addListener(
   (details) => {
-    if (details.tabId < 0) return; // ignore non-tab requests
+    if (!canObservePassiveIndex(passiveIndexEnabled, details.tabId)) return;
 
     // Check exclusion list
     try {
@@ -1177,6 +1190,22 @@ chrome.runtime.onMessage.addListener(
       case 'GET_INDEX': {
         sendResponse({ type: 'STATE_UPDATE', index: passiveIndex } as any);
         break;
+      }
+
+      case 'GET_PASSIVE_INDEX_STATUS': {
+        sendResponse({ type: 'STATE_UPDATE', passiveIndexEnabled } as any);
+        break;
+      }
+
+      case 'SET_PASSIVE_INDEX_ENABLED': {
+        const enabled = message.enabled === true;
+        passiveIndexEnabled = enabled;
+        chrome.storage.local.set({ passiveIndexEnabled: enabled }).then(() => {
+          sendResponse({ type: 'STATE_UPDATE', passiveIndexEnabled } as any);
+        }).catch((err) => {
+          sendResponse({ type: 'ERROR', error: String(err) } as CaptureResponse);
+        });
+        return true;
       }
 
       case 'GET_APPROVED_DOMAINS': {

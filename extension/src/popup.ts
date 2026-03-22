@@ -221,6 +221,19 @@ autolearnCaptureToggle.addEventListener('change', (e) => {
 
 // --- Settings tab ---
 
+const passiveIndexToggle = document.getElementById('passive-index-toggle') as HTMLInputElement;
+
+chrome.runtime.sendMessage({ type: 'GET_PASSIVE_INDEX_STATUS' }, (response: any) => {
+  passiveIndexToggle.checked = response?.passiveIndexEnabled === true;
+});
+
+passiveIndexToggle.addEventListener('change', (e) => {
+  const enabled = (e.target as HTMLInputElement).checked;
+  chrome.runtime.sendMessage({ type: 'SET_PASSIVE_INDEX_ENABLED', enabled }, (response: any) => {
+    passiveIndexToggle.checked = response?.passiveIndexEnabled === true;
+  });
+});
+
 chrome.storage.local.get(['autoLearn', 'revisitThreshold'], (result) => {
   (document.getElementById('auto-learn-toggle') as HTMLInputElement).checked = result.autoLearn ?? false;
   (document.getElementById('revisit-threshold') as HTMLInputElement).value = String(result.revisitThreshold ?? 3);

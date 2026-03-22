@@ -12,8 +12,10 @@ export interface CaptureState {
 // Messages from popup → background
 export interface CaptureMessage {
   type: 'START_CAPTURE' | 'STOP_CAPTURE' | 'GET_STATE' | 'DOWNLOAD_SKILL'
-    | 'PROMOTE_DOMAIN' | 'GET_INDEX' | 'GET_APPROVED_DOMAINS' | 'REMOVE_APPROVED_DOMAIN';
+    | 'PROMOTE_DOMAIN' | 'GET_INDEX' | 'GET_APPROVED_DOMAINS' | 'REMOVE_APPROVED_DOMAIN'
+    | 'GET_PASSIVE_INDEX_STATUS' | 'SET_PASSIVE_INDEX_ENABLED';
   domain?: string; // for PROMOTE_DOMAIN
+  enabled?: boolean; // for SET_PASSIVE_INDEX_ENABLED
 }
 
 // Responses from background → popup

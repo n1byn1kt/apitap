@@ -77,6 +77,14 @@ function scrubObjectFields(obj: Record<string, unknown>): void {
   }
 }
 
+function scrubHeaderFields(headers: Record<string, unknown>): void {
+  for (const key of Object.keys(headers)) {
+    if (SENSITIVE_HEADERS.has(key.toLowerCase()) && typeof headers[key] === 'string') {
+      headers[key] = '[stored]';
+    }
+  }
+}
+
 export function scrubAuthFromSkillJson(json: string): string {
   let skill: any;
   try {
@@ -87,20 +95,19 @@ export function scrubAuthFromSkillJson(json: string): string {
   if (Array.isArray(skill.endpoints)) {
     for (const ep of skill.endpoints) {
       if (ep.headers && typeof ep.headers === 'object') {
-        for (const key of Object.keys(ep.headers)) {
-          if (SENSITIVE_HEADERS.has(key.toLowerCase())) {
-            ep.headers[key] = '[stored]';
-          }
-        }
+        scrubHeaderFields(ep.headers);
       }
-      // Also scrub from example request headers if present
+
+      // Also scrub from schema-aligned example request headers.
+      if (ep.examples?.request?.headers && typeof ep.examples.request.headers === 'object') {
+        scrubHeaderFields(ep.examples.request.headers);
+      }
+
+      // Backward-compat for older extension-generated shape.
       if (ep.exampleRequestHeaders && typeof ep.exampleRequestHeaders === 'object') {
-        for (const key of Object.keys(ep.exampleRequestHeaders)) {
-          if (SENSITIVE_HEADERS.has(key.toLowerCase())) {
-            ep.exampleRequestHeaders[key] = '[stored]';
-          }
-        }
+        scrubHeaderFields(ep.exampleRequestHeaders);
       }
+
       // Scrub sensitive fields from request body templates
       if (ep.requestBody?.template && typeof ep.requestBody.template === 'object') {
         scrubObjectFields(ep.requestBody.template);

@@ -159,7 +159,7 @@ function printUsage(): void {
     --json                     Output machine-readable JSON
     --from apis-guru           Bulk-import from APIs.guru directory
     --from swaggerhub          Import from SwaggerHub (785K+ public specs)
-    --from known               Import curated known API specs (55 providers)
+    --from known               Import curated known API specs (31 providers)
     --query <term>             Filter by provider name (SwaggerHub, known)
     --search <term>            Filter APIs.guru entries by name/title
     --limit <n>                Max APIs to import (default: 100)

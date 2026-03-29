@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { loadKnownSpecs, type KnownSpec } from '../../src/cli.js';
+import { loadKnownSpecs, type KnownSpec } from '../../src/known-specs-loader.js';
 
 describe('known-specs.json', () => {
   let specs: KnownSpec[];

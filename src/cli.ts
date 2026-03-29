@@ -1508,18 +1508,7 @@ async function handleGitHubImport(flags: Record<string, string | boolean>): Prom
 
 // ─── Known specs import ────────────────────────────────────────────────────────
 
-export interface KnownSpec {
-  provider: string;
-  repo: string;
-  specPath: string;
-  specUrl: string;
-  notes: string;
-}
-
-export function loadKnownSpecs(): KnownSpec[] {
-  const specPath = join(__dirname, '..', 'data', 'known-specs.json');
-  return JSON.parse(readFileSync(specPath, 'utf-8')) as KnownSpec[];
-}
+import { loadKnownSpecs, KnownSpec } from './known-specs-loader.js';
 
 async function handleKnownSpecsImport(flags: Record<string, string | boolean>): Promise<void> {
   const json = flags.json === true;
@@ -1553,7 +1542,7 @@ async function handleKnownSpecsImport(flags: Record<string, string | boolean>): 
       console.log(JSON.stringify({ success: true, imported: 0, failed: 0, skipped: 0, totalEndpoints: 0 }));
     } else {
       console.log(query
-        ? `\n  No known specs matching "${query}". Run without --query to see all ${loadKnownSpecs().length} providers.\n`
+        ? `\n  No known specs matching "${query}". Run without --query to see all ${allSpecs.length} providers.\n`
         : '\n  No known specs found.\n');
     }
     return;

@@ -1,18 +1,17 @@
 // test/skill/known-specs.cli.test.ts
-import { execSync } from 'node:child_process';
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { loadKnownSpecs } from '../../src/known-specs-loader.js';
 import { join } from 'node:path';
 import { existsSync, rmSync } from 'node:fs';
 
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
-const CLI = join(__dirname, '../../dist/cli.js');
+const CLI = join(__dirname, '../../src/cli.ts');
 const SKILLS_DIR = join(__dirname, '../../tmp/skills-test');
 
-function runCli(args, opts = {}) {
-  return execSync(`node ${CLI} ${args}`, { encoding: 'utf8', ...opts });
+function runCli(args: string, opts = {}) {
+  return execFileSync('node', ['--import', 'tsx', CLI, ...args.split(/\s+/)], { encoding: 'utf8', ...opts });
 }
 
 describe('known-specs CLI integration', () => {

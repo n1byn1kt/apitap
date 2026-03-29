@@ -29,6 +29,7 @@ import { createMcpServer } from './mcp.js';
 import { attach, parseDomainPatterns } from './capture/cdp-attach.js';
 import { isOpenAPISpec, convertOpenAPISpec } from './skill/openapi-converter.js';
 import { mergeSkillFile } from './skill/merge.js';
+import { loadKnownSpecs, type KnownSpec } from './known-specs-loader.js';
 import { fetchApisGuruList, filterEntries, fetchSpec } from './skill/apis-guru.js';
 import { searchSwaggerHub, fetchSwaggerHubSpec } from './skill/swaggerhub.js';
 import { buildIndex, removeFromIndex } from './skill/index.js';
@@ -158,7 +159,7 @@ function printUsage(): void {
     --json                     Output machine-readable JSON
     --from apis-guru           Bulk-import from APIs.guru directory
     --from swaggerhub          Import from SwaggerHub (785K+ public specs)
-    --from known               Import curated known API specs (50+ providers)
+    --from known               Import curated known API specs (55 providers)
     --query <term>             Filter by provider name (SwaggerHub, known)
     --search <term>            Filter APIs.guru entries by name/title
     --limit <n>                Max APIs to import (default: 100)
@@ -1508,8 +1509,6 @@ async function handleGitHubImport(flags: Record<string, string | boolean>): Prom
 
 // ─── Known specs import ────────────────────────────────────────────────────────
 
-import { loadKnownSpecs, KnownSpec } from './known-specs-loader.js';
-
 async function handleKnownSpecsImport(flags: Record<string, string | boolean>): Promise<void> {
   const json = flags.json === true;
   const dryRun = flags['dry-run'] === true;
@@ -1519,9 +1518,9 @@ async function handleKnownSpecsImport(flags: Record<string, string | boolean>): 
   const skillsDir = SKILLS_DIR || join(APITAP_DIR, 'skills');
 
   // Load curated specs
-  let specs: KnownSpec[];
+  let allSpecs: KnownSpec[];
   try {
-    specs = loadKnownSpecs();
+    allSpecs = loadKnownSpecs();
   } catch (err: any) {
     const msg = `Failed to load known-specs.json: ${err.message}`;
     if (json) {
@@ -1533,8 +1532,9 @@ async function handleKnownSpecsImport(flags: Record<string, string | boolean>): 
   }
 
   // Filter by --query
+  let specs = allSpecs;
   if (query) {
-    specs = specs.filter(s => s.provider.toLowerCase().includes(query));
+    specs = allSpecs.filter(s => s.provider.toLowerCase().includes(query));
   }
 
   if (specs.length === 0) {

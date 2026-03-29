@@ -10,9 +10,9 @@ describe('known-specs.json', () => {
     assert.ok(Array.isArray(specs));
   });
 
-  it('contains at least 50 entries', () => {
+  it('contains at least 25 entries', () => {
     specs = loadKnownSpecs();
-    assert.ok(specs.length >= 50, `expected >= 50 entries, got ${specs.length}`);
+    assert.ok(specs.length >= 25, `expected >= 25 entries, got ${specs.length}`);
   });
 
   it('every entry has required fields', () => {

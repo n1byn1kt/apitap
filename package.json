@@ -44,6 +44,7 @@
   "files": [
     "dist/",
     "src/",
+    "data/",
     "LICENSE",
     "README.md",
     "SKILL.md"

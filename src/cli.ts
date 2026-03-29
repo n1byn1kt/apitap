@@ -158,7 +158,8 @@ function printUsage(): void {
     --json                     Output machine-readable JSON
     --from apis-guru           Bulk-import from APIs.guru directory
     --from swaggerhub          Import from SwaggerHub (785K+ public specs)
-    --query <term>             Search term (required for SwaggerHub)
+    --from known               Import curated known API specs (50+ providers)
+    --query <term>             Filter by provider name (SwaggerHub, known)
     --search <term>            Filter APIs.guru entries by name/title
     --limit <n>                Max APIs to import (default: 100)
     --no-auth-only             Skip APIs that require authentication
@@ -541,6 +542,12 @@ async function handleImport(positional: string[], flags: Record<string, string |
   // --from github: GitHub import mode
   if (flags['from'] === 'github') {
     await handleGitHubImport(flags);
+    return;
+  }
+
+  // --from known: curated known-specs import mode
+  if (flags['from'] === 'known') {
+    await handleKnownSpecsImport(flags);
     return;
   }
 
@@ -1492,6 +1499,234 @@ async function handleGitHubImport(flags: Record<string, string | boolean>): Prom
       }
       console.log(rateLine);
     }
+    if (dryRun) {
+      console.log('  (dry run — no changes written)');
+    }
+    console.log();
+  }
+}
+
+// ─── Known specs import ────────────────────────────────────────────────────────
+
+export interface KnownSpec {
+  provider: string;
+  repo: string;
+  specPath: string;
+  specUrl: string;
+  notes: string;
+}
+
+export function loadKnownSpecs(): KnownSpec[] {
+  const specPath = join(__dirname, '..', 'data', 'known-specs.json');
+  return JSON.parse(readFileSync(specPath, 'utf-8')) as KnownSpec[];
+}
+
+async function handleKnownSpecsImport(flags: Record<string, string | boolean>): Promise<void> {
+  const json = flags.json === true;
+  const dryRun = flags['dry-run'] === true;
+  const force = flags.force === true;
+  const noAuthOnly = flags['no-auth-only'] === true;
+  const query = typeof flags.query === 'string' ? flags.query.toLowerCase() : undefined;
+  const skillsDir = SKILLS_DIR || join(APITAP_DIR, 'skills');
+
+  // Load curated specs
+  let specs: KnownSpec[];
+  try {
+    specs = loadKnownSpecs();
+  } catch (err: any) {
+    const msg = `Failed to load known-specs.json: ${err.message}`;
+    if (json) {
+      console.log(JSON.stringify({ success: false, reason: msg }));
+    } else {
+      console.error(`Error: ${msg}`);
+    }
+    process.exit(1);
+  }
+
+  // Filter by --query
+  if (query) {
+    specs = specs.filter(s => s.provider.toLowerCase().includes(query));
+  }
+
+  if (specs.length === 0) {
+    if (json) {
+      console.log(JSON.stringify({ success: true, imported: 0, failed: 0, skipped: 0, totalEndpoints: 0 }));
+    } else {
+      console.log(query
+        ? `\n  No known specs matching "${query}". Run without --query to see all ${loadKnownSpecs().length} providers.\n`
+        : '\n  No known specs found.\n');
+    }
+    return;
+  }
+
+  if (!json) {
+    console.log(`\n  Importing ${specs.length} known API specs${query ? ` matching "${query}"` : ''}...\n`);
+  }
+
+  const total = specs.length;
+  let imported = 0;
+  let failed = 0;
+  let skippedSpecs = 0;
+  let totalEndpointsAdded = 0;
+
+  const machineId = await getMachineId();
+  const key = deriveSigningKey(machineId);
+
+  const results: Array<{
+    index: number;
+    status: 'ok' | 'fail' | 'skip';
+    provider: string;
+    domain: string;
+    endpointsAdded: number;
+    error?: string;
+  }> = [];
+
+  for (let i = 0; i < specs.length; i++) {
+    const entry = specs[i];
+    const idx = String(i + 1).padStart(String(total).length, ' ');
+
+    try {
+      // Fetch spec (fetchGitHubSpec handles both JSON and YAML, and does SSRF validation)
+      const spec = await fetchGitHubSpec(entry.specUrl, null);
+
+      // Pre-conversion content filters
+      if (!hasServerUrl(spec)) {
+        if (!json) {
+          console.log(`  [${idx}/${total}] SKIP ${entry.provider.padEnd(24)} no server URL`);
+        }
+        results.push({ index: i + 1, status: 'skip', provider: entry.provider, domain: '', endpointsAdded: 0 });
+        skippedSpecs++;
+        continue;
+      }
+
+      if (isLocalhostSpec(spec)) {
+        if (!json) {
+          console.log(`  [${idx}/${total}] SKIP ${entry.provider.padEnd(24)} localhost/placeholder`);
+        }
+        results.push({ index: i + 1, status: 'skip', provider: entry.provider, domain: '', endpointsAdded: 0 });
+        skippedSpecs++;
+        continue;
+      }
+
+      // Normalize templated domains before conversion
+      normalizeSpecServerUrls(spec);
+
+      // Convert
+      const importResult = convertOpenAPISpec(spec, entry.specUrl);
+      const { domain, endpoints, meta } = importResult;
+
+      if (endpoints.length === 0) {
+        if (!json) {
+          console.log(`  [${idx}/${total}] SKIP ${entry.provider.padEnd(24)} 0 endpoints`);
+        }
+        results.push({ index: i + 1, status: 'skip', provider: entry.provider, domain, endpointsAdded: 0 });
+        skippedSpecs++;
+        continue;
+      }
+
+      // Skip auth-required APIs when --no-auth-only is set
+      if (noAuthOnly && meta.requiresAuth) {
+        if (!json) {
+          console.log(`  [${idx}/${total}] SKIP ${entry.provider.padEnd(24)} requires auth`);
+        }
+        results.push({ index: i + 1, status: 'skip', provider: entry.provider, domain, endpointsAdded: 0 });
+        skippedSpecs++;
+        continue;
+      }
+
+      // SSRF validate
+      const dnsCheck = await resolveAndValidateUrl(`https://${domain}`);
+      if (!dnsCheck.safe) {
+        if (!json) {
+          console.log(`  [${idx}/${total}] SKIP ${entry.provider.padEnd(24)} SSRF risk`);
+        }
+        results.push({ index: i + 1, status: 'skip', provider: entry.provider, domain, endpointsAdded: 0 });
+        skippedSpecs++;
+        continue;
+      }
+
+      // Read existing
+      let existing = null;
+      try {
+        existing = await readSkillFile(domain, skillsDir, { verifySignature: false });
+      } catch (err: any) {
+        if ((err as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+          if (!json) console.error(`  Warning: could not read existing skill file for ${domain}: ${err.message}`);
+        }
+      }
+
+      // Skip if already exists and not --force
+      if (!force && existing?.endpoints.length) {
+        if (!json) {
+          console.log(`  [${idx}/${total}] SKIP ${entry.provider.padEnd(24)} already exists (${existing.endpoints.length} endpoints)`);
+        }
+        results.push({ index: i + 1, status: 'skip', provider: entry.provider, domain, endpointsAdded: 0 });
+        skippedSpecs++;
+        continue;
+      }
+
+      // Merge
+      const { skillFile, diff } = mergeSkillFile(existing, endpoints, meta);
+      skillFile.domain = domain;
+      skillFile.baseUrl = `https://${domain}`;
+
+      if (!dryRun) {
+        // Sign and write
+        const hasCaptured = skillFile.endpoints.some(
+          ep => !ep.endpointProvenance || ep.endpointProvenance === 'captured'
+        );
+        const signed = signSkillFileAs(skillFile, key, hasCaptured ? 'self' : 'imported-signed');
+        await writeSkillFile(signed, skillsDir);
+      }
+
+      if (!json) {
+        const label = dryRun ? '(dry run) ' : '';
+        console.log(`  ${label}[${idx}/${total}] OK   ${entry.provider.padEnd(24)} +${diff.added} endpoints  (${domain})`);
+      }
+      results.push({
+        index: i + 1,
+        status: 'ok',
+        provider: entry.provider,
+        domain,
+        endpointsAdded: diff.added,
+      });
+      imported++;
+      totalEndpointsAdded += diff.added;
+    } catch (err: any) {
+      if (!json) {
+        console.log(`  [${idx}/${total}] FAIL ${entry.provider.padEnd(24)} ${err.message.slice(0, 60)}`);
+      }
+      results.push({
+        index: i + 1,
+        status: 'fail',
+        provider: entry.provider,
+        domain: '',
+        endpointsAdded: 0,
+        error: err.message,
+      });
+      failed++;
+    }
+
+    // Polite delay between spec fetches
+    if (i < specs.length - 1) {
+      await new Promise(r => setTimeout(r, 100));
+    }
+  }
+
+  if (json) {
+    console.log(JSON.stringify({
+      success: true,
+      dryRun,
+      imported,
+      failed,
+      skipped: skippedSpecs,
+      totalEndpoints: totalEndpointsAdded,
+      results,
+    }));
+  } else {
+    console.log();
+    console.log(`  Done: ${imported} imported, ${failed} failed, ${skippedSpecs} skipped`);
+    console.log(`       ${totalEndpointsAdded.toLocaleString()} endpoints added across ${imported} APIs`);
     if (dryRun) {
       console.log('  (dry run — no changes written)');
     }

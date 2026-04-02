@@ -1,5 +1,10 @@
 # Changelog
 
+## v1.10.1
+
+### Security
+- Security: Updated path-to-regexp to 8.4.2 to fix ReDoS vulnerability (CVE-2026-4926, CVE-2026-4923)
+
 ## v1.10.0
 
 ### Features

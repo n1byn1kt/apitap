@@ -113,19 +113,48 @@ export async function readSkillFile(
           );
         }
       } else {
-        const { verifySignature } = await import('./signing.js');
+        const { verifySignature, verifySignatureLegacyCanon } = await import('./signing.js');
         let verified = verifySignature(skill, signingKey);
+        let needsResign = false;
         if (!verified) {
-          // Fallback: try pre-v1.4.0 legacy key (before HKDF signing key separation)
+          // Fallback 1: try pre-v1.4.0 legacy key (before HKDF signing key separation)
           // Files signed with deriveKey() directly (not deriveSigningKey()) will match here
           const { deriveKey } = await import('../auth/crypto.js');
           const { getMachineId } = await import('../auth/manager.js');
           const machineId = await getMachineId();
           const legacyKey = deriveKey(machineId);
           verified = verifySignature(skill, legacyKey);
+          if (verified) needsResign = true;
+
+          if (!verified) {
+            // Fallback 2: try legacy (shallow) canonicalization with current key
+            verified = verifySignatureLegacyCanon(skill, signingKey);
+            if (verified) needsResign = true;
+          }
+
+          if (!verified) {
+            // Fallback 3: try legacy canonicalization with legacy key
+            verified = verifySignatureLegacyCanon(skill, legacyKey);
+            if (verified) needsResign = true;
+          }
         }
         if (!verified) {
           throw new Error(`Skill file signature verification failed for ${domain} — file may be tampered`);
+        }
+
+        // Transparent migration: re-sign with current format so future loads are fast
+        if (needsResign) {
+          try {
+            const { signSkillFileAs } = await import('./signing.js');
+            const resigned = signSkillFileAs(
+              { ...skill, signature: undefined, signedAt: undefined } as unknown as SkillFile,
+              signingKey,
+              skill.provenance as 'self' | 'imported-signed',
+            );
+            await writeSkillFile(resigned, skillsDir);
+          } catch {
+            // Migration failure is non-fatal — the file is still valid
+          }
         }
 
         if (skill.signedAt) {

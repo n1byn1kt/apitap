@@ -137,6 +137,17 @@ export async function readSkillFile(
             verified = verifySignatureLegacyCanon(skill, legacyKey);
             if (verified) needsResign = true;
           }
+
+          if (!verified) {
+            // Fallback 4: pre-Feb-22-2026 fixed salt key + legacy canonicalization
+            // Files captured before 7fc489b used pbkdf2(machineId, 'apitap-v0.2-key-derivation')
+            // regardless of per-install salt (which didn't exist yet)
+            const { pbkdf2Sync } = await import('node:crypto');
+            const fixedSaltKey = pbkdf2Sync(machineId, 'apitap-v0.2-key-derivation', 100_000, 32, 'sha512');
+            verified = verifySignatureLegacyCanon(skill, fixedSaltKey);
+            if (!verified) verified = verifySignature(skill, fixedSaltKey);
+            if (verified) needsResign = true;
+          }
         }
         if (!verified) {
           throw new Error(`Skill file signature verification failed for ${domain} — file may be tampered`);

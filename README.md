@@ -74,10 +74,12 @@ npm install -g @apitap/core
 **Claude Code** — one command to wire it up:
 
 ```bash
-claude mcp add -s user apitap -- apitap-mcp
+claude mcp add -s user apitap -- apitap mcp
 ```
 
 That's it. 12 MCP tools, ready to go. Requires Node.js 20+.
+
+> **Note:** `npx @apitap/core mcp` does not work due to [npm scoped package bin resolution](https://github.com/n1byn1kt/apitap/issues/46). Use `npx apitap mcp` or `apitap-mcp` instead.
 
 > **Optional:** To use `capture` and `browse` (which open a real browser), also run:
 > ```bash
@@ -286,8 +288,14 @@ ApiTap includes an MCP server with 12 tools for Claude Desktop, Cursor, Windsurf
 
 ```bash
 # Start the MCP server
-apitap-mcp
+apitap mcp
+
+# Also works via npx (no global install needed)
+npx apitap mcp
 ```
+
+> The legacy `apitap-mcp` binary still works but `apitap mcp` is preferred.
+> `npx @apitap/core mcp` does **not** work — npm can't resolve the default bin for scoped packages with multiple bins ([#46](https://github.com/n1byn1kt/apitap/issues/46)).
 
 **Claude Code** — see [Install](#install) above.
 
@@ -297,7 +305,8 @@ apitap-mcp
 {
   "mcpServers": {
     "apitap": {
-      "command": "apitap-mcp"
+      "command": "apitap",
+      "args": ["mcp"]
     }
   }
 }
@@ -309,7 +318,8 @@ apitap-mcp
 {
   "servers": {
     "apitap": {
-      "command": "apitap-mcp"
+      "command": "apitap",
+      "args": ["mcp"]
     }
   }
 }
@@ -552,6 +562,7 @@ All commands support `--json` for machine-readable output.
 | `apitap replay <domain> <id> [key=val...]` | Replay an API endpoint |
 | `apitap refresh <domain>` | Refresh auth tokens via browser |
 | `apitap auth [domain]` | View or manage stored auth |
+| `apitap mcp` | Run the full ApiTap MCP server over stdio |
 | `apitap serve <domain>` | Serve a skill file as an MCP server |
 | `apitap inspect <url>` | Discover APIs without saving |
 | `apitap stats` | Show token savings report |

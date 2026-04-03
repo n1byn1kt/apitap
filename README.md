@@ -4,9 +4,9 @@
 [![tests](https://img.shields.io/badge/tests-1427%20passing-brightgreen)](https://github.com/n1byn1kt/apitap)
 [![license](https://img.shields.io/badge/license-BSL--1.1-blue)](./LICENSE)
 
-**The MCP server that turns any website into an API — no docs, no SDK, no browser.**
+**The CLI, MCP server, and npm library that turns any website into an API — no docs, no SDK, no browser.**
 
-ApiTap is an MCP server that lets AI agents browse the web through APIs instead of browsers. It ships with **6,400+ pre-mapped endpoints** across 280+ APIs (Stripe, GitHub, Twilio, Slack, Spotify, and more) — ready to query on install. For sites not in the database, it captures API traffic from any website, generates reusable "skill files," and replays them directly with `fetch()`. No DOM, no selectors, no flaky waits. Token costs drop 20-100x compared to browser automation.
+ApiTap is a CLI, MCP server, and npm library that lets AI agents (and you) browse the web through APIs instead of browsers. It ships with **6,400+ pre-mapped endpoints** across 280+ APIs (Stripe, GitHub, Twilio, Slack, Spotify, and more) — ready to query on install. For sites not in the database, it captures API traffic from any website, generates reusable "skill files," and replays them directly with `fetch()`. No DOM, no selectors, no flaky waits. Token costs drop 20-100x compared to browser automation.
 
 The web was built for human eyes; ApiTap makes it native to machines.
 

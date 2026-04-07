@@ -109,7 +109,12 @@ test('npm token', () => {
 });
 
 test('Tailscale auth key', () => {
-  const body = 'auth=tskey-auth-abc123-xyz456def789';
+  // Constructed via join() so the literal token doesn't appear in source.
+  // GitHub secret scanning pattern-matches Tailscale auth keys without a
+  // validity callback, so a literal "tskey-auth-..." string in a test
+  // file gets flagged as a real leak even though it's synthetic.
+  const fakeKey = ['tskey', 'auth', 'abc123', 'xyz456def789'].join('-');
+  const body = `auth=${fakeKey}`;
   const findings = scanOutboundRequest(mk(body));
   assert.equal(findings[0].scanner, 'secret_tailscale_auth_key');
 });

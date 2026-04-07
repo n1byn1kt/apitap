@@ -26,6 +26,33 @@ interface Pattern {
   re: RegExp;
   severity: Severity;
   rationale: string;
+  /** Optional post-match validator. When present, a regex match is only
+   *  promoted to a finding if the validator returns true. Used for
+   *  patterns like credit cards that need checksum validation to avoid
+   *  firing on arbitrary 16-digit sequences (order numbers, IDs, etc.). */
+  validator?: (match: string) => boolean;
+}
+
+/**
+ * Luhn checksum for credit card numbers. Accepts 13-19 digit sequences
+ * (standard PAN range) after stripping non-digit characters. Returns true
+ * if the sequence is a valid Luhn-checksum number.
+ */
+function luhnCheck(input: string): boolean {
+  const clean = input.replace(/[^0-9]/g, '');
+  if (clean.length < 13 || clean.length > 19) return false;
+  let sum = 0;
+  let alternate = false;
+  for (let i = clean.length - 1; i >= 0; i--) {
+    let n = parseInt(clean[i], 10);
+    if (alternate) {
+      n *= 2;
+      if (n > 9) n -= 9;
+    }
+    sum += n;
+    alternate = !alternate;
+  }
+  return sum % 10 === 0;
 }
 
 /**
@@ -140,7 +167,8 @@ const STANDALONE_PATTERNS: readonly Pattern[] = Object.freeze([
     scanner: 'pii_credit_card',
     re: /\b\d{4}[- ]?\d{4}[- ]?\d{4}[- ]?\d{4}\b/g,
     severity: 'medium',
-    rationale: 'Credit card number pattern matched',
+    rationale: 'Credit card number pattern matched (Luhn-verified)',
+    validator: luhnCheck,
   },
 ]);
 
@@ -165,6 +193,8 @@ function scanValue(
 ): void {
   for (const p of STANDALONE_PATTERNS) {
     for (const m of value.matchAll(p.re)) {
+      // If the pattern has a validator, drop the match if it fails.
+      if (p.validator && !p.validator(m[0])) continue;
       out.push({
         source: 'egress',
         scanner: p.scanner,

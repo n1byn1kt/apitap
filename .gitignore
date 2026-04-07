@@ -2,6 +2,11 @@ node_modules/
 dist/
 .worktrees/
 
+# Internal scratch: papers, exploratory prompts, roadmap notes
+NOTES/
+/agenttrapspaper.*
+/apitap-shield-exit-prompt*.md
+
 # Internal planning docs — never commit
 docs/plans/
 docs/launch-announcements.md

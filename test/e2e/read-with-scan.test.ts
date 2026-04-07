@@ -1,11 +1,19 @@
 // test/e2e/read-with-scan.test.ts
-import { test, before, after } from 'node:test';
+import { test, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { read } from '../../src/read/index.js';
 
 let server: Server;
 let baseUrl: string;
+
+// Isolate audit-log writes per test so the scanner doesn't pollute the
+// user's real ~/.local/state/apitap/findings.jsonl when these tests run.
+let tempRoot: string;
+const origXdgState = process.env.XDG_STATE_HOME;
 
 const TRAP_HTML = `<!DOCTYPE html>
 <html>
@@ -45,6 +53,17 @@ after(async () => {
   await new Promise<void>((resolve, reject) => {
     server.close((err) => (err ? reject(err) : resolve()));
   });
+});
+
+beforeEach(async () => {
+  tempRoot = await mkdtemp(join(tmpdir(), 'apitap-read-scan-'));
+  process.env.XDG_STATE_HOME = tempRoot;
+});
+
+afterEach(async () => {
+  if (origXdgState === undefined) delete process.env.XDG_STATE_HOME;
+  else process.env.XDG_STATE_HOME = origXdgState;
+  await rm(tempRoot, { recursive: true, force: true });
 });
 
 test('e2e: read with scan enabled finds the trap', async () => {

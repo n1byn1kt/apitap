@@ -110,6 +110,8 @@ function printUsage(): void {
     apitap peek <url>          Zero-cost triage (HEAD only)
     apitap read <url>          Extract content without a browser
     apitap audit               Audit stored skill files and credentials
+    apitap audit --findings [--source=read|egress] [--scanner=NAME] [--since=ISO] [--json]
+                               Query the trap-aware audit log ($XDG_STATE_HOME/apitap/findings.jsonl)
     apitap forget <domain>     Remove skill file and credentials for a domain
     apitap stats               Show token savings report
     apitap index build         Rebuild search index (run after manual edits)
@@ -2094,7 +2096,71 @@ async function handleRead(positional: string[], flags: Record<string, string | b
   console.log();
 }
 
+function getFlagValue(flags: Record<string, string | boolean>, name: string): string | undefined {
+  // Check "--name=value" form (stored as flags['name=value'] = true)
+  for (const key of Object.keys(flags)) {
+    if (key.startsWith(name + '=')) return key.slice(name.length + 1);
+  }
+  // Check "--name value" form (stored as flags[name] = value)
+  const val = flags[name];
+  if (typeof val === 'string') return val;
+  return undefined;
+}
+
 async function handleAudit(flags: Record<string, string | boolean>): Promise<void> {
+  if (flags['findings'] === true) {
+    const { readFindings, getAuditLogPath } = await import('./trapaware/audit.js');
+
+    const sourceArg = getFlagValue(flags, 'source') as 'read' | 'egress' | undefined;
+    const scannerArg = getFlagValue(flags, 'scanner');
+    const sinceArg = getFlagValue(flags, 'since');
+    const jsonOut = flags['json'] === true;
+
+    const findings = await readFindings({
+      source: sourceArg,
+      scanner: scannerArg,
+      since: sinceArg,
+    });
+
+    if (jsonOut) {
+      for (const f of findings) {
+        process.stdout.write(JSON.stringify(f) + '\n');
+      }
+      return;
+    }
+
+    const logPath = getAuditLogPath();
+    console.log(`${logPath} (${findings.length} findings)`);
+    console.log('');
+
+    // Group by source + scanner
+    const counts = new Map<string, { count: number; last: string }>();
+    for (const f of findings) {
+      const key = `${f['source']}/${f['scanner']}`;
+      const prev = counts.get(key);
+      counts.set(key, {
+        count: (prev?.count ?? 0) + 1,
+        last: typeof f['ts'] === 'string' ? f['ts'] : '',
+      });
+    }
+
+    const grouped = new Map<string, Array<[string, { count: number; last: string }]>>();
+    for (const [key, val] of counts.entries()) {
+      const [src, scan] = key.split('/');
+      if (!grouped.has(src)) grouped.set(src, []);
+      grouped.get(src)!.push([scan, val]);
+    }
+
+    for (const [src, entries] of grouped.entries()) {
+      console.log(src === 'read' ? 'Read scanner:' : 'Egress scanner:');
+      for (const [scanner, val] of entries) {
+        console.log(`  ${scanner.padEnd(35)} ${String(val.count).padStart(5)}   last: ${val.last}`);
+      }
+      console.log('');
+    }
+    return;
+  }
+
   const skillsDir = SKILLS_DIR || join(APITAP_DIR, 'skills');
   const summaries = await listSkillFiles(skillsDir);
   const machineId = await getEffectiveMachineId();

@@ -531,11 +531,18 @@ async function handleReplay(positional: string[], flags: Record<string, string |
       status: result.status,
       data: result.data,
       ...(result.contractWarnings?.length ? { contractWarnings: result.contractWarnings } : {}),
+      ...(result.warnings?.length ? { warnings: result.warnings } : {}),
     }, null, 2));
   } else {
     const hint = endpoint ? getConfidenceHint(endpoint.confidence, endpoint.endpointProvenance) : null;
     if (hint) {
       console.error(`  Note: ${hint}`);
+    }
+    if (result.warnings?.length) {
+      console.error(`\n  \u26a0\ufe0f  Egress scanner flagged ${result.warnings.length} finding${result.warnings.length === 1 ? '' : 's'}:`);
+      for (const w of result.warnings) {
+        console.error(`    - ${w.scanner} (${w.severity}) at ${w.paramLocation}:${w.paramPath} [action: ${w.action}]`);
+      }
     }
     console.log(`\n  Status: ${result.status}\n`);
     console.log(JSON.stringify(result.data, null, 2));

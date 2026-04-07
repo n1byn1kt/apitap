@@ -165,6 +165,10 @@ export interface SkillFile {
     }>;
   };
   provenance: 'self' | 'imported' | 'imported-signed' | 'unsigned';
+  /** Opt-in egress check for this domain. Signed. Default: absent (off). */
+  egress_check?: boolean;
+  /** Action to take when egress scanner finds a high-severity match. Signed. */
+  egress_action?: 'annotate' | 'block';
   signature?: string;
   auth?: SkillAuth; // v0.8: top-level auth config
 }

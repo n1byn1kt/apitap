@@ -8,6 +8,10 @@ import { truncateResponse } from './truncate.js';
 import { resolveAndValidateUrl } from '../skill/ssrf.js';
 import { snapshotSchema } from '../contract/schema.js';
 import { diffSchema, type ContractWarning } from '../contract/diff.js';
+import { scanOutboundRequest } from './egress.js';
+import { loadTrapAwareConfig } from '../trapaware/config.js';
+import { appendFinding } from '../trapaware/audit.js';
+import type { EgressFinding, EgressCheckState } from '../trapaware/types.js';
 
 // Header security: block dangerous headers from skill files (blocklist approach).
 // All other headers — including custom API headers like Client-ID — pass through.
@@ -67,6 +71,8 @@ export interface ReplayOptions {
   maxBytes?: number;
   /** @internal Skip SSRF check — for testing only */
   _skipSsrfCheck?: boolean;
+  /** Per-call override for egress check. `false` forces off; "annotate"/"block" force on with that action. Unset falls through to skill file → global config → off. */
+  egressCheck?: false | 'annotate' | 'block';
 }
 
 export interface ReplayResult {
@@ -81,6 +87,8 @@ export interface ReplayResult {
   contractWarnings?: ContractWarning[];
   /** Upgrade hint: set when a low-confidence endpoint gets a 2xx response */
   upgrade?: { confidence: 1.0; endpointProvenance: 'captured' };
+  /** Present only when the egress scanner ran AND produced findings. */
+  warnings?: EgressFinding[];
 }
 
 /**
@@ -140,7 +148,8 @@ function normalizeOptions(
     'fresh' in optionsOrParams ||
     'params' in optionsOrParams ||
     'maxBytes' in optionsOrParams ||
-    '_skipSsrfCheck' in optionsOrParams;
+    '_skipSsrfCheck' in optionsOrParams ||
+    'egressCheck' in optionsOrParams;
 
   if (hasOptionKeys) {
     return optionsOrParams as ReplayOptions;
@@ -248,6 +257,35 @@ export function getConfidenceHint(
  */
 export function shouldOmitQueryParam(param: { type: string; example: string; fromSpec?: boolean }): boolean {
   return param.fromSpec === true && param.example === '';
+}
+
+/**
+ * Resolve the effective egress check state using the precedence chain:
+ * 1. Per-call override (ReplayOptions.egressCheck)
+ * 2. Skill file (skill.egress_check + skill.egress_action)
+ * 3. Global config (XDG_CONFIG_HOME/apitap/config.json)
+ * 4. Default: off
+ *
+ * When the result is {enabled: false}, the scanner is not called and no
+ * new code paths execute. This is the cron-job contract.
+ */
+async function resolveEgressCheck(
+  callOverride: false | 'annotate' | 'block' | undefined,
+  skill: SkillFile,
+): Promise<EgressCheckState> {
+  if (callOverride !== undefined) {
+    return callOverride === false
+      ? { enabled: false, action: 'annotate' }
+      : { enabled: true, action: callOverride };
+  }
+  if (skill.egress_check === true) {
+    return { enabled: true, action: skill.egress_action ?? 'annotate' };
+  }
+  const cfg = await loadTrapAwareConfig();
+  if (cfg.egressCheckAll === true) {
+    return { enabled: true, action: cfg.egressCheckAction };
+  }
+  return { enabled: false, action: 'annotate' };
 }
 
 /**
@@ -476,6 +514,32 @@ export async function replayEndpoint(
     }
   }
 
+  // ─── Trap-aware egress check ─────────────────────────────────
+  // Resolves the precedence chain. When disabled (the default),
+  // scanOutboundRequest is never called and no findings are logged.
+  let egressFindings: EgressFinding[] | undefined;
+  const egressState = await resolveEgressCheck(options.egressCheck, skill);
+  if (egressState.enabled) {
+    const rawFindings = scanOutboundRequest({
+      url: fetchUrl,
+      method: endpoint.method,
+      body,
+      contentType: headers['content-type'],
+      domain: skill.domain,
+      requestPath: url.pathname,
+    });
+    egressFindings = rawFindings.map(f => ({ ...f, action: egressState.action }));
+    for (const f of egressFindings) {
+      await appendFinding(f, undefined);
+    }
+    if (egressState.action === 'block' && egressFindings.some(f => f.severity === 'high')) {
+      throw new Error(
+        `Egress blocked: ${egressFindings.filter(f => f.severity === 'high').map(f => f.scanner).join(', ')}`,
+      );
+    }
+  }
+  // ─── End trap-aware egress check ─────────────────────────────
+
   let response = await fetch(fetchUrl, {
     method: endpoint.method,
     headers,
@@ -600,6 +664,7 @@ export async function replayEndpoint(
           refreshed,
           ...(truncated.truncated ? { truncated: true } : {}),
           ...(retryUpgrade ? { upgrade: retryUpgrade } : {}),
+          ...(egressFindings && egressFindings.length > 0 ? { warnings: egressFindings } : {}),
         };
       }
 
@@ -609,6 +674,7 @@ export async function replayEndpoint(
         data: retryFinalData,
         refreshed,
         ...(retryUpgrade ? { upgrade: retryUpgrade } : {}),
+        ...(egressFindings && egressFindings.length > 0 ? { warnings: egressFindings } : {}),
       };
     }
   }
@@ -657,10 +723,19 @@ export async function replayEndpoint(
       ...(truncated.truncated ? { truncated: true } : {}),
       ...(contractWarnings ? { contractWarnings } : {}),
       ...(upgrade ? { upgrade } : {}),
+      ...(egressFindings && egressFindings.length > 0 ? { warnings: egressFindings } : {}),
     };
   }
 
-  return { status: response.status, headers: responseHeaders, data: finalData, ...(refreshed ? { refreshed } : {}), ...(contractWarnings ? { contractWarnings } : {}), ...(upgrade ? { upgrade } : {}) };
+  return {
+    status: response.status,
+    headers: responseHeaders,
+    data: finalData,
+    ...(refreshed ? { refreshed } : {}),
+    ...(contractWarnings ? { contractWarnings } : {}),
+    ...(upgrade ? { upgrade } : {}),
+    ...(egressFindings && egressFindings.length > 0 ? { warnings: egressFindings } : {}),
+  };
 }
 
 // --- Batch replay ---

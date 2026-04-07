@@ -1,5 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { isIP } from 'node:net';
 import { resolveAndValidateUrl } from '../../src/skill/ssrf.js';
 import { replayEndpoint } from '../../src/replay/engine.js';
 import type { SkillFile } from '../../src/types.js';
@@ -33,9 +34,16 @@ describe('F3: DNS rebinding prevention', () => {
     assert.ok(result.resolvedIp, 'Should have resolvedIp');
     assert.equal(result.originalHost, 'example.com', 'Should preserve original host');
 
-    // Verify the resolvedUrl uses IP, not hostname
+    // Verify the resolvedUrl uses an IP address, not the hostname. The
+    // address family depends on the local resolver (may return IPv4 or
+    // IPv6); URL.hostname returns IPv6 addresses in bracketed form.
     const resolvedUrlObj = new URL(result.resolvedUrl);
-    assert.match(resolvedUrlObj.hostname, /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/, 'Hostname should be an IP address');
+    const rawIp = resolvedUrlObj.hostname.replace(/^\[|\]$/g, '');
+    assert.ok(
+      isIP(rawIp) > 0,
+      `Hostname should be a valid IP address (IPv4 or IPv6), got: ${resolvedUrlObj.hostname}`,
+    );
+    assert.notEqual(rawIp, 'example.com', 'Hostname should not be the original domain');
     assert.equal(resolvedUrlObj.pathname, '/api', 'Path should be preserved');
   });
 
@@ -66,6 +74,24 @@ describe('F3: DNS rebinding prevention', () => {
       assert.match(capturedUrl, /http:\/\/example\.com\/data/, 'Fetch URL should use original hostname');
     } finally {
       globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('accepts public IPv6 addresses as safe', async () => {
+    // Mock the DNS lookup would be ideal, but we already have a network-
+    // dependent test above. Assert that isPrivateIp (via resolveAndValidateUrl)
+    // no longer fails on IPv6 resolution. example.com commonly returns
+    // IPv6 on IPv6-enabled networks; if it doesn't here, we can't verify
+    // the v6 path, but the test still passes (v4 path always worked).
+    const result = await resolveAndValidateUrl('https://example.com/api');
+    assert.equal(result.safe, true, 'public example.com must resolve as safe regardless of family');
+    assert.ok(result.resolvedIp, 'should have a resolved IP');
+    // If the resolver returned IPv6, verify the pinned URL is well-formed
+    // (bracketed) and parses back to the same address.
+    if (isIP(result.resolvedIp) === 6) {
+      assert.ok(result.resolvedUrl, 'IPv6 resolution must produce a pinned URL');
+      const parsed = new URL(result.resolvedUrl);
+      assert.equal(parsed.hostname, `[${result.resolvedIp}]`, 'IPv6 hostname must be bracketed');
     }
   });
 

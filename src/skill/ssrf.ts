@@ -1,5 +1,6 @@
 // src/skill/ssrf.ts
 import { lookup } from 'node:dns/promises';
+import { isIPv6 } from 'node:net';
 import type { SkillFile } from '../types.js';
 
 export interface ValidationResult {
@@ -198,6 +199,23 @@ function isPrivateIp(ip: string): string | null {
     return isPrivateIp(reconstructed);
   }
 
+  // After IPv4-mapped unwrapping: if `ipv4` still looks like IPv6 (contains
+  // a colon), treat it as a raw IPv6 address. Previously we fell through
+  // to the IPv4 regex and returned 'unrecognized IP format', which blocked
+  // every public IPv6 host (Cloudflare, Wikipedia, GitHub — all AAAA).
+  if (ipv4.includes(':')) {
+    // Reserved / non-routable IPv6 ranges beyond the ones already checked:
+    if (ipv4 === '::') return 'IPv6 unspecified';
+    if (/^ff[0-9a-f]{2}:/i.test(ipv4)) return 'IPv6 multicast';
+    if (/^2001:db8:/i.test(ipv4)) return 'IPv6 documentation (2001:db8::/32)';
+    if (/^100::/i.test(ipv4)) return 'IPv6 discard prefix (100::/64)';
+    // Validate textual format with Node's own IPv6 parser. Rejects
+    // malformed input (too many colons, out-of-range groups, etc.).
+    if (!isIPv6(ipv4)) return 'unrecognized IP format';
+    // Valid public IPv6 address — safe for SSRF purposes.
+    return null;
+  }
+
   const parts = ipv4.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
   if (!parts) return 'unrecognized IP format'; // Fail closed for unrecognized formats
 
@@ -250,9 +268,12 @@ export async function resolveAndValidateUrl(urlString: string): Promise<Validati
       return { safe: false, reason: `DNS rebinding: ${hostname} resolves to ${address} (${privateReason})` };
     }
 
-    // Return the resolved URL with IP pinned to prevent DNS rebinding
+    // Return the resolved URL with IP pinned to prevent DNS rebinding.
+    // IPv6 addresses MUST be bracketed when assigned to URL.hostname —
+    // otherwise the assignment silently fails and the hostname is left
+    // unchanged (Node URL API behavior).
     const pinnedUrl = new URL(urlString);
-    pinnedUrl.hostname = address;
+    pinnedUrl.hostname = isIPv6(address) ? `[${address}]` : address;
     return {
       safe: true,
       resolvedUrl: pinnedUrl.toString(),

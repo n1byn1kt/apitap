@@ -1,4 +1,5 @@
 // src/read/types.ts
+import type { ReadFinding } from '../trapaware/types.js';
 
 export interface PeekResult {
   url: string;
@@ -28,6 +29,8 @@ export interface ReadResult {
     siteName: string | null;
   };
   cost: { tokens: number };
+  /** Trap scanner findings. Present when the scanner ran. Absent when scan: false. */
+  findings?: ReadFinding[];
 }
 
 export interface Decoder {

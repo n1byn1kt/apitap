@@ -180,13 +180,14 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
         params: z.object({}).passthrough().optional().describe('Optional key-value parameters: path params (id), query params, or body variables (variables.limit for GraphQL)'),
         fresh: z.boolean().optional().describe('Force token refresh before replay (opens browser to capture fresh CSRF/session tokens)'),
         maxBytes: z.number().optional().describe('Maximum response size in bytes. Large responses are truncated to fit. Omit for unlimited.'),
+        egress_check: z.union([z.literal(false), z.enum(['annotate', 'block'])]).optional().describe('Per-call egress check override. false forces off; "annotate" or "block" force on with that action. Unset falls through to skill file and global config.'),
       }),
       annotations: {
         readOnlyHint: true,
         openWorldHint: true,
       },
     },
-    async ({ domain, endpointId, params, fresh, maxBytes }) => {
+    async ({ domain, endpointId, params, fresh, maxBytes, egress_check }) => {
       if (!rateLimiter.check()) {
         return { content: [{ type: 'text' as const, text: 'Rate limit exceeded. Try again in a moment.' }], isError: true };
       }
@@ -219,6 +220,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
           fresh: fresh ?? false,
           maxBytes,
           _skipSsrfCheck: options._skipSsrfCheck,
+          egressCheck: egress_check,
         });
         const cached = sessionCache.get(domain);
         const skillSource = cached?.source ?? 'disk';
@@ -372,13 +374,14 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
       inputSchema: z.object({
         url: z.string().describe('URL to read (e.g. "https://en.wikipedia.org/wiki/TypeScript")'),
         maxBytes: z.number().optional().describe('Maximum content size in bytes. Content is truncated to fit.'),
+        scan: z.boolean().optional().describe('Enable trap-aware content scanning (default: true). Set to false to skip scanning and preserve the legacy response envelope shape.'),
       }),
       annotations: {
         readOnlyHint: true,
         openWorldHint: true,
       },
     },
-    async ({ url, maxBytes }) => {
+    async ({ url, maxBytes, scan }) => {
       if (!rateLimiter.check()) {
         return { content: [{ type: 'text' as const, text: 'Rate limit exceeded. Try again in a moment.' }], isError: true };
       }
@@ -389,7 +392,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
             throw new Error(validation.reason ?? 'URL validation failed');
           }
         }
-        const result = await read(url, { maxBytes: maxBytes ?? undefined });
+        const result = await read(url, { maxBytes: maxBytes ?? undefined, scan: scan !== false });
         if (!result) {
           return {
             content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Failed to read content', url }) }],

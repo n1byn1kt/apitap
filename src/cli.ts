@@ -135,6 +135,10 @@ function printUsage(): void {
     --json                     Output machine-readable JSON
     --fresh                    Force token refresh before replay
     --max-bytes <bytes>        Truncate response to fit within byte limit
+    --egress-check             Enable egress scanning for this call (annotate mode)
+    --egress-check=annotate    Explicit annotate mode
+    --egress-check=block       Explicit block mode (refuses on high-severity)
+    --no-egress-check          Force disable, overriding skill file and global config
 
   Auth options:
     --list                     List all domains with stored auth
@@ -151,6 +155,8 @@ function printUsage(): void {
   Read options:
     --json                     Output machine-readable JSON
     --max-bytes <bytes>        Truncate content to fit within byte limit
+    --scan                     Enable trap-aware content scanning (default)
+    --no-scan                  Disable trap-aware content scanning
 
   Import options:
     --yes                      Skip confirmation prompt
@@ -485,6 +491,15 @@ async function handleReplay(positional: string[], flags: Record<string, string |
     console.error('[apitap] WARNING: SSRF protection is disabled via --danger-disable-ssrf');
   }
 
+  let egressCheckOverride: false | 'annotate' | 'block' | undefined = undefined;
+  if (flags['no-egress-check'] === true) {
+    egressCheckOverride = false;
+  } else if (flags['egress-check=block'] === true) {
+    egressCheckOverride = 'block';
+  } else if (flags['egress-check=annotate'] === true || flags['egress-check'] === true) {
+    egressCheckOverride = 'annotate';
+  }
+
   const result = await replayEndpoint(replaySkill, endpointId, {
     params: Object.keys(params).length > 0 ? params : undefined,
     authManager,
@@ -492,6 +507,7 @@ async function handleReplay(positional: string[], flags: Record<string, string |
     fresh,
     maxBytes,
     _skipSsrfCheck: dangerDisableSsrf,
+    egressCheck: egressCheckOverride,
   });
 
   // Auto-upgrade imported endpoints on successful replay
@@ -2054,7 +2070,9 @@ async function handleRead(positional: string[], flags: Record<string, string | b
     console.log(`\n  Reading ${url}...\n`);
   }
 
-  const result = await read(fullUrl, { maxBytes });
+  const scanFlag = flags['no-scan'] !== true;
+
+  const result = await read(fullUrl, { maxBytes, scan: scanFlag });
 
   if (!result) {
     if (json) {

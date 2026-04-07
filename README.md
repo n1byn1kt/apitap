@@ -530,7 +530,88 @@ Endpoint replayed
 
 This is especially relevant now that [MCP servers are being used as attack vectors in the wild](https://cloud.google.com/blog/topics/threat-intelligence/distillation-experimentation-integration-ai-adversarial-use) — Google's Threat Intelligence Group recently documented underground toolkits built on compromised MCP servers. ApiTap is designed to be safe even when processing untrusted inputs.
 
+## Trap-Aware Mode
 
+ApiTap ingests web content on behalf of agents, and adds inspection at the two places it already sits in the pipeline:
+
+- **`apitap read`** scans raw HTML for hidden content containing explicit prompt-injection markers before extraction. Results are annotated on the response via a `findings[]` field; content is never modified.
+- **`apitap replay`** optionally scans outbound request bodies and query strings for secret patterns (SSH keys, cloud credentials, API tokens) before the `fetch()` call. Opt-in per skill file or globally.
+
+### Read-side scanner
+
+The read scanner runs by default on `apitap read` and the `apitap_read` MCP tool. It uses a two-condition gate: a finding is emitted only when content is in a hidden position (inline `style:display:none`, `visibility:hidden`, `opacity:0`, off-viewport positioning, `hidden` attribute, `aria-hidden="true"`, or inside an HTML comment) **and** the hidden content matches an explicit role marker or a known prompt-injection signature.
+
+Visible content never triggers a finding. Blog posts about prompt engineering, documentation of jailbreak techniques, and this README itself are all non-triggering.
+
+Disable with `--no-scan` on the CLI or `scan: false` on the MCP tool.
+
+```bash
+apitap read https://example.com          # scan on by default
+apitap read https://example.com --no-scan  # scan off
+```
+
+**Known limitations:**
+- Class-based CSS hiding is not detected in v1.0. The generic HTML extractor strips `<style>` blocks before the scanner runs, so class-resolved hiding is invisible.
+- Site-specific decoders (Reddit, YouTube, Wikipedia, HN, Twitter, Grokipedia, DeepWiki) bypass scanning. They extract from structured API sources rather than raw HTML.
+- The scanner is a heuristic, not a classifier. Absence of findings is not proof of safety.
+
+### Egress-side scanner (opt-in)
+
+The egress scanner is **opt-in per domain** or globally. Default behavior on upgrade is byte-identical to the previous release — cron-job users see zero change unless they explicitly enable it.
+
+Three ways to enable:
+
+**Per skill file** — add `egress_check: true` to the skill file (part of the signed payload):
+
+```json
+{
+  "version": "1.2",
+  "domain": "api.example.com",
+  "egress_check": true,
+  "egress_action": "annotate",
+  "endpoints": []
+}
+```
+
+**Globally** — via `$XDG_CONFIG_HOME/apitap/config.json`:
+
+```json
+{
+  "egressCheckAll": true,
+  "egressCheckAction": "annotate"
+}
+```
+
+**Per call** — via the CLI flag or MCP tool argument:
+
+```bash
+apitap replay api.example.com post-submit --egress-check=annotate
+apitap replay api.example.com post-submit --egress-check=block
+apitap replay api.example.com post-submit --no-egress-check
+```
+
+Precedence: per-call → skill file → global config → off.
+
+When enabled with `annotate` (default action), the request proceeds normally and the response envelope gains a `warnings[]` field. When enabled with `block`, `high`-severity findings refuse the request. `medium`-severity findings (PII) always annotate, never block.
+
+### Audit log
+
+Both scanners write findings to `$XDG_STATE_HOME/apitap/findings.jsonl` (default: `~/.local/state/apitap/findings.jsonl`):
+
+```bash
+apitap audit --findings
+apitap audit --findings --source=egress --since=2026-04-01
+apitap audit --findings --json
+```
+
+The audit log **never contains matched secret bytes**. Egress findings record pattern name, parameter location, structural path, and match length only.
+
+### Honest threat model
+
+- The read scanner catches hidden content with explicit prompt-injection markers. It does not catch semantic manipulation, framing attacks, class-based hidden content, font-face remapping, or content hidden via external stylesheets.
+- The egress scanner uses pattern matching. An attacker who can get the agent to encode or transform a secret before sending it will defeat pattern matching. This is defense in depth, not a DLP solution.
+- The audit log is advisory tamper-evidence, same-user boundary. Same threat model as ApiTap's existing skill signing.
+- v1.0 is rules-based. No learning loop. Tuning happens via signature list updates informed by audit log data.
 
 ## CLI Reference
 

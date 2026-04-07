@@ -9,6 +9,8 @@ NOTES/
 
 # Internal planning docs — never commit
 docs/plans/
+docs/superpowers/plans/
+docs/superpowers/specs/
 docs/launch-announcements.md
 docs/launch-announcements-final.md
 docs/launch-announcements-v2.md

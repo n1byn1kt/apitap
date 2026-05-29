@@ -579,6 +579,14 @@ export async function replayEndpoint(
         signal: AbortSignal.timeout(30_000),
         redirect: 'manual',  // Prevent chaining
       });
+      // Post-fetch DNS re-validation on the redirect hop (symmetric with the
+      // initial request above) to narrow the TOCTOU rebinding window.
+      if (!options._skipSsrfCheck && redirectUrl.hostname && !redirectUrl.hostname.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)) {
+        const postCheck = await resolveAndValidateUrl(redirectFetchUrl);
+        if (!postCheck.safe) {
+          throw new Error(`DNS rebinding detected (post-redirect): ${postCheck.reason}`);
+        }
+      }
     }
   }
 
@@ -629,6 +637,13 @@ export async function replayEndpoint(
             signal: AbortSignal.timeout(30_000),
             redirect: 'manual',
           });
+          // Post-fetch DNS re-validation on the retry redirect hop.
+          if (!options._skipSsrfCheck && redirectUrl.hostname && !redirectUrl.hostname.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)) {
+            const postCheck = await resolveAndValidateUrl(retryRedirectFetchUrl);
+            if (!postCheck.safe) {
+              throw new Error(`DNS rebinding detected (post-redirect): ${postCheck.reason}`);
+            }
+          }
         }
       }
 

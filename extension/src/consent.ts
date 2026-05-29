@@ -1,4 +1,4 @@
-const STORAGE_KEY = 'approvedAgentDomains';
+export const STORAGE_KEY = 'approvedAgentDomains';
 export const CONSENT_TTL_MS = 24 * 60 * 60 * 1000;
 
 export interface ApprovedDomainEntry {

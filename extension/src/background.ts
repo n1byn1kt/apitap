@@ -52,9 +52,16 @@ function connectNativePort(): void {
 
       // Otherwise, this is a CLI-initiated request relayed through the native host
       if (message.action === 'capture_request') {
+        // The relay ID must be a non-empty string we can echo back for routing;
+        // reject malformed relay messages rather than processing them.
+        if (typeof message._relayId !== 'string' || message._relayId.length === 0) {
+          console.warn('[apitap] dropping capture_request with invalid _relayId');
+          return;
+        }
+        const relayId = message._relayId;
         handleAgentCapture(message as AgentRequest).then((response) => {
           // Send response back with the relay ID so native host can route it
-          nativePort?.postMessage({ ...response, _relayId: message._relayId });
+          nativePort?.postMessage({ ...response, _relayId: relayId });
         });
       }
     });
@@ -131,7 +138,7 @@ async function saveViaBridge(skills: Array<{ domain: string; skillJson: string }
 
 // --- Agent-initiated capture ---
 
-import { isApproved, addApprovedDomain, removeApprovedDomain, getApprovedDomainEntries } from './consent.js';
+import { addApprovedDomain, removeApprovedDomain, getApprovedDomainEntries, STORAGE_KEY as APPROVED_DOMAINS_KEY } from './consent.js';
 
 // Pending consent callbacks — keyed by domain
 const pendingConsent = new Map<string, {
@@ -154,7 +161,7 @@ function requestConsentUI(domain: string): Promise<boolean> {
 
     chrome.notifications.create(notifId, {
       type: 'basic',
-      iconUrl: 'icons/48.png',
+      iconUrl: 'icons/icon48.png',
       title: 'ApiTap Agent Request',
       message: `An agent wants to capture API traffic from ${domain}. Click to allow or deny.`,
       requireInteraction: true,
@@ -339,15 +346,16 @@ async function handleAgentCapture(request: AgentRequest): Promise<AgentResponse>
     return { success: false, error: 'capture_in_progress' };
   }
 
-  // Check per-site consent
-  const approved = await isApproved(domain);
-  if (!approved) {
-    const granted = await requestConsentUI(domain);
-    if (!granted) {
-      return { success: false, error: 'user_denied' };
-    }
-    await addApprovedDomain(domain);
+  // Per-capture consent: agent/CLI-initiated captures ALWAYS prompt, even for
+  // a previously-approved domain. The 24h approval cache must not let a local
+  // process silently drive `debugger` captures of an already-approved domain
+  // (it would attach to the tab and read response bodies with no UI). The
+  // cache/approval list is retained only as a visible record in the popup.
+  const granted = await requestConsentUI(domain);
+  if (!granted) {
+    return { success: false, error: 'user_denied' };
   }
+  await addApprovedDomain(domain);
 
   // Find or open a tab for the domain
   const tab = await findOrOpenTab(domain);
@@ -636,8 +644,30 @@ let passiveIndexEnabled = PASSIVE_INDEX_DEFAULT_ENABLED;
 // --- Excluded domains (cached in memory, synced from chrome.storage.local) ---
 let excludedDomains: Set<string> = new Set();
 
+// --- Approved domains (cached in memory) — gates raw auth-token VALUE capture
+// in the passive index. Passive metadata (auth type, endpoints) is recorded for
+// all domains, but the actual token value is only captured/stored for domains
+// the user has explicitly approved, so enabling the passive index can't silently
+// harvest a brokerage/webmail bearer token (and later write it to disk via
+// auto-learn). Synced from the consent list in chrome.storage.local.
+let approvedTokenDomains: Set<string> = new Set();
+
+function approvedDomainsFromEntries(raw: unknown): Set<string> {
+  if (!Array.isArray(raw)) return new Set();
+  const now = Date.now();
+  const domains = raw
+    .filter((e): e is { domain: string; expiresAt?: string } => !!e && typeof e === 'object' && typeof (e as any).domain === 'string')
+    .filter((e) => !e.expiresAt || Date.parse(e.expiresAt) > now)
+    .map((e) => e.domain);
+  return new Set(domains);
+}
+
 chrome.storage.local.get(['excludedDomains'], (result) => {
   excludedDomains = new Set(result.excludedDomains ?? []);
+});
+
+chrome.storage.local.get([APPROVED_DOMAINS_KEY], (result) => {
+  approvedTokenDomains = approvedDomainsFromEntries(result[APPROVED_DOMAINS_KEY]);
 });
 
 chrome.storage.local.get(['passiveIndexEnabled'], (result) => {
@@ -647,6 +677,9 @@ chrome.storage.local.get(['passiveIndexEnabled'], (result) => {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes.excludedDomains) {
     excludedDomains = new Set(changes.excludedDomains.newValue ?? []);
+  }
+  if (area === 'local' && changes[APPROVED_DOMAINS_KEY]) {
+    approvedTokenDomains = approvedDomainsFromEntries(changes[APPROVED_DOMAINS_KEY].newValue);
   }
   if (area === 'local' && changes.passiveIndexEnabled) {
     passiveIndexEnabled = resolvePassiveIndexEnabled(changes.passiveIndexEnabled.newValue);
@@ -676,9 +709,17 @@ chrome.webRequest.onSendHeaders.addListener(
       if (h.name && h.value) headers[h.name.toLowerCase()] = h.value;
     }
     const reqId = String(details.requestId);
+    // Always record auth TYPE metadata (no secret value) for the index.
     pendingObserverAuthTypes.set(reqId, detectAuthType(headers));
-    const tokens = extractAuthTokens(headers);
-    if (tokens.length > 0) pendingObserverAuthTokens.set(reqId, tokens);
+    // Only capture the raw token VALUE for domains the user explicitly approved.
+    // Otherwise enabling the passive index would silently harvest live bearer
+    // tokens from every site (and auto-learn could write them to disk).
+    let reqDomain = '';
+    try { reqDomain = new URL(details.url).hostname; } catch { /* leave empty */ }
+    if (reqDomain && approvedTokenDomains.has(reqDomain)) {
+      const tokens = extractAuthTokens(headers);
+      if (tokens.length > 0) pendingObserverAuthTokens.set(reqId, tokens);
+    }
     // Clean up if maps grow too large (prevent memory leak)
     if (pendingObserverAuthTypes.size > 1000) {
       const keys = [...pendingObserverAuthTypes.keys()];

@@ -164,6 +164,12 @@ describe('unix socket relay', () => {
     assert.equal(response.action, 'pong');
   });
 
+  it('creates the socket owner-only (0o600) by the time it accepts', async () => {
+    await startSocketServer(socketPath, async () => ({ success: true }));
+    const st = await fs.stat(socketPath);
+    assert.equal(st.mode & 0o777, 0o600, 'socket must be 0o600 with no world/group access window');
+  });
+
   it('handles concurrent CLI connections', async () => {
     const mockHandler = async (msg: any) => {
       await new Promise(r => setTimeout(r, 50));
@@ -244,6 +250,18 @@ describe('relay handler', () => {
 
     assert.equal(result.success, true);
     assert.deepEqual(relayedMessage, { action: 'capture_request', domain: 'x.com' });
+  });
+
+  it('rejects capture_request with an invalid domain before relaying', async () => {
+    let relayed = false;
+    const sendToExtension = async (msg: any) => { relayed = true; return { success: true }; };
+    const handler = createRelayHandler(sendToExtension);
+
+    for (const domain of ['../etc', 'evil.com/../x', 'has space', '']) {
+      const result = await handler({ action: 'capture_request', domain });
+      assert.equal(result.success, false, `domain ${JSON.stringify(domain)} should be rejected`);
+    }
+    assert.equal(relayed, false, 'invalid domains must not reach the extension');
   });
 
   it('returns error when extension relay fails', async () => {

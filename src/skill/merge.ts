@@ -21,6 +21,70 @@ function matchKey(method: string, path: string): string {
   return `${method.toUpperCase()} ${normalizePath(path)}`;
 }
 
+export interface CapturedMergeResult {
+  skillFile: SkillFile;
+  /** endpoints in `fresh` that did not exist in `existing` */
+  added: number;
+  /** endpoints present in both (re-captured this session — fresh won) */
+  updated: number;
+  /** endpoints in `existing` not re-captured this session (carried over) */
+  preserved: number;
+}
+
+/**
+ * Pure function — no I/O.
+ *
+ * Merge a freshly-captured skill file with the one already on disk for the same
+ * domain, so a new capture session ADDS to prior coverage instead of replacing
+ * it. Unlike {@link mergeSkillFile} (which treats its second argument as
+ * lower-priority OpenAPI spec data), here both sides are captured, so the FRESH
+ * capture wins on any endpoint re-seen this session (newest example/verification),
+ * while endpoints only present in the existing file are carried over untouched.
+ *
+ * Endpoints are matched by `METHOD + normalizePath(path)`, so the same route
+ * captured with a different param name (`:id` vs `:userId`) dedupes to one.
+ * The fresh file is used as the base (latest capturedAt / baseUrl / metadata);
+ * the existing file's `metadata.importHistory` is carried forward if present.
+ *
+ * @param existing The existing skill file on disk, or null if none exists.
+ * @param fresh    The skill file generated from the current capture session.
+ */
+export function mergeCapturedSkillFiles(
+  existing: SkillFile | null,
+  fresh: SkillFile,
+): CapturedMergeResult {
+  if (!existing) {
+    return { skillFile: fresh, added: fresh.endpoints.length, updated: 0, preserved: 0 };
+  }
+
+  const freshKeys = new Set(fresh.endpoints.map(ep => matchKey(ep.method, ep.path)));
+
+  // Start from the union: existing endpoints not re-captured, then all fresh.
+  const carriedOver = existing.endpoints.filter(
+    ep => !freshKeys.has(matchKey(ep.method, ep.path)),
+  );
+  const existingKeys = new Set(existing.endpoints.map(ep => matchKey(ep.method, ep.path)));
+
+  let added = 0;
+  let updated = 0;
+  for (const ep of fresh.endpoints) {
+    if (existingKeys.has(matchKey(ep.method, ep.path))) updated++;
+    else added++;
+  }
+
+  const merged: SkillFile = {
+    ...fresh,
+    endpoints: [...carriedOver, ...fresh.endpoints],
+  };
+
+  // Preserve import history from the prior file (capture doesn't produce it).
+  if (existing.metadata?.importHistory && !merged.metadata.importHistory) {
+    merged.metadata = { ...merged.metadata, importHistory: existing.metadata.importHistory };
+  }
+
+  return { skillFile: merged, added, updated, preserved: carriedOver.length };
+}
+
 /**
  * Merge query params from a captured endpoint with params from an imported
  * spec endpoint.

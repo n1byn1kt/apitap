@@ -7,8 +7,9 @@ import { isDomainMatch } from './domain.js';
 import { SkillGenerator, deduplicateAuth, type GeneratorOptions } from '../skill/generator.js';
 import { detectCaptcha } from '../auth/refresh.js';
 import { verifyEndpoints } from './verifier.js';
-import { signSkillFile } from '../skill/signing.js';
-import { writeSkillFile } from '../skill/store.js';
+import { signSkillFileAs, provenanceForSigning } from '../skill/signing.js';
+import { writeSkillFile, readSkillFile } from '../skill/store.js';
+import { mergeCapturedSkillFiles } from '../skill/merge.js';
 import { AuthManager, getMachineId } from '../auth/manager.js';
 import { deriveSigningKey } from '../auth/crypto.js';
 import { homedir } from 'node:os';
@@ -240,11 +241,24 @@ export class CaptureSession {
       // Verify endpoints
       skill = await verifyEndpoints(skill);
 
-      // Sign
-      skill = signSkillFile(skill, key);
+      // Merge with any existing on-disk skill so a re-capture ADDS to prior
+      // coverage instead of overwriting it (#55). Previously-captured endpoints
+      // not seen this session are carried over; the fresh capture wins on any
+      // endpoint re-seen. Read with trustUnsigned so a same-user file always
+      // merges; if it can't be read (corrupt/foreign signature), fall back to
+      // just this session's skill rather than failing the capture.
+      const skillsDir = this.options.skillsDir;
+      let existing = null;
+      try {
+        existing = await readSkillFile(domain, skillsDir, { trustUnsigned: true });
+      } catch { /* no existing or unreadable — proceed with fresh only */ }
+      skill = mergeCapturedSkillFiles(existing, skill).skillFile;
+
+      // Sign with minimum-trust provenance: 'self' for an all-captured file,
+      // 'imported-signed' if the merge carried in any imported endpoints.
+      skill = signSkillFileAs(skill, key, provenanceForSigning(skill));
 
       // Write
-      const skillsDir = this.options.skillsDir;
       const path = await writeSkillFile(skill, skillsDir);
 
       // Tally tiers

@@ -126,4 +126,26 @@ describe('detectOAuthTokenResponse', () => {
     );
     assert.equal(result, null);
   });
+
+  it('does not mis-capture a generic /token endpoint that returns access_token without OAuth shape', () => {
+    // /api/token matches the broad /token pattern but, lacking token_type /
+    // expires_in / refresh_token, may be a non-OAuth ticket/handle — don't
+    // treat its value as a stored OAuth credential.
+    const result = detectOAuthTokenResponse(
+      'https://example.com/api/token',
+      200,
+      JSON.stringify({ access_token: 'one-time-download-handle' }),
+    );
+    assert.equal(result, null);
+  });
+
+  it('still captures a broad /token match when the body is OAuth-shaped', () => {
+    const result = detectOAuthTokenResponse(
+      'https://example.com/v2/token',
+      200,
+      JSON.stringify({ access_token: 'tok', expires_in: 3600 }),
+    );
+    assert.ok(result);
+    assert.equal(result!.accessToken, 'tok');
+  });
 });

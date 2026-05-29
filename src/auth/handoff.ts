@@ -24,14 +24,17 @@ export interface OAuthTokenDetection {
   scope?: string;
 }
 
-/** URL patterns for OAuth token endpoints */
-const TOKEN_URL_PATTERNS = [
-  /\/token\b/i,
+/** Specific OAuth token-endpoint patterns — an access_token here is trusted as an OAuth grant. */
+const SPECIFIC_TOKEN_URL_PATTERNS = [
   /\/oauth\/token/i,
   /\/oauth2\/token/i,
   /\/o\/oauth2\/token/i,
   /securetoken\.googleapis\.com/i,
 ];
+
+/** Broad token-endpoint pattern — matches any /token segment; requires a
+ *  corroborating OAuth field in the body before we treat it as a grant. */
+const BROAD_TOKEN_URL_PATTERN = /\/token\b/i;
 
 /**
  * Detect OAuth token endpoint response from URL, status, and body.
@@ -43,7 +46,9 @@ export function detectOAuthTokenResponse(
   body: string,
 ): OAuthTokenDetection | null {
   if (status < 200 || status >= 300) return null;
-  if (!TOKEN_URL_PATTERNS.some(p => p.test(url))) return null;
+  const specific = SPECIFIC_TOKEN_URL_PATTERNS.some(p => p.test(url));
+  const broad = BROAD_TOKEN_URL_PATTERN.test(url);
+  if (!specific && !broad) return null;
 
   let parsed: Record<string, unknown>;
   try {
@@ -53,6 +58,17 @@ export function detectOAuthTokenResponse(
   }
 
   if (typeof parsed.access_token !== 'string') return null;
+
+  // For broad /token matches (not a specific OAuth path), require a
+  // corroborating OAuth field so we don't mis-capture non-OAuth endpoints
+  // that merely return an `access_token`-named value.
+  if (!specific) {
+    const hasOAuthShape =
+      typeof parsed.token_type === 'string' ||
+      typeof parsed.expires_in === 'number' ||
+      typeof parsed.refresh_token === 'string';
+    if (!hasOAuthShape) return null;
+  }
 
   return {
     accessToken: parsed.access_token,
@@ -238,7 +254,7 @@ async function doHandoff(
       try {
         const status = response.status();
         const url = response.url();
-        if (TOKEN_URL_PATTERNS.some(p => p.test(url)) && status >= 200 && status < 300) {
+        if ((SPECIFIC_TOKEN_URL_PATTERNS.some(p => p.test(url)) || BROAD_TOKEN_URL_PATTERN.test(url)) && status >= 200 && status < 300) {
           const body = await response.text();
           const oauth = detectOAuthTokenResponse(url, status, body);
           if (oauth) {

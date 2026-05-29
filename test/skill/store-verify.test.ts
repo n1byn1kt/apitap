@@ -54,6 +54,35 @@ describe('F4: Signature verification on load', () => {
     await rm(testDir, { recursive: true, force: true });
   });
 
+  it('fixed-salt (v0.2) legacy key fallback is gated behind APITAP_ALLOW_LEGACY_KEYS', async () => {
+    const { pbkdf2Sync } = await import('node:crypto');
+    const prevId = process.env.APITAP_MACHINE_ID;
+    const prevFlag = process.env.APITAP_ALLOW_LEGACY_KEYS;
+    process.env.APITAP_MACHINE_ID = 'fixed-salt-test-id';
+    try {
+      // A file signed with the public-constant v0.2 key (legacy canon).
+      const fixedSaltKey = pbkdf2Sync('fixed-salt-test-id', 'apitap-v0.2-key-derivation', 100_000, 32, 'sha512');
+      const legacy = signSkillLegacy(makeSkill('example.com'), fixedSaltKey);
+      await writeFile(join(testDir, 'example.com.json'), JSON.stringify(legacy));
+
+      // Default: the forgeable fixed-salt key must NOT verify the file.
+      delete process.env.APITAP_ALLOW_LEGACY_KEYS;
+      await assert.rejects(
+        () => readSkillFile('example.com', testDir, { verifySignature: true }),
+        /verification failed|tamper/i,
+        'fixed-salt fallback must be off by default',
+      );
+
+      // Opt-in: one-off migration of genuinely old files.
+      process.env.APITAP_ALLOW_LEGACY_KEYS = '1';
+      const loaded = await readSkillFile('example.com', testDir, { verifySignature: true });
+      assert.ok(loaded, 'should load with APITAP_ALLOW_LEGACY_KEYS=1');
+    } finally {
+      if (prevId === undefined) delete process.env.APITAP_MACHINE_ID; else process.env.APITAP_MACHINE_ID = prevId;
+      if (prevFlag === undefined) delete process.env.APITAP_ALLOW_LEGACY_KEYS; else process.env.APITAP_ALLOW_LEGACY_KEYS = prevFlag;
+    }
+  });
+
   it('verification fails for tampered skill file', async () => {
     // Create and sign a skill
     const skill = makeSkill('example.com');

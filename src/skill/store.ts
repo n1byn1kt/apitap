@@ -147,10 +147,14 @@ export async function readSkillFile(
             if (verified) needsResign = true;
           }
 
-          if (!verified) {
-            // Fallback 4: pre-Feb-22-2026 fixed salt key + legacy canonicalization
-            // Files captured before 7fc489b used pbkdf2(machineId, 'apitap-v0.2-key-derivation')
-            // regardless of per-install salt (which didn't exist yet)
+          if (!verified && process.env.APITAP_ALLOW_LEGACY_KEYS === '1') {
+            // Fallback 4 (opt-in): pre-Feb-22-2026 fixed salt key + legacy
+            // canonicalization. Files captured before 7fc489b used
+            // pbkdf2(machineId, 'apitap-v0.2-key-derivation') regardless of
+            // per-install salt. This salt is a public constant, so on cloned
+            // machine-id fleets (containers/VM templates) the key is shared
+            // and forgeable — gate it behind APITAP_ALLOW_LEGACY_KEYS=1 so it
+            // is only used for an explicit one-off migration of old files.
             const { pbkdf2Sync } = await import('node:crypto');
             const fixedSaltKey = pbkdf2Sync(machineId, 'apitap-v0.2-key-derivation', 100_000, 32, 'sha512');
             verified = verifySignatureLegacyCanon(skill, fixedSaltKey);

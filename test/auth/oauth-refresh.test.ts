@@ -5,8 +5,22 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AuthManager } from '../../src/auth/manager.js';
-import { refreshOAuth } from '../../src/auth/oauth-refresh.js';
+import { refreshOAuth, redactSecrets } from '../../src/auth/oauth-refresh.js';
 import type { OAuthConfig } from '../../src/types.js';
+
+describe('redactSecrets', () => {
+  it('redacts secret values from an error message', () => {
+    const msg = 'connect failed for body grant_type=refresh_token&refresh_token=RT_SECRET&client_secret=CS_SECRET';
+    const out = redactSecrets(msg, ['RT_SECRET', 'CS_SECRET']);
+    assert.ok(!out.includes('RT_SECRET'), 'refresh token must be redacted');
+    assert.ok(!out.includes('CS_SECRET'), 'client secret must be redacted');
+    assert.ok(out.includes('[redacted]'));
+  });
+
+  it('ignores empty/undefined secrets and short values', () => {
+    assert.equal(redactSecrets('plain error', [undefined, '', 'ab']), 'plain error');
+  });
+});
 
 describe('refreshOAuth', () => {
   let testDir: string;

@@ -89,17 +89,24 @@ describe('F4: Signature verification on load', () => {
     assert.equal(loaded.baseUrl, 'https://example.com');
   });
 
-  it('unsigned/imported skill file passes without verification error', async () => {
-    // Create an imported skill (no signature)
+  it('unsigned file labeled "imported" is rejected unless trusted', async () => {
+    // Security fix: `imported` provenance no longer bypasses verification.
     const skill = makeSkill('example.com', 'imported');
     await writeSkillFile(skill, testDir);
 
-    // Reading with verification should not fail for imported files
-    const loaded = await readSkillFile('example.com', testDir, { verifySignature: true, signingKey });
+    await assert.rejects(
+      () => readSkillFile('example.com', testDir, { verifySignature: true, signingKey }),
+      /unsigned/i,
+      'imported-but-unsigned file must not load silently',
+    );
 
-    assert.ok(loaded, 'Should load imported skill without verification error');
-    assert.equal(loaded.domain, 'example.com');
-    assert.equal(loaded.provenance, 'imported');
+    // It still loads when the caller explicitly trusts unsigned files.
+    const loaded = await readSkillFile('example.com', testDir, {
+      verifySignature: true,
+      signingKey,
+      trustUnsigned: true,
+    });
+    assert.ok(loaded, 'Should load with trustUnsigned');
   });
 
   it('verifies pre-March-5 skill files signed with legacy shallow canonicalization', async () => {

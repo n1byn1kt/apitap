@@ -5,7 +5,7 @@ import { writeSkillFile, readSkillFile, listSkillFiles } from './skill/store.js'
 import { replayEndpoint, getConfidenceHint } from './replay/engine.js';
 import { AuthManager, getMachineId } from './auth/manager.js';
 import { deriveSigningKey } from './auth/crypto.js';
-import { signSkillFile, signSkillFileAs } from './skill/signing.js';
+import { signSkillFile, signSkillFileAs, provenanceForSigning } from './skill/signing.js';
 import { importSkillFile } from './skill/importer.js';
 import { resolveAndValidateUrl } from './skill/ssrf.js';
 import { verifyEndpoints } from './capture/verifier.js';
@@ -807,11 +807,10 @@ async function handleOpenAPIImport(
   // Sign and write
   const machineId = await getMachineId();
   const key = deriveSigningKey(machineId);
-  // Determine provenance: 'self' if file has any captured endpoints, 'imported-signed' if all from import
-  const hasCaptured = skillFile.endpoints.some(
-    ep => !ep.endpointProvenance || ep.endpointProvenance === 'captured'
-  );
-  const signed = signSkillFileAs(skillFile, key, hasCaptured ? 'self' : 'imported-signed');
+  // Provenance is the minimum trust across endpoints: 'self' only if every
+  // endpoint is captured, else 'imported-signed' (a single imported endpoint
+  // must not let the whole file inherit 'self' trust).
+  const signed = signSkillFileAs(skillFile, key, provenanceForSigning(skillFile));
   const filePath = await writeSkillFile(signed, skillsDir);
 
   if (json) {
@@ -970,11 +969,8 @@ async function handleApisGuruImport(flags: Record<string, string | boolean>): Pr
 
       if (!dryRun) {
         // Sign and write
-        // Determine provenance: 'self' if file has any captured endpoints, 'imported-signed' if all from import
-        const hasCaptured = skillFile.endpoints.some(
-          ep => !ep.endpointProvenance || ep.endpointProvenance === 'captured'
-        );
-        const signed = signSkillFileAs(skillFile, key, hasCaptured ? 'self' : 'imported-signed');
+        // Minimum-trust provenance across endpoints (see provenanceForSigning).
+        const signed = signSkillFileAs(skillFile, key, provenanceForSigning(skillFile));
         await writeSkillFile(signed, skillsDir);
       }
 
@@ -1151,11 +1147,8 @@ async function handleSwaggerHubImport(flags: Record<string, string | boolean>): 
       skillFile.domain = domain;
       skillFile.baseUrl = `https://${domain}`;
 
-      // Sign and write
-      const hasCaptured = skillFile.endpoints.some(
-        ep => !ep.endpointProvenance || ep.endpointProvenance === 'captured'
-      );
-      const signed = signSkillFileAs(skillFile, key, hasCaptured ? 'self' : 'imported-signed');
+      // Sign and write — minimum-trust provenance (see provenanceForSigning).
+      const signed = signSkillFileAs(skillFile, key, provenanceForSigning(skillFile));
       await writeSkillFile(signed, skillsDir);
 
       if (!json) {
@@ -1443,11 +1436,8 @@ async function handleGitHubImport(flags: Record<string, string | boolean>): Prom
         continue;
       }
 
-      // Sign and write
-      const hasCaptured = skillFile.endpoints.some(
-        ep => !ep.endpointProvenance || ep.endpointProvenance === 'captured'
-      );
-      const signed = signSkillFileAs(skillFile, key, hasCaptured ? 'self' : 'imported-signed');
+      // Sign and write — minimum-trust provenance (see provenanceForSigning).
+      const signed = signSkillFileAs(skillFile, key, provenanceForSigning(skillFile));
       await writeSkillFile(signed, skillsDir);
 
       if (!json) {
@@ -1685,11 +1675,8 @@ async function handleKnownSpecsImport(flags: Record<string, string | boolean>): 
       skillFile.baseUrl = `https://${domain}`;
 
       if (!dryRun) {
-        // Sign and write
-        const hasCaptured = skillFile.endpoints.some(
-          ep => !ep.endpointProvenance || ep.endpointProvenance === 'captured'
-        );
-        const signed = signSkillFileAs(skillFile, key, hasCaptured ? 'self' : 'imported-signed');
+        // Sign and write — minimum-trust provenance (see provenanceForSigning).
+        const signed = signSkillFileAs(skillFile, key, provenanceForSigning(skillFile));
         await writeSkillFile(signed, skillsDir);
       }
 

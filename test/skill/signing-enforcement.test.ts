@@ -79,11 +79,15 @@ describe('HMAC enforcement Phase 2', () => {
     assert.ok(loaded, 'Unsigned file should load with trustUnsigned');
   });
 
-  it('imported file skips verification', async () => {
+  it('unsigned file labeled "imported" no longer bypasses verification', async () => {
+    // Security fix: relabelling a file `imported` used to skip verification.
+    // An imported file with no signature is now treated as unsigned.
     const skill = makeSkill({ provenance: 'imported' });
     await writeSkillFile(skill, testDir);
-    const loaded = await readSkillFile('example.com', testDir, { verifySignature: true, signingKey });
-    assert.ok(loaded, 'Imported file should skip verification');
+    await assert.rejects(
+      () => readSkillFile('example.com', testDir, { verifySignature: true, signingKey }),
+      /unsigned/i,
+    );
   });
 
   it('file signed with wrong key is rejected', async () => {

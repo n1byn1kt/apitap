@@ -102,10 +102,12 @@ export async function readSkillFile(
         signingKey = deriveSigningKey(machineId);
       }
 
-      if (skill.provenance === 'imported') {
-        // Imported files had foreign signature stripped — can't verify
-      } else if (!skill.signature) {
-        // Unsigned files are rejected unless trustUnsigned is set
+      if (!skill.signature) {
+        // Unsigned files are rejected unless trustUnsigned is set. This now
+        // includes legacy `imported` files (which were stored without a
+        // signature); they must be re-imported (and locally signed) or
+        // loaded with --trust-unsigned. Relabelling a file `imported` no
+        // longer bypasses verification.
         if (!options?.trustUnsigned) {
           throw new Error(
             `Skill file for ${domain} is unsigned and cannot be verified. ` +
@@ -113,9 +115,15 @@ export async function readSkillFile(
           );
         }
       } else {
-        const { verifySignature, verifySignatureLegacyCanon } = await import('./signing.js');
+        const { verifySignature, verifySignatureLegacyCanon, verifySignaturePreProvenance } = await import('./signing.js');
         let verified = verifySignature(skill, signingKey);
         let needsResign = false;
+        if (!verified) {
+          // Fallback 0: pre-provenance canonicalization with the current key.
+          // Files signed before provenance was authenticated match here.
+          verified = verifySignaturePreProvenance(skill, signingKey);
+          if (verified) needsResign = true;
+        }
         if (!verified) {
           // Fallback 1: try pre-v1.4.0 legacy key (before HKDF signing key separation)
           // Files signed with deriveKey() directly (not deriveSigningKey()) will match here
@@ -156,11 +164,11 @@ export async function readSkillFile(
         // Transparent migration: re-sign with current format so future loads are fast
         if (needsResign) {
           try {
-            const { signSkillFileAs } = await import('./signing.js');
+            const { signSkillFileAs, provenanceForSigning } = await import('./signing.js');
             const resigned = signSkillFileAs(
               { ...skill, signature: undefined, signedAt: undefined } as unknown as SkillFile,
               signingKey,
-              skill.provenance as 'self' | 'imported-signed',
+              provenanceForSigning(skill),
             );
             await writeSkillFile(resigned, skillsDir);
           } catch {

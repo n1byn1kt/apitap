@@ -44,6 +44,18 @@ export function validateUrl(urlString: string): ValidationResult {
     }
   }
 
+  // IPv6 literal hosts: delegate to the comprehensive isPrivateIp check,
+  // which covers ::, ::1, multicast, documentation, NAT64, IPv4-mapped, and
+  // link/site/unique-local. This closes literals (e.g. [::]) that the
+  // pattern checks below miss, and unifies literal handling in one place.
+  if (hostname.startsWith('[') && hostname.endsWith(']')) {
+    const inner = hostname.slice(1, -1);
+    const reason = isPrivateIp(inner);
+    if (reason) {
+      return { safe: false, reason: `URL targets reserved IPv6 address: ${inner} (${reason})` };
+    }
+  }
+
   // IPv6 loopback
   if (hostname === '[::1]' || hostname === '::1') {
     return { safe: false, reason: 'URL targets IPv6 loopback' };
@@ -209,6 +221,12 @@ function isPrivateIp(ip: string): string | null {
     if (/^ff[0-9a-f]{2}:/i.test(ipv4)) return 'IPv6 multicast';
     if (/^2001:db8:/i.test(ipv4)) return 'IPv6 documentation (2001:db8::/32)';
     if (/^100::/i.test(ipv4)) return 'IPv6 discard prefix (100::/64)';
+    // NAT64 translation prefix — embeds an IPv4 address in the low 32 bits,
+    // so it can reach internal IPv4 hosts (e.g. 64:ff9b::7f00:1 → 127.0.0.1).
+    if (/^64:ff9b:/i.test(ipv4)) return 'IPv6 NAT64 (64:ff9b::/96)';
+    // Deprecated site-local fec0::/10 (fec0–feff); link-local fe80::/10 is
+    // handled above by the fe[89ab] check.
+    if (/^fe[c-f][0-9a-f]:/i.test(ipv4)) return 'IPv6 site-local (deprecated fec0::/10)';
     // Validate textual format with Node's own IPv6 parser. Rejects
     // malformed input (too many colons, out-of-range groups, etc.).
     if (!isIPv6(ipv4)) return 'unrecognized IP format';
@@ -255,8 +273,20 @@ export async function resolveAndValidateUrl(urlString: string): Promise<Validati
 
   const hostname = url.hostname;
 
-  // Skip DNS resolution for raw IPs (already checked by validateUrl)
-  if (hostname.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/) || hostname.startsWith('[')) {
+  // Skip DNS resolution for raw IPv4 literals (already range-checked by validateUrl).
+  if (hostname.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)) {
+    return { safe: true };
+  }
+
+  // IPv6 literals have no DNS to resolve, but must still be range-checked
+  // here rather than short-circuited to safe — validateUrl already ran, but
+  // re-assert via isPrivateIp so a reserved literal can never slip through.
+  if (hostname.startsWith('[') && hostname.endsWith(']')) {
+    const inner = hostname.slice(1, -1);
+    const reason = isPrivateIp(inner);
+    if (reason) {
+      return { safe: false, reason: `URL targets reserved IPv6 address: ${inner} (${reason})` };
+    }
     return { safe: true };
   }
 

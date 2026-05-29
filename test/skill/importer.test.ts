@@ -91,7 +91,7 @@ describe('skill file import', () => {
   });
 
   describe('importSkillFile', () => {
-    it('copies skill file with provenance set to imported', async () => {
+    it('signs imported file locally as imported-signed', async () => {
       const filePath = join(testDir, 'import.json');
       await writeFile(filePath, JSON.stringify(makeSkill()));
 
@@ -100,8 +100,9 @@ describe('skill file import', () => {
 
       const { readSkillFile } = await import('../../src/skill/store.js');
       const loaded = await readSkillFile('api.example.com', skillsDir);
-      assert.equal(loaded!.provenance, 'imported');
-      assert.equal(loaded!.signature, undefined);
+      assert.equal(loaded!.provenance, 'imported-signed');
+      // Imported files are now locally signed (tamper-evident), not left unsigned.
+      assert.ok(loaded!.signature?.startsWith('hmac-sha256:'));
     });
 
     it('rejects file with SSRF URLs', async () => {

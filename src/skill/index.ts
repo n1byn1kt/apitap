@@ -2,6 +2,7 @@
 import { readFile, writeFile, readdir, rename } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { scrubPII } from '../capture/scrubber.js';
 
 // --- Types ---
 
@@ -123,7 +124,7 @@ export async function buildIndex(skillsDir: string = DEFAULT_SKILLS_DIR): Promis
         endpoints: skill.endpoints.map((ep: any) => ({
           id: ep.id ?? '',
           method: ep.method ?? 'GET',
-          path: ep.path ?? '/',
+          path: scrubPII(ep.path ?? '/'),
           ...(ep.replayability?.tier ? { tier: ep.replayability.tier } : {}),
           ...(ep.replayability?.verified ? { verified: true } : {}),
         })),
@@ -233,6 +234,7 @@ export async function ensureIndex(skillsDir: string = DEFAULT_SKILLS_DIR): Promi
 async function writeIndexAtomic(index: IndexFile, skillsDir: string): Promise<void> {
   const path = indexPath(skillsDir);
   const tmpPath = `${path}.${process.pid}.tmp`;
-  await writeFile(tmpPath, JSON.stringify(index));
+  // Owner-only: the index holds harvested endpoint paths, like skill files.
+  await writeFile(tmpPath, JSON.stringify(index), { mode: 0o600 });
   await rename(tmpPath, path);
 }

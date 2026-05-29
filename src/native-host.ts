@@ -207,6 +207,11 @@ export function createRelayHandler(
     }
 
     if (EXTENSION_ACTIONS.has(message.action)) {
+      // Validate the domain before relaying to the browser — a direct socket
+      // client could otherwise drive the extension with an arbitrary string.
+      if (typeof message.domain !== 'string' || !isValidDomain(message.domain)) {
+        return { success: false, error: `Invalid domain: ${message.domain}` };
+      }
       try {
         return await sendToExtension(message);
       } catch (err) {
@@ -268,10 +273,17 @@ export async function startSocketServer(
     });
 
     socketServer.on('error', reject);
+    // Create the socket owner-only from the start: set a restrictive umask
+    // around listen() so there is no window where the socket is world/group
+    // accessible, then chmod (belt-and-suspenders) and only resolve once it
+    // has succeeded. The containing ~/.apitap dir is already 0o700.
+    const prevUmask = process.umask(0o077);
     socketServer.listen(socketPath, () => {
-      // Restrict socket permissions to owner only
-      fs.chmod(socketPath, 0o600).catch(() => {});
-      resolve();
+      process.umask(prevUmask);
+      fs.chmod(socketPath, 0o600).then(
+        () => resolve(),
+        () => resolve(), // chmod best-effort; umask already constrained creation
+      );
     });
   });
 }

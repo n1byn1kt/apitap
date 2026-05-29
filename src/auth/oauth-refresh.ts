@@ -10,6 +10,22 @@ export interface OAuthRefreshResult {
 }
 
 /**
+ * Redact secret values from an error string before it is returned/logged.
+ * Network/runtime errors can echo request context (the refresh_token /
+ * client_secret in the POST body), so scrub any occurrence of the known
+ * secrets. Values shorter than 4 chars are ignored to avoid mangling text.
+ */
+export function redactSecrets(message: string, secrets: Array<string | undefined>): string {
+  let out = message;
+  for (const secret of secrets) {
+    if (secret && secret.length >= 4) {
+      out = out.split(secret).join('[redacted]');
+    }
+  }
+  return out;
+}
+
+/**
  * Refresh an OAuth2 access token via the token endpoint using stdlib fetch().
  * Supports refresh_token and client_credentials grant types.
  * Handles refresh token rotation (new refresh_token in response).
@@ -125,9 +141,11 @@ export async function refreshOAuth(
 
     return { success: true, tokenRotated };
   } catch (error) {
+    const raw = error instanceof Error ? error.message : String(error);
     return {
       success: false,
-      error: error instanceof Error ? error.message : String(error),
+      // Scrub secrets that may be echoed back in network/runtime error text.
+      error: redactSecrets(raw, [oauthCreds?.refreshToken, oauthCreds?.clientSecret]),
     };
   }
 }

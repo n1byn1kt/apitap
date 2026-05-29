@@ -203,8 +203,8 @@ function extractQueryParams(url: URL): Record<string, { type: string; example: s
   return params;
 }
 
-/** Query param names that carry API keys or tokens */
-const SENSITIVE_QUERY_KEYS = /api.?key|token|secret|credential|key|access.?key/i;
+/** Query param names that carry API keys, tokens, OAuth grants, or passwords */
+const SENSITIVE_QUERY_KEYS = /api.?key|token|secret|credential|key|access.?key|^code$|^state$|sig|signature|password|passwd|pwd|session.?id|^sid$|^otp$/i;
 
 function scrubQueryParams(
   params: Record<string, { type: string; example: string }>,
@@ -250,8 +250,25 @@ function scrubUrlQueryParams(urlString: string): string {
   }
 }
 
-/** Body field names that must always be scrubbed (credentials in POST bodies) */
-const SENSITIVE_BODY_KEYS = /^(password|passwd|pass|secret|client_secret|refresh_token|access_token|api_key|apikey|token|csrf_token|_csrf|xsrf_token|private_key|credential)$/i;
+/**
+ * Body field names that must always be scrubbed (credentials in POST bodies).
+ * Matches snake_case, camelCase, and prefixed variants by normalizing the key
+ * (strip separators, lowercase) and testing against credential stems. Strong
+ * stems match anywhere; weak stems (token/pass/auth/pwd) match only as a whole
+ * word or suffix so benign keys like `tokenCount` are not over-scrubbed.
+ */
+const STRONG_BODY_KEY_STEMS = [
+  'password', 'passwd', 'secret', 'credential', 'privatekey', 'apikey',
+  'refreshtoken', 'accesstoken', 'clientsecret', 'sessiontoken', 'csrf', 'xsrf', 'bearer',
+];
+const WEAK_BODY_KEY_STEMS = ['token', 'pass', 'auth', 'pwd'];
+
+export function isSensitiveBodyKey(key: string): boolean {
+  const n = key.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (STRONG_BODY_KEY_STEMS.some((s) => n.includes(s))) return true;
+  if (WEAK_BODY_KEY_STEMS.some((s) => n === s || n.endsWith(s))) return true;
+  return false;
+}
 
 function scrubBody(body: unknown, doScrub: boolean): unknown {
   if (!doScrub) return body;
@@ -264,7 +281,7 @@ function scrubBody(body: unknown, doScrub: boolean): unknown {
   if (body && typeof body === 'object') {
     const scrubbed: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(body as Record<string, unknown>)) {
-      if (SENSITIVE_BODY_KEYS.test(key) && typeof value === 'string') {
+      if (isSensitiveBodyKey(key) && typeof value === 'string') {
         scrubbed[key] = '[scrubbed]';
       } else if (typeof value === 'string') {
         scrubbed[key] = scrubPII(value);

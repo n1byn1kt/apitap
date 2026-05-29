@@ -3,11 +3,24 @@ import { hmacSign, hmacVerify } from '../auth/crypto.js';
 import type { SkillFile } from '../types.js';
 
 /**
- * Create a canonical JSON string from a skill file,
- * excluding `signature` and `provenance` fields.
+ * Create a canonical JSON string from a skill file, excluding only the
+ * `signature` field. `provenance` IS included so the trust label is
+ * authenticated — a tampered file cannot relabel itself (e.g. flip to
+ * `imported` to bypass verification) without invalidating the signature.
  * This is the payload that gets signed.
  */
 export function canonicalize(skill: SkillFile): string {
+  const { signature: _sig, ...rest } = skill;
+  return JSON.stringify(sortKeysDeep(rest));
+}
+
+/**
+ * Pre-provenance canonicalization (deep sort, provenance excluded).
+ * This was the signed format before provenance became authenticated;
+ * kept only as a verification fallback so files signed by older versions
+ * still load (and are then transparently re-signed in the new format).
+ */
+export function canonicalizePreProvenance(skill: SkillFile): string {
   const { signature: _sig, provenance: _prov, ...rest } = skill;
   return JSON.stringify(sortKeysDeep(rest));
 }
@@ -36,7 +49,8 @@ function sortKeysDeep(value: unknown): unknown {
  */
 export function signSkillFile(skill: SkillFile, key: Buffer): SkillFile {
   const signedAt = new Date().toISOString();
-  const payload = canonicalize({ ...skill, signedAt } as SkillFile);
+  // provenance must be set before canonicalizing so it is covered by the HMAC.
+  const payload = canonicalize({ ...skill, signedAt, provenance: 'self' } as SkillFile);
   const signature = hmacSign(payload, key);
   return {
     ...skill,
@@ -56,7 +70,8 @@ export function signSkillFileAs(
   provenance: 'self' | 'imported-signed',
 ): SkillFile {
   const signedAt = new Date().toISOString();
-  const payload = canonicalize({ ...skill, signedAt } as SkillFile);
+  // provenance must be set before canonicalizing so it is covered by the HMAC.
+  const payload = canonicalize({ ...skill, signedAt, provenance } as SkillFile);
   const signature = hmacSign(payload, key);
   return { ...skill, signedAt, provenance, signature };
 }
@@ -89,4 +104,29 @@ export function verifySignatureLegacyCanon(skill: SkillFile, key: Buffer): boole
   if (!skill.signature) return false;
   const payload = legacyCanonicalize(skill);
   return hmacVerify(payload, skill.signature, key);
+}
+
+/**
+ * Verify using the pre-provenance canonicalization (deep sort, provenance
+ * excluded). Returns true if the signature matches a file signed before
+ * provenance was authenticated. Callers should re-sign on a match.
+ */
+export function verifySignaturePreProvenance(skill: SkillFile, key: Buffer): boolean {
+  if (!skill.signature) return false;
+  const payload = canonicalizePreProvenance(skill);
+  return hmacVerify(payload, skill.signature, key);
+}
+
+/**
+ * Compute the provenance a skill file should be signed with, as the MINIMUM
+ * trust across its endpoints. Only `self` if every endpoint is locally
+ * captured; a single imported (openapi-import) or skeleton endpoint
+ * downgrades the whole file to `imported-signed` so untrusted endpoints can
+ * never inherit `self` trust by being merged into a captured file.
+ */
+export function provenanceForSigning(skill: SkillFile): 'self' | 'imported-signed' {
+  const allCaptured = skill.endpoints.every(
+    (ep) => !ep.endpointProvenance || ep.endpointProvenance === 'captured',
+  );
+  return allCaptured ? 'self' : 'imported-signed';
 }

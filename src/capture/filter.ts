@@ -1,5 +1,6 @@
 // src/capture/filter.ts
 import { isBlocklisted } from './blocklist.js';
+import { isSensitivePath } from './sensitive-paths.js';
 
 export interface FilterableResponse {
   url: string;
@@ -53,6 +54,8 @@ export function shouldCapture(response: FilterableResponse): boolean {
     const url = new URL(response.url);
     if (isBlocklisted(url.hostname)) return false;
     if (isPathNoise(url.pathname)) return false;
+    // Never capture credential / payment / account-security surfaces.
+    if (isSensitivePath(url.pathname)) return false;
   } catch {
     return false;
   }

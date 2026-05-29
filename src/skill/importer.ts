@@ -95,12 +95,21 @@ export async function importSkillFile(
     return { success: false, reason: validation.reason };
   }
 
-  // Strip foreign signature, set provenance
-  const importedSkill: SkillFile = {
-    ...skill,
-    provenance: 'imported',
-    signature: undefined,
-  };
+  // Strip any foreign signature, then re-sign locally as `imported-signed`
+  // so the file is tamper-evident on subsequent loads. Leaving imported
+  // files unsigned previously let them skip verification entirely.
+  const { signSkillFileAs } = await import('./signing.js');
+  let key = localKey;
+  if (!key) {
+    const { deriveSigningKey } = await import('../auth/crypto.js');
+    const { getMachineId } = await import('../auth/manager.js');
+    key = deriveSigningKey(await getMachineId());
+  }
+  const importedSkill = signSkillFileAs(
+    { ...skill, signature: undefined, signedAt: undefined } as SkillFile,
+    key,
+    'imported-signed',
+  );
 
   const writtenPath = await writeSkillFile(importedSkill, skillsDir);
   return { success: true, skillFile: writtenPath };

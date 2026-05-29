@@ -1,6 +1,6 @@
 // src/capture/verifier.ts
 import type { SkillFile, SkillEndpoint, Replayability } from '../types.js';
-import { validateUrl } from '../skill/ssrf.js';
+import { resolveAndValidateUrl } from '../skill/ssrf.js';
 
 /**
  * Heuristic tier classification for non-GET endpoints (or when verification is skipped).
@@ -41,9 +41,10 @@ async function verifySingle(
   const url = endpoint.examples.request.url;
   if (!url) return classifyHeuristic(endpoint);
 
-  // SSRF check before verification fetch
+  // SSRF check before verification fetch — resolve DNS so a hostname that
+  // rebinds to a private/internal IP is caught (sync validateUrl would miss it).
   if (!skipSsrf) {
-    const ssrfResult = validateUrl(url);
+    const ssrfResult = await resolveAndValidateUrl(url);
     if (!ssrfResult.safe) return classifyHeuristic(endpoint);
   }
 
@@ -58,6 +59,9 @@ async function verifySingle(
   try {
     const response = await fetch(url, {
       headers,
+      // Do not follow redirects: a redirect Location is unvalidated and could
+      // target an internal host / cloud metadata endpoint.
+      redirect: 'manual',
       signal: AbortSignal.timeout(5000),
     });
 
@@ -102,9 +106,9 @@ async function verifySinglePost(
   const url = endpoint.examples.request.url;
   if (!url || !endpoint.requestBody) return classifyHeuristic(endpoint);
 
-  // SSRF check before verification fetch
+  // SSRF check before verification fetch — resolve DNS (see verifySingle).
   if (!skipSsrf) {
-    const ssrfResult = validateUrl(url);
+    const ssrfResult = await resolveAndValidateUrl(url);
     if (!ssrfResult.safe) return classifyHeuristic(endpoint);
   }
 
@@ -124,6 +128,9 @@ async function verifySinglePost(
       method: endpoint.method,
       headers,
       body,
+      // Do not follow redirects (see verifySingle): an unvalidated Location
+      // could target an internal host.
+      redirect: 'manual',
       signal: AbortSignal.timeout(5000),
     });
 

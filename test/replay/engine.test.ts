@@ -1172,6 +1172,9 @@ describe('replayEndpoint redirect auth stripping', () => {
         'x-custom-token': req.headers['x-custom-token'] as string | undefined,
         'x-custom-secret': req.headers['x-custom-secret'] as string | undefined,
         'x-custom-key': req.headers['x-custom-key'] as string | undefined,
+        'x-session': req.headers['x-session'] as string | undefined,
+        'cf-access-jwt-assertion': req.headers['cf-access-jwt-assertion'] as string | undefined,
+        accept: req.headers['accept'] as string | undefined,
       };
       res.writeHead(200, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ ok: true }));
@@ -1254,6 +1257,49 @@ describe('replayEndpoint redirect auth stripping', () => {
       assert.equal(receivedHeaders['x-custom-token'], undefined);
       assert.equal(receivedHeaders['x-custom-secret'], undefined);
       assert.equal(receivedHeaders['x-custom-key'], undefined);
+    } finally {
+      await rm(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('strips custom auth headers that lack token/secret/key in the name (allowlist)', async () => {
+    const skill: SkillFile = {
+      version: '1.2',
+      domain: 'localhost',
+      capturedAt: new Date().toISOString(),
+      baseUrl: originBaseUrl,
+      endpoints: [{
+        id: 'get-start',
+        method: 'GET',
+        path: '/start',
+        queryParams: {},
+        headers: {},
+        responseShape: { type: 'object' },
+        examples: { request: { url: `${originBaseUrl}/start`, headers: {} }, responsePreview: null },
+      }],
+      metadata: { captureCount: 1, filteredCount: 0, toolVersion: '1.0.0' },
+      provenance: 'self',
+    };
+
+    const testDir = await mkdtemp(join(tmpdir(), 'apitap-redirect-allow-'));
+    try {
+      const authManager = new AuthManager(testDir, 'test-machine-id');
+      await authManager.store('localhost', {
+        type: 'custom',
+        header: 'x-session',
+        value: 'SECRET_SESSION',
+        headers: [
+          { header: 'x-session', value: 'SECRET_SESSION' },
+          { header: 'cf-access-jwt-assertion', value: 'SECRET_CF_JWT' },
+        ],
+      });
+
+      await replayEndpoint(skill, 'get-start', { authManager, domain: 'localhost', _skipSsrfCheck: true });
+
+      // Neither header contains token/secret/key, but both carry credentials
+      // and must not leak to the cross-domain redirect target.
+      assert.equal(receivedHeaders['x-session'], undefined, 'x-session must be stripped');
+      assert.equal(receivedHeaders['cf-access-jwt-assertion'], undefined, 'cf-access-jwt-assertion must be stripped');
     } finally {
       await rm(testDir, { recursive: true, force: true });
     }

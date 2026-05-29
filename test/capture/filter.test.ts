@@ -12,6 +12,43 @@ describe('shouldCapture', () => {
     }), true);
   });
 
+  describe('drops sensitive PII / financial / account-security paths', () => {
+    const sensitive = [
+      'https://api.example.com/account/security',
+      'https://api.example.com/checkout',
+      'https://api.example.com/payment/methods',
+      'https://api.example.com/billing/invoices',
+      'https://api.example.com/users/me/password',
+      'https://api.example.com/reset-password',
+      'https://api.example.com/2fa/verify',
+    ];
+    for (const url of sensitive) {
+      it(`drops ${url} even when 2xx JSON`, () => {
+        assert.equal(
+          shouldCapture({ url, status: 200, contentType: 'application/json' }),
+          false,
+          `${url} is a sensitive path and must not be captured`,
+        );
+      });
+    }
+
+    it('still captures OAuth/token endpoints (auth capture is intentional)', () => {
+      // ApiTap's auth subsystem is designed to capture these; the secret is
+      // extracted to the encrypted store and scrubbed from the skill file.
+      for (const url of [
+        'https://api.example.com/oauth/token',
+        'https://api.example.com/login',
+        'https://api.example.com/authors', // also: must not match a credential pattern
+      ]) {
+        assert.equal(
+          shouldCapture({ url, status: 200, contentType: 'application/json' }),
+          true,
+          `${url} should remain capturable`,
+        );
+      }
+    });
+  });
+
   it('keeps JSON responses with charset parameter', () => {
     assert.equal(shouldCapture({
       url: 'https://api.example.com/data',

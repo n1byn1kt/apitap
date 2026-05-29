@@ -138,11 +138,13 @@ describe('H1: Signature verification enforcement', () => {
     assert.ok(loaded);
   });
 
-  it('skips verification for imported files', async () => {
+  it('does not skip verification for unsigned files labeled "imported"', async () => {
+    // Security fix: `imported` provenance no longer bypasses verification.
     await writeSkillFile(makeSkill({ provenance: 'imported' as const }), testDir);
-    const loaded = await readSkillFile('example.com', testDir, { signingKey });
-    assert.ok(loaded);
-    assert.equal(loaded.provenance, 'imported');
+    await assert.rejects(
+      () => readSkillFile('example.com', testDir, { signingKey }),
+      /unsigned/i,
+    );
   });
 });
 

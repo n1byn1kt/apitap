@@ -174,6 +174,21 @@ function isSafeAuthRedirectHost(originalHost: string, redirectHost: string): boo
 }
 
 /**
+ * Headers safe to forward to a cross-domain redirect target. Everything else
+ * is dropped — an auth blocklist always misses some scheme (X-Session,
+ * CF-Access-Jwt-Assertion, etc.), so we allowlist non-sensitive transport
+ * headers instead and strip the rest.
+ */
+const SAFE_REDIRECT_HEADERS = new Set([
+  'accept',
+  'accept-language',
+  'accept-encoding',
+  'user-agent',
+  'content-type',
+  'content-length',
+]);
+
+/**
  * Strip auth headers from redirect request if cross-domain (H4 fix).
  * Shared between initial and retry redirect paths.
  */
@@ -182,24 +197,17 @@ function stripAuthForRedirect(
   originalHost: string,
   redirectHost: string,
 ): Record<string, string> {
-  const redirectHeaders = { ...headers };
-  if (!isSafeAuthRedirectHost(originalHost, redirectHost)) {
-    for (const key of Object.keys(redirectHeaders)) {
-      const lower = key.toLowerCase();
-      const isNamedAuthHeader =
-        lower === 'authorization' ||
-        lower === 'x-api-key' ||
-        lower === 'x-api-token' ||
-        lower === 'cookie' ||
-        lower === 'set-cookie';
-      const isAuthLikeHeader =
-        isNamedAuthHeader ||
-        lower.includes('token') ||
-        lower.includes('secret') ||
-        lower.includes('key');
-      if (isAuthLikeHeader || redirectHeaders[key] === '[stored]') {
-        delete redirectHeaders[key];
-      }
+  // Same host / single-level subdomain: forward everything (the auth belongs
+  // to that origin).
+  if (isSafeAuthRedirectHost(originalHost, redirectHost)) {
+    return { ...headers };
+  }
+  // Cross-domain: keep only the safe transport allowlist; drop any header that
+  // could carry credentials regardless of its name.
+  const redirectHeaders: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    if (SAFE_REDIRECT_HEADERS.has(key.toLowerCase())) {
+      redirectHeaders[key] = value;
     }
   }
   return redirectHeaders;
@@ -579,6 +587,14 @@ export async function replayEndpoint(
         signal: AbortSignal.timeout(30_000),
         redirect: 'manual',  // Prevent chaining
       });
+      // Post-fetch DNS re-validation on the redirect hop (symmetric with the
+      // initial request above) to narrow the TOCTOU rebinding window.
+      if (!options._skipSsrfCheck && redirectUrl.hostname && !redirectUrl.hostname.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)) {
+        const postCheck = await resolveAndValidateUrl(redirectFetchUrl);
+        if (!postCheck.safe) {
+          throw new Error(`DNS rebinding detected (post-redirect): ${postCheck.reason}`);
+        }
+      }
     }
   }
 
@@ -629,6 +645,13 @@ export async function replayEndpoint(
             signal: AbortSignal.timeout(30_000),
             redirect: 'manual',
           });
+          // Post-fetch DNS re-validation on the retry redirect hop.
+          if (!options._skipSsrfCheck && redirectUrl.hostname && !redirectUrl.hostname.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)) {
+            const postCheck = await resolveAndValidateUrl(retryRedirectFetchUrl);
+            if (!postCheck.safe) {
+              throw new Error(`DNS rebinding detected (post-redirect): ${postCheck.reason}`);
+            }
+          }
         }
       }
 

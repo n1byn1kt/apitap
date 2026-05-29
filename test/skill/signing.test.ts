@@ -62,10 +62,15 @@ describe('skill file signing', () => {
     assert.equal(verifySignature(skill, key), false);
   });
 
-  it('canonicalize excludes signature and provenance', () => {
-    const a = makeSkill();
+  it('canonicalize excludes signature but includes provenance', () => {
+    // signature is excluded from the payload...
+    const a = { ...makeSkill(), provenance: 'self' as const };
     const b = { ...makeSkill(), signature: 'hmac-sha256:abc', provenance: 'self' as const };
     assert.equal(canonicalize(a), canonicalize(b));
+    // ...but provenance is now authenticated, so it changes the payload.
+    const self = { ...makeSkill(), provenance: 'self' as const };
+    const imported = { ...makeSkill(), provenance: 'imported' as const };
+    assert.notEqual(canonicalize(self), canonicalize(imported));
   });
 
   it('legacyCanonicalize uses shallow key sort (differs from deep sort for nested objects)', () => {

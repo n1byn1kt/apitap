@@ -77,6 +77,9 @@ describe('verifyEndpoints', () => {
       } else if (req.url === '/api/post-fail' && req.method === 'POST') {
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'bad request' }));
+      } else if (req.url === '/api/redirect') {
+        res.writeHead(302, { Location: '/api/public' });
+        res.end();
       } else {
         res.writeHead(404);
         res.end();
@@ -283,6 +286,36 @@ describe('verifyEndpoints', () => {
 
     const verified = await verifyEndpoints(skill, { _skipSsrfCheck: true });
     assert.equal(verified.endpoints[0].replayability?.verified, false);
+  });
+
+  it('does not follow redirects during verification (SSRF: redirect could target internal hosts)', async () => {
+    const skill: SkillFile = {
+      version: '1.2',
+      domain: 'localhost',
+      capturedAt: new Date().toISOString(),
+      baseUrl,
+      endpoints: [
+        makeEndpoint({
+          id: 'get-api-redirect',
+          path: '/api/redirect',
+          examples: {
+            request: { url: `${baseUrl}/api/redirect`, headers: {} },
+            responsePreview: null,
+          },
+        }),
+      ],
+      metadata: { captureCount: 1, filteredCount: 0, toolVersion: '0.3.0' },
+      provenance: 'unsigned',
+    };
+
+    const verified = await verifyEndpoints(skill, { _skipSsrfCheck: true });
+    const r = verified.endpoints[0].replayability;
+    // The 302 must be reported as-is, not silently followed to the /api/public 200.
+    assert.notEqual(r?.tier, 'green', 'a redirect must not be followed and reported as a green verified endpoint');
+    assert.ok(
+      r?.signals.some(s => s.startsWith('status-3')),
+      `expected a 3xx status signal, got ${JSON.stringify(r?.signals)}`,
+    );
   });
 
   it('returns skill unchanged when no endpoints', async () => {

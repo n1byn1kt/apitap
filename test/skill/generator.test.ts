@@ -1,8 +1,28 @@
 // test/skill/generator.test.ts
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { SkillGenerator } from '../../src/skill/generator.js';
+import { SkillGenerator, isSensitiveBodyKey } from '../../src/skill/generator.js';
 import type { CapturedExchange } from '../../src/types.js';
+
+describe('isSensitiveBodyKey', () => {
+  it('matches snake_case and bare credential keys', () => {
+    for (const k of ['password', 'client_secret', 'refresh_token', 'access_token', 'api_key', 'token', 'private_key']) {
+      assert.equal(isSensitiveBodyKey(k), true, `${k} should be sensitive`);
+    }
+  });
+
+  it('matches camelCase and prefixed variants (previously missed)', () => {
+    for (const k of ['accessToken', 'refreshToken', 'clientSecret', 'userPassword', 'apiKey', 'authToken', 'privateKey']) {
+      assert.equal(isSensitiveBodyKey(k), true, `${k} should be sensitive`);
+    }
+  });
+
+  it('does not match benign keys', () => {
+    for (const k of ['username', 'tokenCount', 'id', 'email', 'title', 'description']) {
+      assert.equal(isSensitiveBodyKey(k), false, `${k} should not be sensitive`);
+    }
+  });
+});
 
 function mockExchange(overrides: {
   url?: string;
@@ -220,6 +240,19 @@ describe('SkillGenerator', () => {
     const params = skill.endpoints[0].queryParams;
     assert.equal(params['email'].example, '[email]');
     assert.equal(params['limit'].example, '10');
+  });
+
+  it('scrubs OAuth code/state and password query params (even when short)', () => {
+    const gen = new SkillGenerator();
+    gen.addExchange(mockExchange({
+      url: 'https://example.com/api/callback?code=abc123&state=xyz&password=hunter2&keep=ok',
+    }));
+
+    const params = gen.toSkillFile('example.com').endpoints[0].queryParams;
+    assert.equal(params['code'].example, '[scrubbed]');
+    assert.equal(params['state'].example, '[scrubbed]');
+    assert.equal(params['password'].example, '[scrubbed]');
+    assert.equal(params['keep'].example, 'ok');
   });
 
   it('scrubs PII from example request URL', () => {

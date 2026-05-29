@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.12.1
+
+### Fixed
+
+- **Capture no longer overwrites existing skill files** (#55): `apitap capture` / `apitap_capture` / `apitap_capture_finish` previously rewrote a domain's skill file with only the current session's endpoints, silently dropping endpoints captured earlier. `finish()` now merges the fresh capture with the existing on-disk skill (union by `METHOD + normalized path`; fresh capture wins on re-seen endpoints, prior endpoints carried over), so re-capturing a domain accretes coverage instead of replacing it.
+
 ## v1.12.0
 
 Security & privacy audit fixes across the CLI, MCP server, native host, and browser extension (#54).

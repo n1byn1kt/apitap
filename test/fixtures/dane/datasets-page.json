@@ -1,0 +1,29 @@
+{
+  "data": [
+    { "id": "1681", "type": "dataset", "attributes": {
+      "title": "Nazwiska występujące w rejestrze PESEL", "slug": "nazwiska-pesel",
+      "url": "https://dane.gov.pl/pl/dataset/1681", "keywords": ["nazwiska", "pesel"],
+      "views_count": 21462, "downloads_count": 161127,
+      "openness_scores": [3, 4], "has_high_value_data": true,
+      "category": { "id": "7", "title": "Społeczeństwo" } } },
+    { "id": "219", "type": "dataset", "attributes": {
+      "title": "Imiona nadawane dzieciom w Polsce", "slug": "imiona-dzieci",
+      "url": "https://dane.gov.pl/pl/dataset/219", "keywords": ["imiona", "demografia"],
+      "views_count": 21152, "downloads_count": 77948,
+      "openness_scores": [4], "has_high_value_data": true,
+      "category": { "id": "7", "title": "Społeczeństwo" } } },
+    { "id": "568", "type": "dataset", "attributes": {
+      "title": "Nazwiska osób zmarłych w rejestrze PESEL", "slug": "nazwiska-zmarli",
+      "url": "https://dane.gov.pl/pl/dataset/568", "keywords": ["nazwiska"],
+      "views_count": 3548, "downloads_count": 60116,
+      "openness_scores": [3], "has_high_value_data": false,
+      "category": { "id": "7", "title": "Społeczeństwo" } } },
+    { "id": "900", "type": "dataset", "attributes": {
+      "title": "Wskaźniki cen towarów i usług", "slug": "wskazniki-cen",
+      "url": "https://dane.gov.pl/pl/dataset/900", "keywords": ["inflacja", "ceny"],
+      "views_count": 8000, "downloads_count": 12000,
+      "openness_scores": [3], "has_high_value_data": false,
+      "category": { "id": "2", "title": "Biznes i Gospodarka" } } }
+  ],
+  "meta": { "count": 24447 }
+}

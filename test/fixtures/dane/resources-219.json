@@ -1,0 +1,9 @@
+{
+  "data": [
+    { "id": "63900", "type": "resource", "attributes": {
+      "title": "Imiona męskie nadane dzieciom w Polsce w 2024 r. - imię pierwsze", "format": "xlsx" } },
+    { "id": "63901", "type": "resource", "attributes": {
+      "title": "Imiona żeńskie nadane dzieciom w Polsce w 2024 r. - imię pierwsze", "format": "xlsx" } }
+  ],
+  "meta": { "count": 2 }
+}

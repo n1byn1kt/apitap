@@ -1,0 +1,5 @@
+{
+  "jsonapi": { "version": "1.4" },
+  "data": [],
+  "meta": { "headers_map": {}, "data_schema": { "fields": [] }, "count": 0 }
+}

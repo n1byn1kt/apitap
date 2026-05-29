@@ -1,0 +1,18 @@
+{
+  "jsonapi": { "version": "1.4" },
+  "data": [
+    { "id": "63900-1", "type": "row",
+      "attributes": { "col1": { "repr": "NIKODEM", "val": "NIKODEM" },
+                      "col2": { "repr": "MĘŻCZYZNA", "val": "MĘŻCZYZNA" },
+                      "col3": { "repr": 6388, "val": 6388.0 } } }
+  ],
+  "meta": {
+    "headers_map": { "col1": "IMIĘ_PIERWSZE", "col2": "PŁEĆ", "col3": "LICZBA_WYSTĄPIEŃ" },
+    "data_schema": { "fields": [
+      { "name": "col1", "type": "string", "format": "default" },
+      { "name": "col2", "type": "string", "format": "default" },
+      { "name": "col3", "type": "integer", "format": "default" }
+    ], "missingValues": [] },
+    "count": 967
+  }
+}

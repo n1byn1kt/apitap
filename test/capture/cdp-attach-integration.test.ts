@@ -28,6 +28,11 @@ function cdpGet<T>(url: string): Promise<T> {
 
 describe('CDP attach integration', { skip: !chromeAvailable ? 'Chrome not installed' : undefined }, () => {
   let chrome: ChildProcess;
+  // Chrome being installed doesn't guarantee its remote-debugging port comes
+  // up — in constrained CI sandboxes the port sometimes never binds. Track
+  // readiness and skip (not fail) the tests when it doesn't, so this stays a
+  // signal about cdp-attach behavior rather than a flaky env check.
+  let cdpReady = false;
 
   before(async () => {
     chrome = spawn('google-chrome', [
@@ -40,6 +45,7 @@ describe('CDP attach integration', { skip: !chromeAvailable ? 'Chrome not instal
     for (let i = 0; i < 20; i++) {
       try {
         await cdpGet(`http://127.0.0.1:${TEST_PORT}/json/version`);
+        cdpReady = true;
         break;
       } catch {
         await new Promise(r => setTimeout(r, 500));
@@ -51,7 +57,11 @@ describe('CDP attach integration', { skip: !chromeAvailable ? 'Chrome not instal
     if (chrome) chrome.kill();
   });
 
-  it('discovers browser WebSocket URL and tab count', async () => {
+  it('discovers browser WebSocket URL and tab count', async (t) => {
+    if (!cdpReady) {
+      t.skip('Chrome remote-debugging port never became ready');
+      return;
+    }
     const { discoverBrowserWsUrl } = await import('../../src/capture/cdp-attach.js');
 
     const info = await discoverBrowserWsUrl(TEST_PORT);

@@ -26,6 +26,34 @@ describe('scrubPII', () => {
     assert.equal(scrubPII('product SKU-99887766'), 'product SKU-99887766');
   });
 
+  it('redacts provider-prefixed API keys and tokens', () => {
+    // Tokens are assembled at runtime (prefix + body) so these synthetic
+    // fixtures don't trip GitHub push-protection secret scanning while still
+    // exercising the scrubber patterns.
+    const stripeSk = 'sk_' + 'live_' + '4eC39HqLyjWDarjtT1zdp7dc';
+    const stripePk = 'pk_' + 'live_' + 'abcDEF123456ghiJKL789012';
+    const ghp = 'ghp_' + '16C7e42F292c6912E7710c838347Ae178B4a';
+    const gho = 'gho_' + '16C7e42F292c6912E7710c838347Ae178B4a';
+    const slack = 'xoxb-' + '2345678901-2345678901234-AbCdEfGhIjKlMnOpQr';
+    const gitlab = 'glpat-' + 'AbCdEf12345678901234';
+    assert.equal(scrubPII('key ' + stripeSk), 'key [token]');
+    assert.equal(scrubPII('pub ' + stripePk), 'pub [token]');
+    assert.equal(scrubPII('gh ' + ghp), 'gh [token]');
+    assert.equal(scrubPII('gh ' + gho), 'gh [token]');
+    assert.equal(scrubPII('slack ' + slack), 'slack [token]');
+    assert.equal(scrubPII('gl ' + gitlab), 'gl [token]');
+  });
+
+  it('redacts IBANs', () => {
+    assert.equal(scrubPII('iban DE89370400440532013000 ok'), 'iban [iban] ok');
+    assert.equal(scrubPII('GB29NWBK60161331926819'), '[iban]');
+  });
+
+  it('redacts IPv6 addresses', () => {
+    assert.equal(scrubPII('host 2001:db8::1 here'), 'host [ip] here');
+    assert.equal(scrubPII('fe80::1ff:fe23:4567:890a'), '[ip]');
+  });
+
   it('redacts IPv4 addresses with valid octets', () => {
     assert.equal(scrubPII('server at 192.168.1.1'), 'server at [ip]');
     assert.equal(scrubPII('from 10.0.0.1 to 172.16.0.1'), 'from [ip] to [ip]');

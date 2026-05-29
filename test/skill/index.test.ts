@@ -47,6 +47,28 @@ describe('search index', () => {
     await rm(join(skillsDir, '..'), { recursive: true, force: true });
   });
 
+  describe('privacy of index.json', () => {
+    it('scrubs PII from endpoint paths and writes the index 0o600', async () => {
+      const { stat } = await import('node:fs/promises');
+      await writeFile(
+        join(skillsDir, 'api.example.com.json'),
+        makeSkillJSON('api.example.com', [
+          { id: 'get-user', method: 'GET', path: '/users/jane@example.com/profile' },
+        ]),
+      );
+      await buildIndex(skillsDir);
+
+      const index = await readIndex(skillsDir);
+      const path = index!.domains['api.example.com'].endpoints[0].path;
+      assert.ok(!path.includes('jane@example.com'), `path must be scrubbed, got ${path}`);
+      assert.ok(path.includes('[email]'), `expected [email] placeholder, got ${path}`);
+
+      // index.json holds harvested paths — must be owner-only like skill files.
+      const st = await stat(join(skillsDir, '..', 'index.json'));
+      assert.equal(st.mode & 0o777, 0o600, 'index.json must be mode 0o600');
+    });
+  });
+
   describe('buildIndex', () => {
     it('builds index from skill files on disk', async () => {
       await writeFile(

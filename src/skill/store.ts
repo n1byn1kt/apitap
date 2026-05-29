@@ -4,6 +4,7 @@ import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import type { SkillFile, SkillSummary } from '../types.js';
 import { validateSkillFile } from './validate.js';
+import { scrubPII } from '../capture/scrubber.js';
 import { updateIndex, ensureIndex } from './index.js';
 
 const DEFAULT_SKILLS_DIR = join(homedir(), '.apitap', 'skills');
@@ -58,7 +59,7 @@ export async function writeSkillFile(
       skill.endpoints.map(ep => ({
         id: ep.id,
         method: ep.method,
-        path: ep.path,
+        path: scrubPII(ep.path),
         ...(ep.replayability?.tier ? { tier: ep.replayability.tier } : {}),
         ...(ep.replayability?.verified ? { verified: true } : {}),
       })),

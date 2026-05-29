@@ -253,6 +253,57 @@ describe('CaptureSession', () => {
     }
   });
 
+  it('finish() merges with an existing skill instead of overwriting it (#55)', async () => {
+    // Pre-seed an existing skill file for the capture domain with an endpoint
+    // the current session will NOT re-capture.
+    const { writeFile } = await import('node:fs/promises');
+    const preexisting = {
+      version: '1.2',
+      domain: 'localhost',
+      capturedAt: '2020-01-01T00:00:00.000Z',
+      baseUrl: 'http://localhost',
+      endpoints: [{
+        id: 'get-previously-captured',
+        method: 'GET',
+        path: '/api/previously-captured',
+        queryParams: {},
+        headers: {},
+        responseShape: { type: 'object', fields: ['ok'] },
+        examples: { request: { url: 'http://localhost/api/previously-captured', headers: {} }, responsePreview: null },
+      }],
+      metadata: { captureCount: 1, filteredCount: 0, toolVersion: '1.0.0' },
+      provenance: 'unsigned',
+    };
+    await writeFile(join(testDir, 'localhost.json'), JSON.stringify(preexisting), 'utf-8');
+
+    const session = new CaptureSession({ headless: true, skillsDir: testDir });
+    await session.start(baseUrl);
+    const snap = await session.interact({ action: 'snapshot' });
+    const btn = snap.snapshot.elements.find(e => e.tag === 'button' && e.text.includes('Load Data'));
+    if (btn) {
+      await session.interact({ action: 'click', ref: btn.ref });
+      await session.interact({ action: 'wait', seconds: 2 });
+    }
+    const result = await session.finish();
+
+    // The previously-captured endpoint must survive the new capture. Before the
+    // fix, finish() overwrote the file with only this session's endpoints.
+    const { readSkillFile } = await import('../../src/skill/store.js');
+    const loaded = await readSkillFile('localhost', testDir, { trustUnsigned: true });
+    assert.ok(loaded, 'skill file should still exist');
+    const ids = loaded!.endpoints.map(e => e.id);
+    assert.ok(ids.includes('get-previously-captured'), `preexisting endpoint must be preserved, got: ${ids.join(', ')}`);
+
+    // When this session actually captured an endpoint, the file is the union.
+    const localhostDomain = result.domains.find(d => d.domain === 'localhost');
+    if (localhostDomain) {
+      assert.ok(
+        loaded!.endpoints.length > 1,
+        'merged file should contain the preexisting endpoint plus the freshly captured one(s)',
+      );
+    }
+  });
+
   it('abort() closes without writing', async () => {
     const session = new CaptureSession({ headless: true, skillsDir: testDir });
     await session.start(baseUrl);

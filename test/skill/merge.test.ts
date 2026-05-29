@@ -1,7 +1,7 @@
 // test/skill/merge.test.ts
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { normalizePath, mergeSkillFile } from '../../src/skill/merge.js';
+import { normalizePath, mergeSkillFile, mergeCapturedSkillFiles } from '../../src/skill/merge.js';
 import type { SkillEndpoint, SkillFile, ImportMeta } from '../../src/types.js';
 
 // ---- Helpers ----------------------------------------------------------------
@@ -406,5 +406,62 @@ describe('mergeSkillFile — query param merge', () => {
     );
     const result = mergeSkillFile(null, imported, testMeta);
     assert.equal(result.skillFile.endpoints.length, 500);
+  });
+});
+
+// ---- mergeCapturedSkillFiles (capture-to-capture union) ----------------------
+
+describe('mergeCapturedSkillFiles', () => {
+  it('returns the fresh skill unchanged when there is no existing file', () => {
+    const fresh = makeSkillFile([makeEndpoint({ id: 'a', path: '/a' })]);
+    const r = mergeCapturedSkillFiles(null, fresh);
+    assert.deepEqual(r.skillFile.endpoints.map(e => e.id), ['a']);
+    assert.deepEqual([r.added, r.updated, r.preserved], [1, 0, 0]);
+  });
+
+  it('preserves previously-captured endpoints not seen in the fresh session', () => {
+    const existing = makeSkillFile([
+      makeEndpoint({ id: 'a', method: 'GET', path: '/a' }),
+      makeEndpoint({ id: 'b', method: 'GET', path: '/b' }),
+    ]);
+    const fresh = makeSkillFile([makeEndpoint({ id: 'c', method: 'GET', path: '/c' })]);
+
+    const r = mergeCapturedSkillFiles(existing, fresh);
+    const ids = r.skillFile.endpoints.map(e => e.id).sort();
+    assert.deepEqual(ids, ['a', 'b', 'c'], 'union must keep a, b and add c');
+    assert.deepEqual([r.added, r.updated, r.preserved], [1, 0, 2]);
+  });
+
+  it('lets the fresh capture win on a re-captured endpoint (same method + path slot)', () => {
+    const existing = makeSkillFile([
+      makeEndpoint({ id: 'old-user', method: 'GET', path: '/users/:id',
+        examples: { request: { url: 'https://test.com/users/1', headers: {} }, responsePreview: null } }),
+    ]);
+    // same slot, different param name + fresher example
+    const fresh = makeSkillFile([
+      makeEndpoint({ id: 'new-user', method: 'GET', path: '/users/:userId',
+        examples: { request: { url: 'https://test.com/users/42', headers: {} }, responsePreview: { ok: true } } }),
+    ]);
+
+    const r = mergeCapturedSkillFiles(existing, fresh);
+    assert.equal(r.skillFile.endpoints.length, 1, 'same slot must dedupe, not duplicate');
+    assert.equal(r.skillFile.endpoints[0].id, 'new-user', 'fresh capture wins');
+    assert.deepEqual([r.added, r.updated, r.preserved], [0, 1, 0]);
+  });
+
+  it('treats different methods on the same path as distinct endpoints', () => {
+    const existing = makeSkillFile([makeEndpoint({ id: 'get-x', method: 'GET', path: '/x' })]);
+    const fresh = makeSkillFile([makeEndpoint({ id: 'post-x', method: 'POST', path: '/x' })]);
+    const r = mergeCapturedSkillFiles(existing, fresh);
+    assert.equal(r.skillFile.endpoints.length, 2);
+  });
+
+  it('uses the fresh file as the base (latest capturedAt / metadata)', () => {
+    const existing = makeSkillFile([makeEndpoint({ id: 'a', path: '/a' })]);
+    existing.capturedAt = '2020-01-01T00:00:00.000Z';
+    const fresh = makeSkillFile([makeEndpoint({ id: 'b', path: '/b' })]);
+    fresh.capturedAt = '2026-05-29T00:00:00.000Z';
+    const r = mergeCapturedSkillFiles(existing, fresh);
+    assert.equal(r.skillFile.capturedAt, '2026-05-29T00:00:00.000Z');
   });
 });

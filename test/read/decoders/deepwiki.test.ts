@@ -138,23 +138,49 @@ describe('deepwikiDecoder', () => {
   describe('RSC content extraction', () => {
     afterEach(teardownServer);
 
-    it('extracts markdown from RSC payload', async () => {
+    it('extracts markdown from RSC payload via safeFetch (issue #63)', async () => {
       const payload = makeRscPayload(overviewContent);
       await setupServer(payload);
 
-      // Monkey-patch the URL to use our test server
-      const decoder = deepwikiDecoder;
-      const url = `${baseUrl}/myorg/myrepo`;
-
-      // We need to test against deepwiki.com pattern, so test the decode logic directly
-      // by calling with a URL that matches but redirecting fetch
-      const result = await decoder.decode(
-        url.replace(baseUrl, 'https://deepwiki.com'),
+      const result = await deepwikiDecoder.decode(
+        'https://deepwiki.com/myorg/myrepo',
         { _testBaseUrl: baseUrl, skipSsrf: true }
       );
 
-      // This won't work because the decoder fetches the actual URL
-      // Instead, let's test the extraction logic
+      assert.ok(result, 'decoder should extract content from the local RSC server');
+      assert.ok(result.content.includes('MyProject is a tool'), 'main content extracted');
+      assert.equal(result.metadata.source, 'deepwiki-rsc');
+      // The RSC request went through the pipeline with the trick headers.
+      assert.equal(lastRequestHeaders['rsc'], '1');
+      assert.equal(lastRequestHeaders['next-url'], '/myorg/myrepo');
+    });
+
+    it('does not blindly follow redirects (issue #63: safeFetch semantics)', async () => {
+      // Raw fetch() auto-follows redirects with no re-validation; safeFetch
+      // follows one hop only after re-validating the target. A redirect to a
+      // private address must be refused even mid-flight.
+      await new Promise<void>((resolve) => {
+        server = createServer((req: IncomingMessage, res: ServerResponse) => {
+          if (req.url?.includes('redirected')) {
+            res.writeHead(200, { 'Content-Type': 'text/x-component' });
+            res.end(makeRscPayload('# Attacker content that must not surface'.padEnd(60, '.')));
+            return;
+          }
+          res.writeHead(302, { Location: 'http://169.254.169.254/latest/meta-data/' });
+          res.end();
+        });
+        server.listen(0, '127.0.0.1', () => {
+          const addr = server.address() as { port: number };
+          baseUrl = `http://127.0.0.1:${addr.port}`;
+          resolve();
+        });
+      });
+
+      const result = await deepwikiDecoder.decode(
+        'https://deepwiki.com/myorg/myrepo',
+        { _testBaseUrl: baseUrl, skipSsrf: true }
+      );
+      assert.equal(result, null, 'redirect to a private address must yield null');
     });
 
     it('sends RSC header in request', async () => {

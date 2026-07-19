@@ -494,6 +494,7 @@ async function handleReplay(positional: string[], flags: Record<string, string |
   const dangerDisableSsrf = flags['danger-disable-ssrf'] === true;
   if (dangerDisableSsrf) {
     console.error('[apitap] WARNING: SSRF protection is disabled via --danger-disable-ssrf');
+    process.env.APITAP_DANGER_DISABLE_SSRF = '1'; // acknowledged operator override (see assertSsrfBypassAllowed)
   }
 
   let egressCheckOverride: false | 'annotate' | 'block' | undefined = undefined;
@@ -1947,6 +1948,7 @@ async function handleServe(positional: string[], flags: Record<string, string | 
 async function handleMcp(flags: Record<string, string | boolean>): Promise<void> {
   if (flags['danger-disable-ssrf'] === true) {
     console.error('[apitap] WARNING: SSRF protection is disabled via --danger-disable-ssrf');
+    process.env.APITAP_DANGER_DISABLE_SSRF = '1'; // acknowledged operator override (see assertSsrfBypassAllowed)
   }
   const server = createMcpServer({
     skillsDir: SKILLS_DIR,
@@ -2214,6 +2216,10 @@ async function handleBrowse(positional: string[], flags: Record<string, string |
   const { browse } = await import('./orchestration/browse.js');
   const { SessionCache } = await import('./orchestration/cache.js');
 
+  if (flags['danger-disable-ssrf'] === true) {
+    console.error('[apitap] WARNING: SSRF protection is disabled via --danger-disable-ssrf');
+    process.env.APITAP_DANGER_DISABLE_SSRF = '1'; // acknowledged operator override (see assertSsrfBypassAllowed)
+  }
   const result = await browse(fullUrl, {
     skillsDir: SKILLS_DIR,
     cache: new SessionCache(),

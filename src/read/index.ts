@@ -9,12 +9,14 @@ import { findDecoder } from './decoders/index.js';
 import { parseHead, extractContent } from './extract.js';
 import { scanRawHtml } from './scan.js';
 import { appendFinding } from '../trapaware/audit.js';
+import { assertSsrfBypassAllowed } from '../skill/ssrf.js';
 
 export interface ReadOptions {
   skipSsrf?: boolean;
-  /** Approximate envelope size bound: content is sliced to this many chars
-   *  and links shrink to fit, but content + fixed metadata keep priority and
-   *  can exceed it. */
+  /** Envelope size bound: links shrink first, then content is re-sliced
+   *  byte-accurately (with a contentTruncated signal) until the serialized
+   *  envelope fits. Only fixed metadata — including scanner findings —
+   *  larger than the budget itself can still exceed it. */
   maxBytes?: number;
   /** Enable trap-aware content scanning on fetched HTML. Default: true.
    *  When false, the scanner does not run and the ReadResult has no
@@ -67,6 +69,7 @@ function dietImages(images: Array<{ alt: string; src: string }>): Array<{ alt: s
  * same content-injection attack surface.
  */
 export async function read(url: string, options: ReadOptions = {}): Promise<ReadResult | null> {
+  assertSsrfBypassAllowed(options.skipSsrf);
   const scanEnabled = options.scan !== false;
 
   // Try site-specific decoder first
@@ -77,6 +80,7 @@ export async function read(url: string, options: ReadOptions = {}): Promise<Read
       if (options.maxBytes && result.content.length > options.maxBytes) {
         result.content = result.content.slice(0, options.maxBytes);
         result.cost.tokens = Math.ceil(result.content.length / 4);
+        result.contentTruncated = true;
       }
       // Decoders bypass scanning — they extract from structured sources.
       // Do NOT attach a findings field; preserve existing decoder envelope.
@@ -115,8 +119,10 @@ export async function read(url: string, options: ReadOptions = {}): Promise<Read
   }
 
   let content = body.content;
+  let contentTruncated = false;
   if (options.maxBytes && content.length > options.maxBytes) {
     content = content.slice(0, options.maxBytes);
+    contentTruncated = true;
   }
 
   const title = head.ogTitle || head.title || null;
@@ -160,6 +166,7 @@ export async function read(url: string, options: ReadOptions = {}): Promise<Read
     ...(linksOmitted > 0 ? { linksOmitted } : {}),
     images,
     ...(imagesOmitted > 0 ? { imagesOmitted } : {}),
+    ...(contentTruncated ? { contentTruncated: true } : {}),
     metadata: {
       type: head.ogType || 'unknown',
       publishedAt: head.publishedTime || null,
@@ -173,6 +180,10 @@ export async function read(url: string, options: ReadOptions = {}): Promise<Read
 
   // maxBytes bounds the envelope: shrink links (halving) before touching content.
   if (options.maxBytes) {
+    // cost.tokens is recomputed after shrinking; measure with its widest
+    // possible value so the final number never grows the envelope past
+    // the budget we just enforced.
+    envelope.cost.tokens = Math.ceil(options.maxBytes / 4);
     while (
       Buffer.byteLength(JSON.stringify(envelope), 'utf-8') > options.maxBytes &&
       envelope.links.length > 0
@@ -180,6 +191,32 @@ export async function read(url: string, options: ReadOptions = {}): Promise<Read
       const keep = Math.floor(envelope.links.length / 2);
       envelope.linksOmitted = (envelope.linksOmitted ?? 0) + (envelope.links.length - keep);
       envelope.links = envelope.links.slice(0, keep);
+    }
+
+    // Links exhausted but still over budget: binary-search the largest
+    // content prefix whose full envelope fits (issue #62). Byte-accurate —
+    // measured against the serialized envelope, not content length. Only
+    // fixed metadata larger than maxBytes itself can still overshoot.
+    if (
+      Buffer.byteLength(JSON.stringify(envelope), 'utf-8') > options.maxBytes &&
+      envelope.content.length > 0
+    ) {
+      const full = envelope.content;
+      const suffix = '... [truncated]';
+      // Set the signal BEFORE measuring so its own bytes are budgeted.
+      envelope.contentTruncated = true;
+      let lo = 0;
+      let hi = full.length;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        envelope.content = full.slice(0, mid) + suffix;
+        if (Buffer.byteLength(JSON.stringify(envelope), 'utf-8') <= options.maxBytes) {
+          lo = mid;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      envelope.content = full.slice(0, lo) + suffix;
     }
   }
 

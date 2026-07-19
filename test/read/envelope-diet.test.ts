@@ -16,8 +16,13 @@ describe('read envelope diet', () => {
   let base: string;
 
   before(async () => {
-    server = createServer((_req, res) => {
+    server = createServer((req, res) => {
       res.writeHead(200, { 'content-type': 'text/html' });
+      if (req.url === '/big') {
+        // Large content, zero links: link shrinking cannot rescue the envelope.
+        res.end(`<!doctype html><html><head><title>Big</title></head><body><article><p>${'Long content. '.repeat(600)}</p></article></body></html>`);
+        return;
+      }
       res.end(pageWithNoise());
     });
     await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
@@ -62,6 +67,21 @@ describe('read envelope diet', () => {
     const bytes = Buffer.byteLength(JSON.stringify(result), 'utf-8');
     assert.ok(bytes <= 6000, `envelope ${bytes} bytes`);
     assert.ok(result.content.length > 0, 'content survives before links');
+  });
+
+  it('re-slices content byte-accurately after links are exhausted, with a signal (issue #62)', async () => {
+    const result = await read(`${base}/big`, { skipSsrf: true, maxBytes: 2000 });
+    assert.ok(result);
+    const bytes = Buffer.byteLength(JSON.stringify(result), 'utf-8');
+    assert.ok(bytes <= 2000, `envelope ${bytes} bytes exceeds maxBytes 2000`);
+    assert.strictEqual(result.contentTruncated, true, 'content truncation must carry a signal');
+    assert.ok(result.content.length > 0, 'some content must survive');
+  });
+
+  it('does not set contentTruncated when the envelope fits', async () => {
+    const result = await read(`${base}/big`, { skipSsrf: true, maxBytes: 100_000 });
+    assert.ok(result);
+    assert.strictEqual(result.contentTruncated, undefined);
   });
 
   it('scan:false keeps the legacy envelope (no diet)', async () => {

@@ -1,6 +1,6 @@
 // src/capture/verifier.ts
 import type { SkillFile, SkillEndpoint, Replayability } from '../types.js';
-import { resolveAndValidateUrl } from '../skill/ssrf.js';
+import { resolveAndValidateUrl, assertSsrfBypassAllowed } from '../skill/ssrf.js';
 
 /**
  * Heuristic tier classification for non-GET endpoints (or when verification is skipped).
@@ -177,6 +177,7 @@ export interface VerifyOptions {
  * Returns a new skill file with replayability tags on all endpoints.
  */
 export async function verifyEndpoints(skill: SkillFile, opts?: VerifyOptions): Promise<SkillFile> {
+  assertSsrfBypassAllowed(opts?._skipSsrfCheck);
   const verifiedEndpoints = await Promise.all(
     skill.endpoints.map(async (ep) => {
       let replayability: Replayability;

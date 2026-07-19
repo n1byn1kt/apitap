@@ -25,6 +25,8 @@ export interface ReadResult {
   linksOmitted?: number;
   /** Number of images dropped (all of them unless includeImages). Absent on the legacy path. */
   imagesOmitted?: number;
+  /** True when content was cut to fit maxBytes. Absent on the legacy path. */
+  contentTruncated?: boolean;
   metadata: {
     type: string;
     publishedAt: string | null;

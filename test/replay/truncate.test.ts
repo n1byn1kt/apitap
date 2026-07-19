@@ -41,6 +41,42 @@ describe('truncateResponse', () => {
       assert.ok((result.data as unknown[]).length > 0);
     });
 
+    it('keeps the maximal prefix that fits the budget', () => {
+      const items = Array.from({ length: 500 }, (_, i) => ({
+        id: i,
+        body: 'x'.repeat(200),
+      }));
+      const result = truncateResponse(items, { maxBytes: 20_000 });
+      assert.ok(result.truncated !== false);
+      const kept = result.data as Array<{ id: number }>;
+      // Survivors are the original prefix, in order.
+      kept.forEach((item, i) => assert.equal(item.id, i));
+      // Maximal: adding the next item would exceed the budget.
+      const onePlus = items.slice(0, kept.length + 1);
+      assert.ok(
+        Buffer.byteLength(JSON.stringify(onePlus)) > 20_000,
+        'prefix is not maximal — one more item still fits'
+      );
+      assert.equal(result.truncated.droppedItems, items.length - kept.length);
+      assert.equal(result.truncated.keptItems, kept.length);
+    });
+
+    it('truncates a 20k-item array in linear time (issue #61)', () => {
+      const items = Array.from({ length: 20_000 }, (_, i) => ({
+        id: i,
+        name: `item-${i}`,
+        price: i * 1.5,
+      }));
+      const start = performance.now();
+      const result = truncateResponse(items, { maxBytes: 50_000 });
+      const elapsed = performance.now() - start;
+      assert.ok(result.truncated !== false);
+      assert.ok(
+        elapsed < 1_500,
+        `truncation took ${Math.round(elapsed)}ms — pop-loop re-serialization is quadratic`
+      );
+    });
+
     it('truncates string fields when single item exceeds limit', () => {
       const items = [{
         id: 1,
@@ -203,6 +239,32 @@ describe('recursive truncation (spec 2026-07-19)', () => {
     assert.strictEqual(truncateResponse(small, { maxBytes: 0 }).truncated, false);
     assert.strictEqual(truncateResponse(small, { maxBytes: -5 }).truncated, false);
     assert.strictEqual(truncateResponse(small, { maxBytes: Number.NaN }).truncated, false);
+  });
+
+  it('bounds a wide flat scalar object and reports dropped fields (issue #60)', () => {
+    // Thousands of small scalar fields: nothing for truncateValue to shrink
+    // (no long strings, no nested containers), and the old schemaSample kept
+    // every key — so the ~2x maxBytes guarantee was violable for id-keyed
+    // maps / locale dictionaries.
+    const wide: Record<string, number> = {};
+    for (let i = 0; i < 5_000; i++) wide[`key-${i}`] = i;
+    const originalBytes = Buffer.byteLength(JSON.stringify(wide));
+    assert.ok(originalBytes > 50_000, 'test data should be much larger than budget');
+
+    const start = performance.now();
+    const result = truncateResponse(wide, { maxBytes: 5_000 });
+    const elapsed = performance.now() - start;
+
+    assert.ok(result.truncated !== false);
+    const finalBytes = Buffer.byteLength(JSON.stringify(result.data));
+    assert.ok(finalBytes <= 10_000, `final ${finalBytes} bytes exceeds 2x maxBytes (10000)`);
+    const info = result.truncated as { note?: string; droppedFields?: number };
+    assert.ok(
+      (info.droppedFields ?? 0) > 0,
+      'droppedFields should report the fields cut from the sample'
+    );
+    assert.ok(info.note?.includes('fields dropped'), `note should mention dropped fields, got: ${info.note}`);
+    assert.ok(elapsed < 1_500, `took ${Math.round(elapsed)}ms — wide-object walk should be linear`);
   });
 
   it('recomputes honest stats for the schema-sample fallback (array input)', () => {

@@ -5,7 +5,7 @@ import { substituteBodyVariables } from '../capture/body-variables.js';
 import { parseJwtClaims } from '../capture/entropy.js';
 import { refreshTokens } from '../auth/refresh.js';
 import { truncateResponse, type TruncationInfo } from './truncate.js';
-import { resolveAndValidateUrl } from '../skill/ssrf.js';
+import { resolveAndValidateUrl, assertSsrfBypassAllowed } from '../skill/ssrf.js';
 import { snapshotSchema } from '../contract/schema.js';
 import { diffSchema, type ContractWarning } from '../contract/diff.js';
 import { scanOutboundRequest } from './egress.js';
@@ -310,6 +310,7 @@ export async function replayEndpoint(
 ): Promise<ReplayResult> {
   // Normalize options: support both new ReplayOptions and legacy params-only
   const options = normalizeOptions(optionsOrParams);
+  assertSsrfBypassAllowed(options._skipSsrfCheck);
   const { params = {}, authManager, domain } = options;
 
   const endpoint = skill.endpoints.find(e => e.id === endpointId);

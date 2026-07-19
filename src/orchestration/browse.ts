@@ -4,6 +4,7 @@ import { readSkillFile } from '../skill/store.js';
 import { replayEndpoint } from '../replay/engine.js';
 import { SessionCache } from './cache.js';
 import { read } from '../read/index.js';
+import { assertSsrfBypassAllowed } from '../skill/ssrf.js';
 import { bridgeAvailable, requestBridgeCapture, DEFAULT_SOCKET } from '../bridge/client.js';
 import { signSkillFile } from '../skill/signing.js';
 import { deriveSigningKey } from '../auth/crypto.js';
@@ -162,6 +163,7 @@ export async function browse(
   url: string,
   options: BrowseOptions = {},
 ): Promise<BrowseResult> {
+  assertSsrfBypassAllowed(options._skipSsrfCheck);
   const { cache, skillsDir, task, skipDiscovery, maxBytes = 50_000 } = options;
   const fullUrl = url.startsWith('http') ? url : `https://${url}`;
 

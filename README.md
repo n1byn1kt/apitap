@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/@apitap/core)](https://www.npmjs.com/package/@apitap/core)
 [![tests](https://img.shields.io/badge/tests-1590%20passing-brightgreen)](https://github.com/n1byn1kt/apitap)
-[![license](https://img.shields.io/badge/license-BSL--1.1-blue)](./LICENSE)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
 
 **The CLI, MCP server, and npm library that turns any website into an API — no docs, no SDK, no browser.**
 
@@ -696,4 +696,4 @@ Questions, feedback, or issues? -> **[hello@apitap.io](mailto:hello@apitap.io)**
 
 ## License
 
-[Business Source License 1.1](./LICENSE) — **free for all non-competing use** (personal, internal, educational, research, open source). Cannot be rebranded and sold as a competing service. Converts to Apache 2.0 on February 7, 2029.
+[Apache License 2.0](./LICENSE) — free and open source, no restrictions on use. ApiTap's BSL scheduled conversion to Apache 2.0 for 2029; we invoked the early-conversion clause on July 19, 2026 instead ([details](./LICENSE-CHANGE.md)).

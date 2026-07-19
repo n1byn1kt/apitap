@@ -16,7 +16,7 @@
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build"
   },
-  "license": "BSL-1.1",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/n1byn1kt/apitap.git"
@@ -45,6 +45,7 @@
     "src/",
     "data/",
     "LICENSE",
+    "LICENSE-CHANGE.md",
     "README.md",
     "SKILL.md"
   ],

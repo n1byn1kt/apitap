@@ -235,7 +235,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
             skillSource,
             capturedAt: skill.capturedAt,
             ...(result.refreshed ? { refreshed: result.refreshed } : {}),
-            ...(result.truncated ? { truncated: true } : {}),
+            ...(result.truncated ? { truncated: result.truncated } : {}),
             ...(result.contractWarnings?.length ? { contractWarnings: result.contractWarnings } : {}),
           }, 'apitap_replay');
       } catch (err: any) {

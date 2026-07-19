@@ -16,7 +16,11 @@ describe('replayEndpoint', () => {
 
   before(async () => {
     server = createServer((req, res) => {
-      if (req.url?.startsWith('/api/items')) {
+      if (req.url === '/api/items-large') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        const items = Array.from({ length: 500 }, (_, i) => ({ id: i, name: `Widget ${i}`.repeat(10) }));
+        res.end(JSON.stringify(items));
+      } else if (req.url?.startsWith('/api/items')) {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify([{ id: 1, name: 'Widget' }, { id: 2, name: 'Gadget' }]));
       } else if (req.url === '/api/item/42') {
@@ -163,6 +167,29 @@ describe('replayEndpoint', () => {
     const result = await replayEndpoint(skill, 'get-api-item', { _skipSsrfCheck: true });
     assert.equal(result.status, 200);
     assert.deepEqual(result.data, { id: 42, name: 'Special' });
+  });
+
+  it('returns structured truncation metadata when maxBytes cuts the response', async () => {
+    const skill = makeSkill();
+    skill.endpoints.push({
+      id: 'get-api-items-large',
+      method: 'GET',
+      path: '/api/items-large',
+      queryParams: {},
+      headers: {},
+      responseShape: { type: 'array', fields: ['id', 'name'] },
+      examples: {
+        request: { url: `${baseUrl}/api/items-large`, headers: {} },
+        responsePreview: [],
+      },
+    });
+
+    const result = await replayEndpoint(skill, 'get-api-items-large', { maxBytes: 500, _skipSsrfCheck: true });
+    assert.equal(result.status, 200);
+    assert.ok(result.truncated, 'expected truncated to be present');
+    assert.notStrictEqual(result.truncated, true, 'must be TruncationInfo, not boolean');
+    const info = result.truncated as { originalBytes: number; droppedItems: number };
+    assert.ok(info.originalBytes > 0);
   });
 });
 

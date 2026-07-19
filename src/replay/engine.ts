@@ -4,7 +4,7 @@ import type { AuthManager } from '../auth/manager.js';
 import { substituteBodyVariables } from '../capture/body-variables.js';
 import { parseJwtClaims } from '../capture/entropy.js';
 import { refreshTokens } from '../auth/refresh.js';
-import { truncateResponse } from './truncate.js';
+import { truncateResponse, type TruncationInfo } from './truncate.js';
 import { resolveAndValidateUrl } from '../skill/ssrf.js';
 import { snapshotSchema } from '../contract/schema.js';
 import { diffSchema, type ContractWarning } from '../contract/diff.js';
@@ -81,8 +81,8 @@ export interface ReplayResult {
   data: unknown;
   /** Whether tokens were refreshed during this replay */
   refreshed?: boolean;
-  /** Whether the response was truncated to fit maxBytes */
-  truncated?: boolean;
+  /** Truncation report, present when the response was cut to fit maxBytes */
+  truncated?: TruncationInfo;
   /** Contract warnings from schema drift detection */
   contractWarnings?: ContractWarning[];
   /** Upgrade hint: set when a low-confidence endpoint gets a 2xx response */
@@ -685,7 +685,7 @@ export async function replayEndpoint(
           headers: retryHeaders,
           data: truncated.data,
           refreshed,
-          ...(truncated.truncated ? { truncated: true } : {}),
+          ...(truncated.truncated ? { truncated: truncated.truncated } : {}),
           ...(retryUpgrade ? { upgrade: retryUpgrade } : {}),
           ...(egressFindings && egressFindings.length > 0 ? { warnings: egressFindings } : {}),
         };
@@ -743,7 +743,7 @@ export async function replayEndpoint(
       headers: responseHeaders,
       data: truncated.data,
       ...(refreshed ? { refreshed } : {}),
-      ...(truncated.truncated ? { truncated: true } : {}),
+      ...(truncated.truncated ? { truncated: truncated.truncated } : {}),
       ...(contractWarnings ? { contractWarnings } : {}),
       ...(upgrade ? { upgrade } : {}),
       ...(egressFindings && egressFindings.length > 0 ? { warnings: egressFindings } : {}),
@@ -777,7 +777,7 @@ export interface BatchReplayResult {
   error?: string;
   tier?: string;
   capturedAt?: string;
-  truncated?: boolean;
+  truncated?: TruncationInfo;
   contractWarnings?: ContractWarning[];
   skillSource?: 'disk' | 'discovered' | 'captured';
 }
@@ -842,7 +842,7 @@ export async function replayMultiple(
           tier,
           capturedAt: skill.capturedAt,
           skillSource: 'disk',
-          ...(result.truncated ? { truncated: true } : {}),
+          ...(result.truncated ? { truncated: result.truncated } : {}),
           ...(result.contractWarnings?.length ? { contractWarnings: result.contractWarnings } : {}),
         };
       } catch (err: any) {

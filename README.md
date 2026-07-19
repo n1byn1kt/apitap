@@ -1,31 +1,29 @@
 # ApiTap
 
 [![npm version](https://img.shields.io/npm/v/@apitap/core)](https://www.npmjs.com/package/@apitap/core)
-[![tests](https://img.shields.io/badge/tests-1590%20passing-brightgreen)](https://github.com/n1byn1kt/apitap)
+[![tests](https://img.shields.io/badge/tests-1601%20passing-brightgreen)](https://github.com/n1byn1kt/apitap)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
 
 **The CLI, MCP server, and npm library that turns any website into an API — no docs, no SDK, no browser.**
 
-ApiTap is a CLI, MCP server, and npm library that lets AI agents (and you) browse the web through APIs instead of browsers. It ships with **6,400+ pre-mapped endpoints** across 280+ APIs (Stripe, GitHub, Twilio, Slack, Spotify, and more) — ready to query on install. For sites not in the database, it captures API traffic from any website, generates reusable "skill files," and replays them directly with `fetch()`. No DOM, no selectors, no flaky waits. Token costs drop 20-100x compared to browser automation.
+ApiTap is a CLI, MCP server, and npm library that lets AI agents (and you) browse the web through APIs instead of browsers. Point it at a site: it captures the internal API from real traffic, generates a portable signed **skill file**, and replays requests directly with `fetch()`. Credentials never live in the file — they stay in encrypted storage and are injected at replay — and replays are matched against the captured route shapes, so your agent learns an endpoint drifted *before* it fails mid-task. No DOM, no selectors, no flaky waits. Token costs drop 20-100x compared to browser automation. Sites that publish OpenAPI specs can skip capture entirely via `apitap import` (APIs.guru directory built in).
 
 The web was built for human eyes; ApiTap makes it native to machines.
 
 ```bash
-# Import 280+ APIs instantly — no browser needed
-apitap import --from apis-guru --limit 100
-  Done: 87 imported, 3 failed, 10 skipped
-       1,847 endpoints added across 87 APIs
-
-# Replay any imported endpoint immediately
-apitap replay api.stripe.com get-listcharges limit=5
-
-# Or capture a site's private API
+# Capture a site's private API once…
 apitap capture https://polymarket.com
+
+# …then replay it forever — no browser in this path
 apitap replay gamma-api.polymarket.com get-events
 
-# Or read content directly
+# Read page content without a browser
 apitap read https://en.wikipedia.org/wiki/Node.js
   ✓ Wikipedia decoder: ~127 tokens (vs ~4,900 raw HTML)
+
+# Or import published OpenAPI specs directly
+apitap import --from apis-guru --search stripe
+apitap replay api.stripe.com get-listcharges limit=5
 ```
 
 No scraping. No browser. Just the API.
@@ -38,9 +36,9 @@ No scraping. No browser. Just the API.
 
 ApiTap has three ways to build its API knowledge:
 
-1. **Import** (instant) — Import OpenAPI/Swagger specs from the [APIs.guru](https://apis.guru) directory of 2,500+ public APIs, or from any spec URL/file. Endpoints get a confidence score based on spec quality. No browser needed.
-2. **Capture** (30 seconds) — Launch a browser, visit a site, browse normally. ApiTap intercepts all network traffic via CDP, filters noise, and generates a skill file. Or use `apitap attach` to capture from your already-running Chrome.
-3. **Discover** (automatic) — ApiTap auto-detects frameworks (WordPress, Next.js, Shopify) and probes for OpenAPI specs at common paths. Works without a browser.
+1. **Capture** (30 seconds) — Launch a browser, visit a site, browse normally. ApiTap intercepts all network traffic via CDP, filters noise, and generates a skill file. Or use `apitap attach` to capture from your already-running Chrome.
+2. **Discover** (automatic) — ApiTap auto-detects frameworks (WordPress, Next.js, Shopify) and probes for OpenAPI specs at common paths. Works without a browser.
+3. **Import** (instant) — Import OpenAPI/Swagger specs from the [APIs.guru](https://apis.guru) directory of 2,500+ public APIs, or from any spec URL/file. Endpoints get a confidence score based on spec quality. No browser needed.
 
 All three paths produce the same artifact: a **skill file** — a portable JSON map of an API's endpoints, stored at `~/.apitap/skills/`.
 
@@ -268,6 +266,8 @@ Auth-required APIs import as endpoint maps with response schemas — you can exp
 **Why not just use an OpenAPI spec?** You can! `apitap import` converts OpenAPI/Swagger specs directly into skill files. But many sites don't publish specs — ApiTap captures their APIs from live traffic.
 
 **Isn't this just a MITM proxy?** No. ApiTap is read-only — it uses Chrome DevTools Protocol to observe responses. No certificate setup, no request modification, no code injection.
+
+**Why trust a client derived from captured traffic?** Because ApiTap treats trust as the product: skill files are HMAC-signed, credentials never enter them (encrypted separately, injected at replay time), replays are matched against the captured route templates instead of "close enough" URLs, and every endpoint carries a replayability tier. When a response stops matching what was captured, ApiTap says so — instead of handing your agent plausible-but-wrong data. Compare that to pasting a raw HAR (bearer tokens included) into an LLM context.
 
 ## Replayability Tiers
 

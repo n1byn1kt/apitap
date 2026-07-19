@@ -100,4 +100,33 @@ describe('runDoctor', () => {
     assert.equal(report.scanned, 1);
     assert.equal(report.findings.length, 0);
   });
+
+  it('quarantine drops ALL of that domain\'s findings from remaining, not just the quarantine trigger', async () => {
+    // A skill that is simultaneously: on the junk-domain blocklist, has a
+    // beacon endpoint, and is unsigned — so scanning it produces
+    // invalid-signature + beacon-endpoints + junk-domain findings. Only one
+    // of those (junk-domain) drives the quarantine action; the file is gone
+    // afterward, so the other findings must not survive into `remaining`.
+    const multiDir = await mkdtemp(join(tmpdir(), 'doctor-engine-multi-'));
+    try {
+      const unsigned = makeSkill({
+        domain: 'cdn.segment.com', baseUrl: 'https://cdn.segment.com',
+        endpoints: [makeEndpoint(), beaconEp()],
+      });
+      (unsigned as any).signature = undefined;
+      (unsigned as any).signedAt = undefined;
+      await writeFile(join(multiDir, 'cdn.segment.com.json'), JSON.stringify(unsigned));
+
+      const scanOnly = await runDoctor({ skillsDir: multiDir, signingKey: key, now: NOW });
+      assert.ok(scanOnly.findings.some(f => f.domain === 'cdn.segment.com' && f.checkId === 'junk-domain'));
+      assert.ok(scanOnly.findings.some(f => f.domain === 'cdn.segment.com' && f.checkId === 'beacon-endpoints'));
+      assert.ok(scanOnly.findings.some(f => f.domain === 'cdn.segment.com' && f.checkId === 'invalid-signature'));
+
+      const report = await runDoctor({ skillsDir: multiDir, signingKey: key, fix: true, now: NOW });
+      assert.deepEqual(report.quarantined, ['cdn.segment.com']);
+      assert.equal(report.remaining.some(f => f.domain === 'cdn.segment.com'), false);
+    } finally {
+      await rm(multiDir, { recursive: true, force: true });
+    }
+  });
 });

@@ -159,6 +159,9 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorReport> {
   }
 
   const fixedKey = new Set(fixes.map(f => `${f.domain} ${f.checkId}`));
-  const remaining = findings.filter(f => !(f.fixable && fixedKey.has(`${f.domain} ${f.checkId}`)));
+  const quarantinedSet = new Set(quarantined);
+  const remaining = findings.filter(
+    f => !(f.fixable && fixedKey.has(`${f.domain} ${f.checkId}`)) && !quarantinedSet.has(f.domain),
+  );
   return { scanned: loaded.length, findings, fixes, remaining, quarantined };
 }

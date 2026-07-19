@@ -2526,16 +2526,32 @@ async function handleDoctor(positional: string[], flags: Record<string, string |
       console.error('Error: --stale-days must be a non-negative number');
       process.exit(2);
     }
+    // The house arg parser greedily assigns the next bare token as a flag's
+    // value, so `--fix polymarket.com` produces flags.fix === 'polymarket.com'
+    // instead of flags.fix === true with 'polymarket.com' as a positional.
+    // Recover intent: a string value still means the boolean flag was set,
+    // and if no positional domain was given, that swallowed string was it.
+    let domain = positional[0];
+    let fixFlag = flags.fix === true;
+    if (typeof flags.fix === 'string') {
+      fixFlag = true;
+      if (domain === undefined) domain = flags.fix;
+    }
+    let jsonFlag = flags.json === true;
+    if (typeof flags.json === 'string') {
+      jsonFlag = true;
+      if (domain === undefined) domain = flags.json;
+    }
     const report = await runDoctor({
       skillsDir, signingKey,
-      fix: flags.fix === true,
-      domain: positional[0],
+      fix: fixFlag,
+      domain,
       staleDays,
     });
-    if (flags.json === true) {
+    if (jsonFlag) {
       console.log(JSON.stringify(report, null, 2));
     } else {
-      console.log(formatDoctorReport(report, flags.fix === true));
+      console.log(formatDoctorReport(report, fixFlag));
       // Auth orphan info for quarantined domains (report-only; quarantine
       // deliberately does not touch auth.enc, unlike forget)
       for (const domain of report.quarantined) {

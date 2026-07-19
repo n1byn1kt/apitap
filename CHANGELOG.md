@@ -1,5 +1,31 @@
 # Changelog
 
+## v2.0.1 — 2026-07-19
+
+### Fixed
+- Array truncation is now linear (#61): the old pop-loop re-serialized the
+  whole array per dropped item — a 50k-item response took minutes, now ~30ms.
+  Same fix applied to the object walk, which had the same quadratic pattern.
+- Wide flat scalar objects (id-keyed maps, locale dictionaries) no longer
+  escape the ~2x `maxBytes` bound (#60): the schema-sample fallback spends a
+  byte budget of max(maxBytes, 2 KB), and dropped fields are reported via
+  `truncated.droppedFields` and the note.
+- `read` envelope now fits `maxBytes` byte-accurately (#62): after links are
+  exhausted, content is re-sliced against the serialized envelope and flagged
+  with `contentTruncated: true` (also set on the decoder path). Only fixed
+  metadata larger than the budget itself can still exceed it. The legacy
+  `--no-scan` envelope is unchanged.
+- DeepWiki decoder routed through `safeFetch` (#63): gains DNS-resolving SSRF
+  validation, manual single-hop redirects with target re-validation, timeout,
+  and a 2 MB body cap. `safeFetch` accepts extra request headers for this.
+
+### Security
+- The internal `skipSsrf` / `_skipSsrfCheck` test escape hatch is refused
+  outside a test run (#64). The warned `--danger-disable-ssrf` CLI flag keeps
+  working via an explicit acknowledgment env (`APITAP_DANGER_DISABLE_SSRF=1`)
+  that the CLI sets itself; the `browse` command now prints the same warning
+  as the other commands when the flag is used.
+
 ## v2.0.0 — 2026-07-19
 
 ### Changed

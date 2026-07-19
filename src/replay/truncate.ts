@@ -12,6 +12,8 @@ export interface TruncationInfo {
   droppedItems: number;
   /** Items surviving in the largest truncated array. */
   keptItems: number;
+  /** Object fields cut by the schema-sample fallback (wide flat objects). */
+  droppedFields?: number;
   note?: string;
 }
 
@@ -61,18 +63,47 @@ function maxArrayLength(value: unknown): number {
   return 0;
 }
 
-/** Aggressive last-resort shape sample: structure survives, bulk does not. */
-function schemaSample(value: unknown, depth: number): unknown {
+/** Floor for the sample budget: tiny maxBytes still yields usable structure. */
+const MIN_SAMPLE_BUDGET = 2_048;
+
+interface SampleStats {
+  /** Approximate bytes emitted so far, charged across the whole recursion. */
+  spent: number;
+  /** Object fields dropped once the budget was exhausted (issue #60). */
+  droppedFields: number;
+}
+
+/**
+ * Aggressive last-resort shape sample: structure survives, bulk does not.
+ * Spends a shared byte budget as it walks; once exhausted, remaining object
+ * fields are dropped and counted — a wide flat object of small scalars no
+ * longer escapes the size bound (issue #60).
+ */
+function schemaSample(value: unknown, depth: number, budget: number, sstats: SampleStats): unknown {
   if (depth > MAX_DEPTH) return '[truncated: depth]';
-  if (typeof value === 'string') return value.length > 100 ? value.slice(0, 100) + '... [truncated]' : value;
-  if (value === null || typeof value !== 'object') return value;
+  if (typeof value === 'string') {
+    const s = value.length > 100 ? value.slice(0, 100) + '... [truncated]' : value;
+    sstats.spent += byteLength(JSON.stringify(s));
+    return s;
+  }
+  if (value === null || typeof value !== 'object') {
+    sstats.spent += size(value);
+    return value;
+  }
   if (Array.isArray(value)) {
-    return value.length === 0 ? [] : [schemaSample(value[0], depth + 1)];
+    sstats.spent += 2;
+    return value.length === 0 ? [] : [schemaSample(value[0], depth + 1, budget, sstats)];
   }
+  const entries = Object.entries(value as Record<string, unknown>);
   const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-    out[k] = schemaSample(v, depth + 1);
+  let kept = 0;
+  for (const [k, v] of entries) {
+    if (sstats.spent >= budget) break;
+    sstats.spent += byteLength(JSON.stringify(k)) + 2; // key + ':' + ','
+    out[k] = schemaSample(v, depth + 1, budget, sstats);
+    kept++;
   }
+  sstats.droppedFields += entries.length - kept;
   return out;
 }
 
@@ -80,7 +111,8 @@ function truncateValue(value: unknown, budget: number, depth: number, stats: Wal
   if (typeof value === 'string') return capString(value);
   if (value === null || typeof value !== 'object') return value;
   if (depth > MAX_DEPTH) return '[truncated: depth]';
-  if (size(value) <= budget) return value;
+  const totalSize = size(value);
+  if (totalSize <= budget) return value;
 
   if (Array.isArray(value)) {
     // Largest prefix (>= 1 item) fitting the budget. Serialize each item
@@ -107,19 +139,27 @@ function truncateValue(value: unknown, budget: number, depth: number, stats: Wal
 
   // Object: recurse into dominant fields, largest first. Small scalar
   // fields are never dropped — they are the schema the agent needs.
+  // Size is tracked incrementally by replacement delta: re-serializing the
+  // whole result per field made wide objects quadratic (see issue #61's
+  // array twin; same failure mode).
   const record = value as Record<string, unknown>;
   const result: Record<string, unknown> = { ...record };
   const fields = Object.entries(record)
     .map(([k, v]) => ({ k, v, s: size(v) }))
     .sort((a, b) => b.s - a.s);
+  let currentSize = totalSize;
   for (const field of fields) {
-    if (size(result) <= budget) break;
+    if (currentSize <= budget) break;
     if (typeof field.v === 'string') {
-      result[field.k] = capString(field.v);
+      const capped = capString(field.v);
+      result[field.k] = capped;
+      currentSize += size(capped) - field.s;
     } else if (field.v !== null && typeof field.v === 'object') {
-      const others = size(result) - field.s;
+      const others = currentSize - field.s;
       const fieldBudget = Math.max(budget - others, MIN_FIELD_BUDGET);
-      result[field.k] = truncateValue(field.v, fieldBudget, depth + 1, stats);
+      const shrunk = truncateValue(field.v, fieldBudget, depth + 1, stats);
+      result[field.k] = shrunk;
+      currentSize += size(shrunk) - field.s;
     }
     // numbers/booleans/null: nothing to shrink
   }
@@ -135,9 +175,9 @@ function truncateValue(value: unknown, budget: number, depth: number, stats: Wal
  * worst case the caller gets one shape-sample item with capped strings.
  *
  * The result may overshoot maxBytes by per-level overhead; if it exceeds
- * 2 x maxBytes a schema-sample fallback replaces it. The fallback keeps
- * every key of a flat object, so a very wide object of small scalars can
- * still exceed the bound. Exact byte fitting is not a goal — honesty and
+ * 2 x maxBytes a schema-sample fallback replaces it, spending a byte budget
+ * of max(maxBytes, 2 KB) and dropping (and counting) object fields once it
+ * is exhausted. Exact byte fitting is not a goal — honesty and
  * order-of-magnitude correctness are.
  */
 export function truncateResponse(data: unknown, options?: TruncateOptions): TruncateResult {
@@ -194,9 +234,14 @@ export function truncateResponse(data: unknown, options?: TruncateOptions): Trun
   let result = truncateValue(data, maxBytes, 0, stats);
 
   // Safety net: bounded overshoot guarantee.
+  let droppedFields = 0;
   if (size(result) > 2 * maxBytes) {
-    result = schemaSample(data, 0);
-    stats.note = 'response exceeded budget after truncation; schema sample returned';
+    const sstats: SampleStats = { spent: 0, droppedFields: 0 };
+    result = schemaSample(data, 0, Math.max(maxBytes, MIN_SAMPLE_BUDGET), sstats);
+    droppedFields = sstats.droppedFields;
+    stats.note =
+      'response exceeded budget after truncation; schema sample returned' +
+      (droppedFields > 0 ? `; ${droppedFields} fields dropped` : '');
     // The walk's dropped/kept counts describe the discarded truncateValue
     // attempt, not this sample — recompute honestly for the sample we
     // actually return. keptItems is the largest array surviving anywhere
@@ -216,6 +261,7 @@ export function truncateResponse(data: unknown, options?: TruncateOptions): Trun
       finalBytes: size(result),
       droppedItems: stats.droppedItems,
       keptItems: stats.keptItems,
+      ...(droppedFields > 0 ? { droppedFields } : {}),
       ...(stats.note ? { note: stats.note } : {}),
     },
   };

@@ -127,8 +127,10 @@ function truncateValue(value: unknown, budget: number, depth: number, stats: Wal
  * worst case the caller gets one shape-sample item with capped strings.
  *
  * The result may overshoot maxBytes by per-level overhead; if it exceeds
- * 2 x maxBytes a schema-sample fallback replaces it. Exact byte fitting
- * is not a goal — honesty and order-of-magnitude correctness are.
+ * 2 x maxBytes a schema-sample fallback replaces it. The fallback keeps
+ * every key of a flat object, so a very wide object of small scalars can
+ * still exceed the bound. Exact byte fitting is not a goal — honesty and
+ * order-of-magnitude correctness are.
  */
 export function truncateResponse(data: unknown, options?: TruncateOptions): TruncateResult {
   let maxBytes = options?.maxBytes ?? DEFAULT_MAX_BYTES;

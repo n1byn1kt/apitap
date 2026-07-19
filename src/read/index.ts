@@ -12,6 +12,9 @@ import { appendFinding } from '../trapaware/audit.js';
 
 export interface ReadOptions {
   skipSsrf?: boolean;
+  /** Approximate envelope size bound: content is sliced to this many chars
+   *  and links shrink to fit, but content + fixed metadata keep priority and
+   *  can exceed it. */
   maxBytes?: number;
   /** Enable trap-aware content scanning on fetched HTML. Default: true.
    *  When false, the scanner does not run and the ReadResult has no

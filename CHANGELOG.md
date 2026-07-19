@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## v2.0.0 — 2026-07-19
 
 ### Changed
 - `maxBytes` now bounds replay responses at any nesting depth (wrapper objects,

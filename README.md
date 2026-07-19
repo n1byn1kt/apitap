@@ -491,6 +491,21 @@ apitap import https://api.apis.guru/v2/specs/stripe.com/2022-11-15/openapi.json
 
 Imported files are re-signed with your local key. OpenAPI specs are automatically detected and converted using the same merge logic — captured endpoints are preserved, imports fill gaps.
 
+### apitap doctor
+
+Offline hygiene check for your skill store — finds junk domains (ad/WAF/consent
+hosts), tracker beacon endpoints inside good skills, duplicate endpoints, stale
+captures, never-verified endpoints, and unsigned/tampered files.
+
+    apitap doctor              # report only; exit 1 if findings
+    apitap doctor --fix        # apply conservative fixes (quarantine + snapshot)
+    apitap doctor --restore example.com   # undo
+    apitap doctor --json       # machine-readable report
+
+`--fix` never deletes: whole files move to `~/.apitap/skills/.quarantine/`,
+edited files keep a first-touch original under `~/.apitap/skills/.doctor/`.
+Files whose signature does not verify are reported but never edited.
+
 ## Security
 
 ApiTap handles untrusted skill files from the internet and replays HTTP requests on your behalf. That's a high-trust position, and we treat it seriously.
@@ -649,6 +664,7 @@ All commands support `--json` for machine-readable output.
 | `apitap stats` | Show token savings report |
 | `apitap index [domain]` | View passive index from Chrome extension |
 | `apitap audit` | Audit stored skill files and credentials |
+| `apitap doctor` | Offline hygiene check for the skill store (junk domains, beacons, dupes, stale/unsigned files) |
 | `apitap forget <domain>` | Remove skill file and credentials for a domain |
 | `apitap --version` | Print version |
 

@@ -77,6 +77,7 @@ export async function read(url: string, options: ReadOptions = {}): Promise<Read
       if (options.maxBytes && result.content.length > options.maxBytes) {
         result.content = result.content.slice(0, options.maxBytes);
         result.cost.tokens = Math.ceil(result.content.length / 4);
+        result.contentTruncated = true;
       }
       // Decoders bypass scanning — they extract from structured sources.
       // Do NOT attach a findings field; preserve existing decoder envelope.
@@ -115,8 +116,10 @@ export async function read(url: string, options: ReadOptions = {}): Promise<Read
   }
 
   let content = body.content;
+  let contentTruncated = false;
   if (options.maxBytes && content.length > options.maxBytes) {
     content = content.slice(0, options.maxBytes);
+    contentTruncated = true;
   }
 
   const title = head.ogTitle || head.title || null;
@@ -160,6 +163,7 @@ export async function read(url: string, options: ReadOptions = {}): Promise<Read
     ...(linksOmitted > 0 ? { linksOmitted } : {}),
     images,
     ...(imagesOmitted > 0 ? { imagesOmitted } : {}),
+    ...(contentTruncated ? { contentTruncated: true } : {}),
     metadata: {
       type: head.ogType || 'unknown',
       publishedAt: head.publishedTime || null,
@@ -173,6 +177,10 @@ export async function read(url: string, options: ReadOptions = {}): Promise<Read
 
   // maxBytes bounds the envelope: shrink links (halving) before touching content.
   if (options.maxBytes) {
+    // cost.tokens is recomputed after shrinking; measure with its widest
+    // possible value so the final number never grows the envelope past
+    // the budget we just enforced.
+    envelope.cost.tokens = Math.ceil(options.maxBytes / 4);
     while (
       Buffer.byteLength(JSON.stringify(envelope), 'utf-8') > options.maxBytes &&
       envelope.links.length > 0
@@ -180,6 +188,32 @@ export async function read(url: string, options: ReadOptions = {}): Promise<Read
       const keep = Math.floor(envelope.links.length / 2);
       envelope.linksOmitted = (envelope.linksOmitted ?? 0) + (envelope.links.length - keep);
       envelope.links = envelope.links.slice(0, keep);
+    }
+
+    // Links exhausted but still over budget: binary-search the largest
+    // content prefix whose full envelope fits (issue #62). Byte-accurate —
+    // measured against the serialized envelope, not content length. Only
+    // fixed metadata larger than maxBytes itself can still overshoot.
+    if (
+      Buffer.byteLength(JSON.stringify(envelope), 'utf-8') > options.maxBytes &&
+      envelope.content.length > 0
+    ) {
+      const full = envelope.content;
+      const suffix = '... [truncated]';
+      // Set the signal BEFORE measuring so its own bytes are budgeted.
+      envelope.contentTruncated = true;
+      let lo = 0;
+      let hi = full.length;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        envelope.content = full.slice(0, mid) + suffix;
+        if (Buffer.byteLength(JSON.stringify(envelope), 'utf-8') <= options.maxBytes) {
+          lo = mid;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      envelope.content = full.slice(0, lo) + suffix;
     }
   }
 

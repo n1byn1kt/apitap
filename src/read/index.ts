@@ -7,6 +7,7 @@ import type { ReadResult } from './types.js';
 import { safeFetch } from '../discovery/fetch.js';
 import { findDecoder } from './decoders/index.js';
 import { parseHead, extractContent } from './extract.js';
+import { detectChallengePage } from './challenge.js';
 import { scanRawHtml } from './scan.js';
 import { appendFinding } from '../trapaware/audit.js';
 import { assertSsrfBypassAllowed } from '../skill/ssrf.js';
@@ -108,9 +109,16 @@ export async function read(url: string, options: ReadOptions = {}): Promise<Read
   const head = parseHead(html);
   const body = extractContent(html);
 
+  // Bot-challenge interstitial (Reddit "please wait for verification",
+  // Cloudflare "Just a moment…"): a 200 whose body is a verification page,
+  // not content. Label it honestly instead of returning an empty success.
+  const challenge = detectChallengePage(html, head.ogTitle || head.title || null);
+
   // Determine source
   let source: string;
-  if (body.isSpaShell) {
+  if (challenge) {
+    source = 'challenge-page';
+  } else if (body.isSpaShell) {
     source = 'spa-shell';
   } else if (body.content.trim().length === 0) {
     source = 'og-tags-only';
@@ -127,6 +135,11 @@ export async function read(url: string, options: ReadOptions = {}): Promise<Read
 
   const title = head.ogTitle || head.title || null;
 
+  // Never hand back an empty success for a challenge page — say what happened.
+  if (challenge && content.trim().length === 0) {
+    content = `[bot-challenge interstitial (${challenge}): the site withheld content pending human verification — no real page content was served]`;
+  }
+
   const legacy = !scanEnabled;
 
   if (legacy) {
@@ -138,6 +151,7 @@ export async function read(url: string, options: ReadOptions = {}): Promise<Read
       content,
       links: body.links,
       images: body.images,
+      ...(challenge ? { botProtection: challenge } : {}),
       metadata: {
         type: head.ogType || 'unknown',
         publishedAt: head.publishedTime || null,
@@ -167,6 +181,7 @@ export async function read(url: string, options: ReadOptions = {}): Promise<Read
     images,
     ...(imagesOmitted > 0 ? { imagesOmitted } : {}),
     ...(contentTruncated ? { contentTruncated: true } : {}),
+    ...(challenge ? { botProtection: challenge } : {}),
     metadata: {
       type: head.ogType || 'unknown',
       publishedAt: head.publishedTime || null,

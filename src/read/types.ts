@@ -28,6 +28,10 @@ export interface ReadResult {
   imagesOmitted?: number;
   /** True when content was cut to fit maxBytes. Absent on the legacy path. */
   contentTruncated?: boolean;
+  /** Set when the page is a bot-challenge interstitial ('cloudflare',
+   *  'ddos-guard', or generic 'challenge') — the site withheld real content.
+   *  metadata.source is 'challenge-page' in that case. */
+  botProtection?: string;
   metadata: {
     type: string;
     publishedAt: string | null;

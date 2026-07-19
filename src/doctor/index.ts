@@ -104,11 +104,31 @@ export async function runDoctor(opts: DoctorOptions): Promise<DoctorReport> {
 
     const fileFindings = CHECKS.flatMap(c => c.scan(l.skill!, ctx));
     findings.push(...fileFindings);
+
+    // Filename/content domain mismatch: the file on disk is named
+    // <domain>.json but the signed skill payload claims a different domain.
+    // Edits are gated on signature validity, which only proves the bytes
+    // weren't tampered with post-write — it says nothing about whether this
+    // file was placed under someone else's filename. Refuse edit fixes here
+    // too; quarantine still works since it acts on the filename path alone.
+    const domainMismatch = l.skill.domain !== l.domain;
+    if (domainMismatch) {
+      findings.push({
+        checkId: 'domain-mismatch',
+        domain: l.domain,
+        severity: 'warn',
+        message: `file ${l.domain}.json contains a skill for domain "${l.skill.domain}" — ` +
+          `edit fixes disabled for this file (quarantine still applies)`,
+        fixable: false,
+      });
+    }
+
     if (!opts.fix) continue;
 
-    // Integrity gate: edits only on files whose signature verifies —
-    // editing + re-signing anything else would launder tampering.
-    const canEdit = l.signatureStatus === 'valid';
+    // Integrity gate: edits only on files whose signature verifies AND whose
+    // filename matches the signed domain — editing + re-signing anything
+    // else would launder tampering.
+    const canEdit = l.signatureStatus === 'valid' && !domainMismatch;
 
     // Quarantine wins: if any fixable finding plans a quarantine, do only that.
     const fixableIds = new Set(fileFindings.filter(f => f.fixable).map(f => f.checkId));

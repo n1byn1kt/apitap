@@ -129,4 +129,30 @@ describe('runDoctor', () => {
       await rm(multiDir, { recursive: true, force: true });
     }
   });
+
+  it('refuses edit fixes when the filename domain does not match the signed skill.domain', async () => {
+    // Validly-signed skill claims domain 'real.com' but is saved under a
+    // different basename — a filename/content mismatch that signature
+    // verification alone would not catch.
+    const mismatchDir = await mkdtemp(join(tmpdir(), 'doctor-engine-mismatch-'));
+    try {
+      const skill = signSkillFileAs(makeSkill({
+        domain: 'real.com', baseUrl: 'https://real.com',
+        endpoints: [makeEndpoint(), beaconEp()],
+      }), key, 'self');
+      const filePath = join(mismatchDir, 'alias.com.json');
+      const before = JSON.stringify(skill);
+      await writeFile(filePath, before);
+
+      const report = await runDoctor({ skillsDir: mismatchDir, signingKey: key, fix: true, now: NOW });
+
+      // bytes unchanged — no edit, no re-sign
+      assert.equal(await readFile(filePath, 'utf-8'), before);
+      assert.ok(report.findings.some(
+        f => f.checkId === 'domain-mismatch' && f.domain === 'alias.com' && f.severity === 'warn' && f.fixable === false,
+      ));
+    } finally {
+      await rm(mismatchDir, { recursive: true, force: true });
+    }
+  });
 });

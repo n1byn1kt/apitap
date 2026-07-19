@@ -55,4 +55,27 @@ describe('doctor snapshot/quarantine/restore', () => {
   it('restore with nothing to restore throws', async () => {
     await assert.rejects(() => restoreSkill(dir, 'nothing.com'), /nothing to restore/i);
   });
+
+  it('restore rejects a path-traversal domain', async () => {
+    await assert.rejects(() => restoreSkill(dir, '../evil'), /Invalid domain/);
+  });
+
+  it('quarantining the same domain twice never clobbers the first copy', async () => {
+    await quarantineSkill(dir, 'a.com');
+    assert.equal(await readFile(quarantinePath(dir, 'a.com'), 'utf-8'), '{"original":true}\n');
+
+    await writeFile(live(), '{"recaptured":true}\n'); // recreate live file
+    await quarantineSkill(dir, 'a.com');
+
+    // unsuffixed copy untouched; a timestamped sibling holds the second one
+    assert.equal(await readFile(quarantinePath(dir, 'a.com'), 'utf-8'), '{"original":true}\n');
+    const { readdir } = await import('node:fs/promises');
+    const entries = await readdir(join(dir, '.quarantine'));
+    const timestamped = entries.filter(e => e !== 'a.com.json' && e.startsWith('a.com.') && e.endsWith('.json'));
+    assert.equal(timestamped.length, 1);
+    assert.equal(
+      await readFile(join(dir, '.quarantine', timestamped[0]), 'utf-8'),
+      '{"recaptured":true}\n',
+    );
+  });
 });

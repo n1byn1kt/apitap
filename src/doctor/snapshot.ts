@@ -5,11 +5,24 @@ import { join } from 'node:path';
 const QUARANTINE_DIR = '.quarantine';
 const SNAPSHOT_DIR = '.doctor';
 
+/**
+ * Mirrors store.ts's skillPath regex + forget's '..' rejection. Every join()
+ * in this module is derived from `domain`, so this guard confines all of
+ * them to the skills dir — no traversal via crafted --restore/--domain args.
+ */
+function assertValidDomain(domain: string): void {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(domain) || domain.includes('..')) {
+    throw new Error(`Invalid domain: ${domain}`);
+  }
+}
+
 export function quarantinePath(skillsDir: string, domain: string): string {
+  assertValidDomain(domain);
   return join(skillsDir, QUARANTINE_DIR, `${domain}.json`);
 }
 
 export function snapshotPath(skillsDir: string, domain: string): string {
+  assertValidDomain(domain);
   return join(skillsDir, SNAPSHOT_DIR, `${domain}.json.orig`);
 }
 
@@ -19,6 +32,7 @@ async function exists(p: string): Promise<boolean> {
 
 /** Copy the live file to .doctor/<domain>.json.orig — first touch only. */
 export async function snapshotOnce(skillsDir: string, domain: string): Promise<boolean> {
+  assertValidDomain(domain);
   await mkdir(join(skillsDir, SNAPSHOT_DIR), { recursive: true, mode: 0o700 });
   try {
     await copyFile(join(skillsDir, `${domain}.json`), snapshotPath(skillsDir, domain), fsConstants.COPYFILE_EXCL);
@@ -29,10 +43,21 @@ export async function snapshotOnce(skillsDir: string, domain: string): Promise<b
   }
 }
 
-/** Move (never delete) a skill file into quarantine. */
+/**
+ * Move (never delete) a skill file into quarantine. Never clobbers an
+ * existing quarantined copy for the same domain — if the unsuffixed
+ * destination is already taken, move to a timestamped name instead. The
+ * existence check has a tiny TOCTOU window, which is fine under this tool's
+ * same-user threat model.
+ */
 export async function quarantineSkill(skillsDir: string, domain: string): Promise<void> {
+  assertValidDomain(domain);
   await mkdir(join(skillsDir, QUARANTINE_DIR), { recursive: true, mode: 0o700 });
-  await rename(join(skillsDir, `${domain}.json`), quarantinePath(skillsDir, domain));
+  const dest = quarantinePath(skillsDir, domain);
+  const target = (await exists(dest))
+    ? join(skillsDir, QUARANTINE_DIR, `${domain}.${Date.now()}.json`)
+    : dest;
+  await rename(join(skillsDir, `${domain}.json`), target);
 }
 
 /**
@@ -41,6 +66,7 @@ export async function quarantineSkill(skillsDir: string, domain: string): Promis
  * file exists (re-captured after quarantine). Bytes verbatim, never re-signs.
  */
 export async function restoreSkill(skillsDir: string, domain: string): Promise<'orig' | 'quarantine'> {
+  assertValidDomain(domain);
   const live = join(skillsDir, `${domain}.json`);
   const orig = snapshotPath(skillsDir, domain);
   const quar = quarantinePath(skillsDir, domain);

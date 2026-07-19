@@ -12,11 +12,47 @@ import { appendFinding } from '../trapaware/audit.js';
 
 export interface ReadOptions {
   skipSsrf?: boolean;
+  /** Approximate envelope size bound: content is sliced to this many chars
+   *  and links shrink to fit, but content + fixed metadata keep priority and
+   *  can exceed it. */
   maxBytes?: number;
   /** Enable trap-aware content scanning on fetched HTML. Default: true.
    *  When false, the scanner does not run and the ReadResult has no
    *  `findings` field (byte-identical to pre-v1.0 output). */
   scan?: boolean;
+  /** Include the images array in the envelope (deduped, capped). Default: false. */
+  includeImages?: boolean;
+}
+
+const LINKS_CAP = 100;
+const IMAGES_CAP = 50;
+
+function dietLinks(links: Array<{ text: string; href: string }>): Array<{ text: string; href: string }> {
+  const seen = new Set<string>();
+  const out: Array<{ text: string; href: string }> = [];
+  for (const link of links) {
+    if (seen.has(link.href)) continue;
+    seen.add(link.href);
+    let text = link.text;
+    const imgMd = /^!\[(.*?)\]\(.*\)$/.exec(text);
+    if (imgMd) text = imgMd[1];
+    if (text.trim() === '') continue; // no visible text after image-markdown unwrapping: drop
+    out.push({ text, href: link.href });
+  }
+  return out;
+}
+
+function dietImages(images: Array<{ alt: string; src: string }>): Array<{ alt: string; src: string }> {
+  const seen = new Set<string>();
+  const out: Array<{ alt: string; src: string }> = [];
+  for (const image of images) {
+    const key = image.src.split('?')[0]; // kill responsive-crop duplicates
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(image);
+    if (out.length >= IMAGES_CAP) break;
+  }
+  return out;
 }
 
 /**
@@ -85,14 +121,45 @@ export async function read(url: string, options: ReadOptions = {}): Promise<Read
 
   const title = head.ogTitle || head.title || null;
 
-  return {
+  const legacy = !scanEnabled;
+
+  if (legacy) {
+    return {
+      url,
+      title,
+      author: head.author || null,
+      description: head.ogDescription || null,
+      content,
+      links: body.links,
+      images: body.images,
+      metadata: {
+        type: head.ogType || 'unknown',
+        publishedAt: head.publishedTime || null,
+        source,
+        canonical: head.canonical || null,
+        siteName: head.ogSiteName || null,
+      },
+      cost: { tokens: Math.ceil(content.length / 4) },
+    };
+  }
+
+  const dietedLinks = dietLinks(body.links);
+  const links = dietedLinks.slice(0, LINKS_CAP);
+  const linksOmitted = body.links.length - links.length;
+
+  const images = options.includeImages ? dietImages(body.images) : [];
+  const imagesOmitted = body.images.length - images.length;
+
+  const envelope: ReadResult = {
     url,
     title,
     author: head.author || null,
     description: head.ogDescription || null,
     content,
-    links: body.links,
-    images: body.images,
+    links,
+    ...(linksOmitted > 0 ? { linksOmitted } : {}),
+    images,
+    ...(imagesOmitted > 0 ? { imagesOmitted } : {}),
     metadata: {
       type: head.ogType || 'unknown',
       publishedAt: head.publishedTime || null,
@@ -100,7 +167,22 @@ export async function read(url: string, options: ReadOptions = {}): Promise<Read
       canonical: head.canonical || null,
       siteName: head.ogSiteName || null,
     },
-    cost: { tokens: Math.ceil(content.length / 4) },
+    cost: { tokens: 0 },
     ...(findings !== undefined ? { findings } : {}),
   };
+
+  // maxBytes bounds the envelope: shrink links (halving) before touching content.
+  if (options.maxBytes) {
+    while (
+      Buffer.byteLength(JSON.stringify(envelope), 'utf-8') > options.maxBytes &&
+      envelope.links.length > 0
+    ) {
+      const keep = Math.floor(envelope.links.length / 2);
+      envelope.linksOmitted = (envelope.linksOmitted ?? 0) + (envelope.links.length - keep);
+      envelope.links = envelope.links.slice(0, keep);
+    }
+  }
+
+  envelope.cost = { tokens: Math.ceil(JSON.stringify(envelope).length / 4) };
+  return envelope;
 }

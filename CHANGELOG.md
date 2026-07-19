@@ -1,5 +1,28 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- `maxBytes` now bounds replay responses at any nesting depth (wrapper objects,
+  GraphQL shapes). Previously nested payloads passed through untruncated. The
+  bound is approximate, not exact: honest metadata and order-of-magnitude
+  correctness are the goal, and rare shapes (e.g. very wide flat objects of
+  small scalars) can still exceed it.
+- **BREAKING** for consumers that compare strictly: `truncated` in replay/browse
+  results is now a structured report
+  `{originalBytes, finalBytes, droppedItems, keptItems, note?}` instead of
+  `true`. It is still truthy exactly when truncation occurred, so
+  `if (result.truncated)` keeps working — but `result.truncated === true`
+  checks and JSON schemas typing the field as `boolean` must be updated.
+- Truncation never returns an empty array for non-empty input — worst case a
+  single shape-sample item with capped strings is kept.
+- `read` envelope: links are deduped by href and capped at 100 (`linksOmitted`
+  reports the cut); images are omitted by default (`--images` / `includeImages`
+  restores them, deduped and capped at 50); `cost.tokens` now measures the
+  whole envelope; `maxBytes` shrinks links first and slices content, but the
+  bound is approximate — a large content body plus fixed metadata can exceed
+  it. `--no-scan` / `scan: false` preserves the legacy envelope exactly.
+
 ## v1.12.1
 
 ### Fixed

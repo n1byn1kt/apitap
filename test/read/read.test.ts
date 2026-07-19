@@ -113,7 +113,8 @@ describe('read', () => {
     const result = await read(baseUrl, { skipSsrf: true });
     assert.ok(result);
     assert.ok(result.cost.tokens > 0);
-    assert.equal(result.cost.tokens, Math.ceil(result.content.length / 4));
+    // cost.tokens now measures the whole serialized envelope, not just content.
+    assert.equal(result.cost.tokens, Math.ceil(JSON.stringify(result).length / 4));
   });
 
   it('returns null for non-200 status', async () => {

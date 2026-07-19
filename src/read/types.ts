@@ -21,6 +21,10 @@ export interface ReadResult {
   content: string;
   links: Array<{ text: string; href: string }>;
   images: Array<{ alt: string; src: string }>;
+  /** Number of links dropped by dedupe/caps. Absent on the legacy (scan: false) path. */
+  linksOmitted?: number;
+  /** Number of images dropped (all of them unless includeImages). Absent on the legacy path. */
+  imagesOmitted?: number;
   metadata: {
     type: string;
     publishedAt: string | null;

@@ -1,4 +1,5 @@
 import type { SkillFile, SkillEndpoint } from '../types.js';
+import type { TruncationInfo } from '../replay/truncate.js';
 import { readSkillFile } from '../skill/store.js';
 import { replayEndpoint } from '../replay/engine.js';
 import { SessionCache } from './cache.js';
@@ -33,7 +34,7 @@ export interface BrowseSuccess {
   skillSource: 'disk' | 'discovered' | 'captured' | 'bridge';
   capturedAt: string;
   task?: string;
-  truncated?: boolean;
+  truncated?: TruncationInfo;
 }
 
 export interface BrowseGuidance {
@@ -106,7 +107,7 @@ async function tryBridgeCapture(
               skillSource: 'bridge',
               capturedAt: primarySkill.capturedAt ?? new Date().toISOString(),
               task: options.task,
-              ...(replayResult.truncated ? { truncated: true } : {}),
+              ...(replayResult.truncated ? { truncated: replayResult.truncated } : {}),
             };
           }
         } catch {
@@ -343,7 +344,7 @@ export async function browse(
       skillSource,
       capturedAt: skill.capturedAt,
       task,
-      ...(result.truncated ? { truncated: true } : {}),
+      ...(result.truncated ? { truncated: result.truncated } : {}),
     };
   } catch {
     // Try extension bridge before giving up

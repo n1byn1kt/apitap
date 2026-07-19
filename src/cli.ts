@@ -160,6 +160,7 @@ function printUsage(): void {
     --max-bytes <bytes>        Truncate content to fit within byte limit
     --scan                     Enable trap-aware content scanning (default)
     --no-scan                  Disable trap-aware content scanning
+    --images                   Include the images array (deduped, capped at 50)
 
   Import options:
     --yes                      Skip confirmation prompt
@@ -532,6 +533,7 @@ async function handleReplay(positional: string[], flags: Record<string, string |
     console.log(JSON.stringify({
       status: result.status,
       data: result.data,
+      ...(result.truncated ? { truncated: result.truncated } : {}),
       ...(result.contractWarnings?.length ? { contractWarnings: result.contractWarnings } : {}),
       ...(result.warnings?.length ? { warnings: result.warnings } : {}),
     }, null, 2));
@@ -548,6 +550,16 @@ async function handleReplay(positional: string[], flags: Record<string, string |
     }
     console.log(`\n  Status: ${result.status}\n`);
     console.log(JSON.stringify(result.data, null, 2));
+    if (result.truncated) {
+      const t = result.truncated;
+      const fromKb = Math.round(t.originalBytes / 1024);
+      const toKb = Math.round(t.finalBytes / 1024);
+      const itemsClause =
+        t.droppedItems === 0 && t.keptItems === 0
+          ? ''
+          : `kept ${t.keptItems} items, dropped ${t.droppedItems}, `;
+      console.log(`  truncated: ${itemsClause}${fromKb} KB → ${toKb} KB`);
+    }
     console.log();
   }
 }
@@ -2291,8 +2303,9 @@ async function handleRead(positional: string[], flags: Record<string, string | b
   }
 
   const scanFlag = flags['no-scan'] !== true;
+  const includeImages = flags['images'] === true;
 
-  const result = await read(fullUrl, { maxBytes, scan: scanFlag });
+  const result = await read(fullUrl, { maxBytes, scan: scanFlag, includeImages });
 
   if (!result) {
     if (json) {

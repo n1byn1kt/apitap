@@ -376,13 +376,14 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
         url: z.string().describe('URL to read (e.g. "https://en.wikipedia.org/wiki/TypeScript")'),
         maxBytes: z.number().optional().describe('Maximum content size in bytes. Content is truncated to fit.'),
         scan: z.boolean().optional().describe('Enable trap-aware content scanning (default: true). Set to false to skip scanning and preserve the legacy response envelope shape.'),
+        includeImages: z.boolean().optional().describe('Include the images array (deduped, capped at 50). Default: false.'),
       }),
       annotations: {
         readOnlyHint: true,
         openWorldHint: true,
       },
     },
-    async ({ url, maxBytes, scan }) => {
+    async ({ url, maxBytes, scan, includeImages }) => {
       if (!rateLimiter.check()) {
         return { content: [{ type: 'text' as const, text: 'Rate limit exceeded. Try again in a moment.' }], isError: true };
       }
@@ -393,7 +394,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
             throw new Error(validation.reason ?? 'URL validation failed');
           }
         }
-        const result = await read(url, { maxBytes: maxBytes ?? undefined, scan: scan !== false });
+        const result = await read(url, { maxBytes: maxBytes ?? undefined, scan: scan !== false, includeImages: includeImages === true });
         if (!result) {
           return {
             content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Failed to read content', url }) }],

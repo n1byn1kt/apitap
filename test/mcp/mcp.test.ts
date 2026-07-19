@@ -330,4 +330,25 @@ describe('apitap_read via MCP', () => {
     assert.equal((result as any)._meta?.externalContent?.untrusted, true);
     assert.equal((result as any)._meta?.externalContent?.source, 'apitap_read');
   });
+
+  it('apitap_read forwards includeImages to read()', async () => {
+    // techcrunch.com is not decoder-matched (generic HTML pipeline), so it
+    // exercises the includeImages diet path rather than a site decoder.
+    const result = await client.callTool({
+      name: 'apitap_read',
+      arguments: { url: 'https://techcrunch.com', includeImages: true },
+    });
+    assert.equal(result.isError, undefined);
+    const data = JSON.parse((result.content as any)[0].text);
+    assert.ok(Array.isArray(data.images));
+    assert.ok(data.images.length > 0, 'images array should be non-empty when includeImages is true');
+
+    const withoutFlag = await client.callTool({
+      name: 'apitap_read',
+      arguments: { url: 'https://techcrunch.com' },
+    });
+    assert.equal(withoutFlag.isError, undefined);
+    const dataWithoutFlag = JSON.parse((withoutFlag.content as any)[0].text);
+    assert.deepEqual(dataWithoutFlag.images, []);
+  });
 });

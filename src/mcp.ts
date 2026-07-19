@@ -394,7 +394,12 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
             throw new Error(validation.reason ?? 'URL validation failed');
           }
         }
-        const result = await read(url, { maxBytes: maxBytes ?? undefined, scan: scan !== false, includeImages: includeImages === true });
+        const result = await read(url, {
+          maxBytes: maxBytes ?? undefined,
+          scan: scan !== false,
+          includeImages: includeImages === true,
+          skipSsrf: options._skipSsrfCheck,
+        });
         if (!result) {
           return {
             content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Failed to read content', url }) }],

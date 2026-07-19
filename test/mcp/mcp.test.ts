@@ -1,5 +1,5 @@
 // test/mcp/mcp.test.ts
-import { describe, it, beforeEach, afterEach } from 'node:test';
+import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -330,25 +330,73 @@ describe('apitap_read via MCP', () => {
     assert.equal((result as any)._meta?.externalContent?.untrusted, true);
     assert.equal((result as any)._meta?.externalContent?.source, 'apitap_read');
   });
+});
 
-  it('apitap_read forwards includeImages to read()', async () => {
-    // techcrunch.com is not decoder-matched (generic HTML pipeline), so it
-    // exercises the includeImages diet path rather than a site decoder.
+describe('apitap_read includeImages via MCP (hermetic)', () => {
+  let httpServer: Server;
+  let base: string;
+  let client: Client;
+  let cleanup: () => Promise<void>;
+
+  before(async () => {
+    // Several <img> tags share a URL-sans-query to exercise dedupe.
+    const html = `<!doctype html><html><head><title>Fixture</title></head><body><article>
+      <p>${'Real content. '.repeat(100)}</p>
+      <img src="/img/1.jpg?w=100" alt="one">
+      <img src="/img/1.jpg?w=200" alt="one-dup">
+      <img src="/img/2.jpg" alt="two">
+      <img src="/img/3.jpg" alt="three">
+    </article></body></html>`;
+    httpServer = createHttpServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(html);
+    });
+    await new Promise<void>(resolve => httpServer.listen(0, '127.0.0.1', resolve));
+    const port = (httpServer.address() as AddressInfo).port;
+    base = `http://127.0.0.1:${port}`;
+  });
+
+  after(async () => {
+    await new Promise<void>(resolve => httpServer.close(() => resolve()));
+  });
+
+  beforeEach(async () => {
+    const server = createMcpServer({ _skipSsrfCheck: true });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    client = new Client({ name: 'test-client', version: '1.0.0' });
+    await server.connect(serverTransport);
+    await client.connect(clientTransport);
+    cleanup = async () => {
+      await client.close();
+      await server.close();
+    };
+  });
+
+  afterEach(async () => {
+    await cleanup();
+  });
+
+  it('omits images by default with imagesOmitted > 0', async () => {
     const result = await client.callTool({
       name: 'apitap_read',
-      arguments: { url: 'https://techcrunch.com', includeImages: true },
+      arguments: { url: `${base}/page` },
+    });
+    assert.equal(result.isError, undefined);
+    const data = JSON.parse((result.content as any)[0].text);
+    assert.deepEqual(data.images, []);
+    assert.ok(data.imagesOmitted > 0, `expected imagesOmitted > 0, got ${data.imagesOmitted}`);
+  });
+
+  it('forwards includeImages to read(), returning deduped images', async () => {
+    const result = await client.callTool({
+      name: 'apitap_read',
+      arguments: { url: `${base}/page`, includeImages: true },
     });
     assert.equal(result.isError, undefined);
     const data = JSON.parse((result.content as any)[0].text);
     assert.ok(Array.isArray(data.images));
     assert.ok(data.images.length > 0, 'images array should be non-empty when includeImages is true');
-
-    const withoutFlag = await client.callTool({
-      name: 'apitap_read',
-      arguments: { url: 'https://techcrunch.com' },
-    });
-    assert.equal(withoutFlag.isError, undefined);
-    const dataWithoutFlag = JSON.parse((withoutFlag.content as any)[0].text);
-    assert.deepEqual(dataWithoutFlag.images, []);
+    // /img/1.jpg?w=100 and /img/1.jpg?w=200 dedupe to a single URL-sans-query entry.
+    assert.equal(data.images.length, 3, `expected 3 deduped images, got ${data.images.length}`);
   });
 });

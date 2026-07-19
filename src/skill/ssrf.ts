@@ -21,8 +21,12 @@ export interface ValidationResult {
 export function assertSsrfBypassAllowed(flag: unknown): void {
   if (!flag) return;
   if (process.env.NODE_TEST_CONTEXT || process.env.NODE_ENV === 'test') return;
+  // Operator path: the CLI's --danger-disable-ssrf flag exports this after
+  // printing its warning. Deliberate and visible, unlike a silent option.
+  if (process.env.APITAP_DANGER_DISABLE_SSRF === '1') return;
   throw new Error(
-    'SSRF bypass (skipSsrf/_skipSsrfCheck) is test-only and refused outside a test run',
+    'SSRF bypass (skipSsrf/_skipSsrfCheck) is test-only and refused outside a test run ' +
+    '(use --danger-disable-ssrf for the warned operator override)',
   );
 }
 

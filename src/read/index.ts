@@ -13,9 +13,10 @@ import { assertSsrfBypassAllowed } from '../skill/ssrf.js';
 
 export interface ReadOptions {
   skipSsrf?: boolean;
-  /** Approximate envelope size bound: content is sliced to this many chars
-   *  and links shrink to fit, but content + fixed metadata keep priority and
-   *  can exceed it. */
+  /** Envelope size bound: links shrink first, then content is re-sliced
+   *  byte-accurately (with a contentTruncated signal) until the serialized
+   *  envelope fits. Only fixed metadata — including scanner findings —
+   *  larger than the budget itself can still exceed it. */
   maxBytes?: number;
   /** Enable trap-aware content scanning on fetched HTML. Default: true.
    *  When false, the scanner does not run and the ReadResult has no

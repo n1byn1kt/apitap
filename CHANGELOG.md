@@ -1,5 +1,32 @@
 # Changelog
 
+## v2.1.1 — 2026-07-19
+
+### Fixed
+- Replay no longer sends a bare request when a skill's `queryParams` is
+  empty but the captured example URL carries a query string (#67): params
+  are seeded from `examples.request.url`, so APIs like open-meteo return
+  real data instead of an empty 200 — the silent-false-success class from
+  the wild dogfood gauntlet. Explicit params still override; populated
+  `queryParams` remain authoritative.
+- `peek` no longer mislabels client-side transport failures as `blocked`
+  (#67): a new `recommendation: 'error'` carries the real failure code in
+  `signals` (e.g. `UND_ERR_HEADERS_OVERFLOW` on sites with oversized CSP
+  headers, with an explicit "not bot protection" note). SSRF-blocked URLs
+  now say "blocked by SSRF protection" instead of a generic "fetch failed".
+- `read` labels bot-challenge interstitials instead of returning an empty
+  success (#68): Reddit's "please wait for verification" and Cloudflare's
+  "Just a moment…" pages now yield `botProtection` on the result,
+  `metadata.source: 'challenge-page'`, and an explicit content note rather
+  than `content: ""`. Detection is title-driven plus the
+  `/cdn-cgi/challenge-platform/` marker, so pages that merely discuss
+  captchas are not flagged.
+
+### Added
+- `safeFetchDetailed` in the discovery fetch layer: preserves why a fetch
+  failed (`kind: 'ssrf' | 'transport'`, code, message). `safeFetch` is
+  unchanged as a thin wrapper.
+
 ## v2.1.0 — 2026-07-19
 
 ### Added

@@ -1,6 +1,7 @@
 // src/read/peek.ts
 import type { PeekResult } from './types.js';
 import { safeFetch } from '../discovery/fetch.js';
+import { assertSsrfBypassAllowed } from '../skill/ssrf.js';
 
 export interface PeekOptions {
   skipSsrf?: boolean;
@@ -11,6 +12,7 @@ export interface PeekOptions {
  * Falls back to GET if HEAD fails.
  */
 export async function peek(url: string, options: PeekOptions = {}): Promise<PeekResult> {
+  assertSsrfBypassAllowed(options.skipSsrf);
   const signals: string[] = [];
 
   // Try HEAD first

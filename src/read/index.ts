@@ -9,6 +9,7 @@ import { findDecoder } from './decoders/index.js';
 import { parseHead, extractContent } from './extract.js';
 import { scanRawHtml } from './scan.js';
 import { appendFinding } from '../trapaware/audit.js';
+import { assertSsrfBypassAllowed } from '../skill/ssrf.js';
 
 export interface ReadOptions {
   skipSsrf?: boolean;
@@ -67,6 +68,7 @@ function dietImages(images: Array<{ alt: string; src: string }>): Array<{ alt: s
  * same content-injection attack surface.
  */
 export async function read(url: string, options: ReadOptions = {}): Promise<ReadResult | null> {
+  assertSsrfBypassAllowed(options.skipSsrf);
   const scanEnabled = options.scan !== false;
 
   // Try site-specific decoder first

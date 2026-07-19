@@ -11,6 +11,21 @@ export interface ValidationResult {
   originalHost?: string;
 }
 
+/**
+ * Test-only escape-hatch guard (issue #64). The skipSsrf/_skipSsrfCheck
+ * options exist so hermetic tests can hit loopback servers; outside a test
+ * run they must be inert. Called at every public ingress that accepts the
+ * flag — internal redirect re-validation (which passes skipSsrf after its
+ * own check) is deliberately not routed through this.
+ */
+export function assertSsrfBypassAllowed(flag: unknown): void {
+  if (!flag) return;
+  if (process.env.NODE_TEST_CONTEXT || process.env.NODE_ENV === 'test') return;
+  throw new Error(
+    'SSRF bypass (skipSsrf/_skipSsrfCheck) is test-only and refused outside a test run',
+  );
+}
+
 const INTERNAL_HOSTNAMES = ['localhost'];
 const INTERNAL_SUFFIXES = ['.local', '.internal', '.localhost', '.corp', '.intranet', '.lan', '.test', '.invalid', '.example'];
 

@@ -128,7 +128,7 @@ const STRUCTURAL_SEGMENTS = new Set<string>([
  * Check if a path segment is a dynamic value based on its structure alone.
  * Returns the parameter name (:id, :hash, :slug) or null if static.
  */
-function classifySegment(segment: string): string | null {
+export function classifySegment(segment: string): string | null {
   // Pure numeric → :id
   if (PURE_NUMERIC_RE.test(segment)) return ':id';
 

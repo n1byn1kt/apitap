@@ -32,7 +32,7 @@ describe('truncateResponse', () => {
       assert.ok(Buffer.byteLength(serialized) > 50_000, 'test data should exceed 50KB');
 
       const result = truncateResponse(items, { maxBytes: 50_000 });
-      assert.strictEqual(result.truncated, true);
+      assert.ok(result.truncated !== false);
 
       const truncatedBytes = Buffer.byteLength(JSON.stringify(result.data));
       assert.ok(truncatedBytes <= 50_000, `should be under 50KB, got ${truncatedBytes}`);
@@ -49,7 +49,7 @@ describe('truncateResponse', () => {
       }];
 
       const result = truncateResponse(items, { maxBytes: 50_000 });
-      assert.strictEqual(result.truncated, true);
+      assert.ok(result.truncated !== false);
 
       const truncatedBytes = Buffer.byteLength(JSON.stringify(result.data));
       assert.ok(truncatedBytes <= 50_000, `should be under 50KB, got ${truncatedBytes}`);
@@ -71,7 +71,7 @@ describe('truncateResponse', () => {
       };
 
       const result = truncateResponse(data, { maxBytes: 50_000 });
-      assert.strictEqual(result.truncated, true);
+      assert.ok(result.truncated !== false);
 
       const truncatedBytes = Buffer.byteLength(JSON.stringify(result.data));
       assert.ok(truncatedBytes <= 50_000, `should be under 50KB, got ${truncatedBytes}`);
@@ -101,7 +101,7 @@ describe('truncateResponse', () => {
     it('uses 50KB default when no maxBytes specified', () => {
       const data = { body: 'x'.repeat(60_000) };
       const result = truncateResponse(data);
-      assert.strictEqual(result.truncated, true);
+      assert.ok(result.truncated !== false);
     });
 
     it('does not truncate small data with default maxBytes', () => {
@@ -127,7 +127,7 @@ describe('truncateResponse', () => {
     it('handles string data over limit', () => {
       const data = 'x'.repeat(100_000);
       const result = truncateResponse(data, { maxBytes: 1_000 });
-      assert.strictEqual(result.truncated, true);
+      assert.ok(result.truncated !== false);
       assert.ok((result.data as string).endsWith('... [truncated]'));
       assert.ok(Buffer.byteLength(JSON.stringify(result.data)) <= 1_000);
     });
@@ -137,5 +137,71 @@ describe('truncateResponse', () => {
       assert.strictEqual(result.data, 42);
       assert.strictEqual(result.truncated, false);
     });
+  });
+});
+
+describe('recursive truncation (spec 2026-07-19)', () => {
+  it('bounds a wrapper object with a huge nested array (polymarket shape)', () => {
+    const big = Array.from({ length: 5000 }, (_, i) => ({
+      id: String(i),
+      title: 'Event ' + i,
+      description: 'x'.repeat(50),
+    }));
+    const data = { $schema: 'https://example.com/schema.json', data: big };
+    const result = truncateResponse(data, { maxBytes: 4000 });
+    const outBytes = Buffer.byteLength(JSON.stringify(result.data), 'utf-8');
+    assert.ok(outBytes <= 8000, `expected <= 8000 bytes, got ${outBytes}`);
+    assert.ok(result.truncated !== false);
+    const info = result.truncated as { originalBytes: number; finalBytes: number; droppedItems: number; keptItems: number };
+    assert.ok(info.droppedItems > 0);
+    assert.ok(info.keptItems >= 1);
+    assert.ok(info.originalBytes > info.finalBytes);
+    const out = result.data as { $schema: string; data: unknown[] };
+    assert.strictEqual(out.$schema, 'https://example.com/schema.json'); // small scalars survive
+    assert.ok(out.data.length >= 1); // never emptied
+  });
+
+  it('recurses into GraphQL-style nesting', () => {
+    const edges = Array.from({ length: 1000 }, (_, i) => ({ node: { id: i, body: 'y'.repeat(100) } }));
+    const data = { data: { search: { edges, pageInfo: { hasNext: true } } } };
+    const result = truncateResponse(data, { maxBytes: 3000 });
+    const outBytes = Buffer.byteLength(JSON.stringify(result.data), 'utf-8');
+    assert.ok(outBytes <= 6000, `expected <= 6000 bytes, got ${outBytes}`);
+    assert.ok(result.truncated !== false);
+    const out = result.data as { data: { search: { edges: unknown[]; pageInfo: { hasNext: boolean } } } };
+    assert.ok(out.data.search.edges.length >= 1);
+    assert.strictEqual(out.data.search.pageInfo.hasNext, true);
+  });
+
+  it('never returns an empty array for non-empty input (single oversized item)', () => {
+    const data = [{ id: 1, content: 'z'.repeat(10_000) }];
+    const result = truncateResponse(data, { maxBytes: 2000 });
+    const out = result.data as Array<Record<string, unknown>>;
+    assert.strictEqual(out.length, 1);
+    assert.ok((out[0].content as string).length < 10_000);
+    assert.strictEqual(out[0].id, 1);
+    assert.ok(result.truncated !== false);
+    assert.ok((result.truncated as { note?: string }).note);
+  });
+
+  it('distinguishes truly-empty from truncated-to-sample', () => {
+    const result = truncateResponse([], { maxBytes: 100 });
+    assert.deepStrictEqual(result.data, []);
+    assert.strictEqual(result.truncated, false);
+  });
+
+  it('caps recursion depth without throwing', () => {
+    let deep: Record<string, unknown> = { leaf: 'v'.repeat(2000) };
+    for (let i = 0; i < 50; i++) deep = { child: deep, pad: 'p'.repeat(200) };
+    const result = truncateResponse(deep, { maxBytes: 1000 });
+    assert.ok(result.truncated !== false);
+    assert.ok(JSON.stringify(result.data).includes('[truncated'));
+  });
+
+  it('treats maxBytes <= 0 or non-finite as default', () => {
+    const small = { a: 1 };
+    assert.strictEqual(truncateResponse(small, { maxBytes: 0 }).truncated, false);
+    assert.strictEqual(truncateResponse(small, { maxBytes: -5 }).truncated, false);
+    assert.strictEqual(truncateResponse(small, { maxBytes: Number.NaN }).truncated, false);
   });
 });

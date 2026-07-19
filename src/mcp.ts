@@ -99,14 +99,15 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
         'Returns endpoints with replayability tier (green/yellow/orange/red) and endpoint IDs for replay.',
       inputSchema: z.object({
         query: z.string().describe('Search query — domain name, endpoint path, or keyword (e.g. "polymarket", "events", "get-markets")'),
+        limit: z.number().optional().describe('Maximum results to return (default: 50). Results are ranked by replayability tier when truncated.'),
       }),
       annotations: {
         readOnlyHint: true,
         openWorldHint: false,
       },
     },
-    async ({ query }) => {
-      const result = await searchSkills(query, skillsDir);
+    async ({ query, limit }) => {
+      const result = await searchSkills(query, skillsDir, { limit });
       return wrapExternalContent(result, 'apitap_search');
     },
   );

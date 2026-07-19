@@ -15,7 +15,20 @@ export interface SearchResponse {
   results?: SearchResult[];
   summary?: string;
   suggestion?: string;
+  /** Set when results were cut to the limit — narrow the query for the rest */
+  truncated?: boolean;
 }
+
+export interface SearchOptions {
+  /** Maximum results to return. Default 50. */
+  limit?: number;
+}
+
+const DEFAULT_LIMIT = 50;
+const SUGGESTION_DOMAIN_CAP = 20;
+
+/** Lower rank = kept first when truncating */
+const TIER_RANK: Record<string, number> = { green: 0, yellow: 1, unknown: 2, orange: 3, red: 4 };
 
 /**
  * Check if a search term matches a target string.
@@ -41,7 +54,9 @@ function termMatches(term: string, text: string): boolean {
 export async function searchSkills(
   query: string,
   skillsDir?: string,
+  options: SearchOptions = {},
 ): Promise<SearchResponse> {
+  const limit = Math.max(1, options.limit ?? DEFAULT_LIMIT);
   const index = await ensureIndex(skillsDir);
 
   const domainCount = Object.keys(index.domains).length;
@@ -82,7 +97,10 @@ export async function searchSkills(
   }
 
   if (results.length === 0) {
-    const domains = Object.keys(index.domains).join(', ');
+    const allDomains = Object.keys(index.domains);
+    const shown = allDomains.slice(0, SUGGESTION_DOMAIN_CAP).join(', ');
+    const rest = allDomains.length - SUGGESTION_DOMAIN_CAP;
+    const domains = rest > 0 ? `${shown} … and ${rest} more` : shown;
     return {
       found: false,
       summary: '0 endpoints across 0 domains',
@@ -90,6 +108,22 @@ export async function searchSkills(
     };
   }
 
-  const summary = `${results.length} endpoints across ${matchedDomains.size} domain${matchedDomains.size === 1 ? '' : 's'}`;
+  const domainPlural = `domain${matchedDomains.size === 1 ? '' : 's'}`;
+  if (results.length > limit) {
+    // Keep the most replayable results; stable within tier
+    const kept = results
+      .map((r, i) => ({ r, i }))
+      .sort((a, b) => (TIER_RANK[a.r.tier] ?? 2) - (TIER_RANK[b.r.tier] ?? 2) || a.i - b.i)
+      .slice(0, limit)
+      .map(({ r }) => r);
+    return {
+      found: true,
+      results: kept,
+      truncated: true,
+      summary: `showing ${limit} of ${results.length} endpoints across ${matchedDomains.size} ${domainPlural} — narrow the query or raise limit`,
+    };
+  }
+
+  const summary = `${results.length} endpoints across ${matchedDomains.size} ${domainPlural}`;
   return { found: true, results, summary };
 }

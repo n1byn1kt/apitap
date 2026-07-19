@@ -123,4 +123,56 @@ describe('searchSkills', () => {
     assert.equal(orderResult.tier, 'orange');
     assert.equal(orderResult.verified, true);
   });
+
+  describe('result limiting (unbounded-output fix)', () => {
+    beforeEach(async () => {
+      // A domain with many endpoints, mixed tiers
+      await writeSkillFile(makeSkill('big.example.com',
+        Array.from({ length: 80 }, (_, i) => ({
+          id: `get-widget-${i}`,
+          method: 'GET',
+          path: `/widget/${i}`,
+          tier: i % 4 === 0 ? 'green' : i % 4 === 1 ? 'yellow' : i % 4 === 2 ? 'orange' : 'red',
+        }))), testDir);
+    });
+
+    it('caps results at the default limit and flags truncation', async () => {
+      const results = await searchSkills('widget', testDir);
+      assert.ok(results.found);
+      assert.equal(results.results!.length, 50);
+      assert.equal(results.truncated, true);
+      assert.match(results.summary!, /showing 50 of 80/);
+    });
+
+    it('respects an explicit limit option', async () => {
+      const results = await searchSkills('widget', testDir, { limit: 5 });
+      assert.ok(results.found);
+      assert.equal(results.results!.length, 5);
+      assert.equal(results.truncated, true);
+    });
+
+    it('prefers replayable tiers when truncating', async () => {
+      const results = await searchSkills('widget', testDir, { limit: 20 });
+      // 20 green + 20 yellow exist; a red endpoint must not displace them
+      assert.ok(results.results!.every(r => r.tier === 'green'));
+    });
+
+    it('does not set truncated when under the limit', async () => {
+      const results = await searchSkills('events', testDir);
+      assert.ok(results.found);
+      assert.equal(results.truncated, undefined);
+    });
+
+    it('caps the domain list in the no-match suggestion', async () => {
+      for (let i = 0; i < 30; i++) {
+        await writeSkillFile(makeSkill(`filler-${i}.example.com`, [
+          { id: 'get-root', method: 'GET', path: '/root' },
+        ]), testDir);
+      }
+      const results = await searchSkills('zzz-no-such-thing', testDir);
+      assert.equal(results.found, false);
+      assert.ok(results.suggestion!.length < 1500, `suggestion too long: ${results.suggestion!.length}`);
+      assert.match(results.suggestion!, /and \d+ more/);
+    });
+  });
 });

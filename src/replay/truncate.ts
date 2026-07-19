@@ -83,11 +83,19 @@ function truncateValue(value: unknown, budget: number, depth: number, stats: Wal
   if (size(value) <= budget) return value;
 
   if (Array.isArray(value)) {
-    const arr = [...value];
-    while (arr.length > 1 && size(arr) > budget) {
-      arr.pop();
-      stats.droppedItems++;
+    // Largest prefix (>= 1 item) fitting the budget. Serialize each item
+    // once and walk the exact cost down — JSON.stringify of an array is
+    // '[' + items joined by ',' + ']', so prefix cost is computable without
+    // re-serializing per drop (issue #61: the old pop loop was O(n²)).
+    const itemSizes = value.map((item) => size(item));
+    let keep = value.length;
+    let cost = 2 + itemSizes.reduce((a, b) => a + b, 0) + Math.max(value.length - 1, 0);
+    while (keep > 1 && cost > budget) {
+      keep--;
+      cost -= itemSizes[keep] + 1; // dropped item + its comma
     }
+    const arr = value.slice(0, keep);
+    stats.droppedItems += value.length - keep;
     if (arr.length >= 1 && size(arr) > budget) {
       // Single item still over budget: recurse into it, never drop to [].
       arr[0] = truncateValue(arr[0], Math.max(budget - 2, MIN_FIELD_BUDGET), depth + 1, stats);

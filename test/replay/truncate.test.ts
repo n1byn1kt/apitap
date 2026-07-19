@@ -41,6 +41,42 @@ describe('truncateResponse', () => {
       assert.ok((result.data as unknown[]).length > 0);
     });
 
+    it('keeps the maximal prefix that fits the budget', () => {
+      const items = Array.from({ length: 500 }, (_, i) => ({
+        id: i,
+        body: 'x'.repeat(200),
+      }));
+      const result = truncateResponse(items, { maxBytes: 20_000 });
+      assert.ok(result.truncated !== false);
+      const kept = result.data as Array<{ id: number }>;
+      // Survivors are the original prefix, in order.
+      kept.forEach((item, i) => assert.equal(item.id, i));
+      // Maximal: adding the next item would exceed the budget.
+      const onePlus = items.slice(0, kept.length + 1);
+      assert.ok(
+        Buffer.byteLength(JSON.stringify(onePlus)) > 20_000,
+        'prefix is not maximal — one more item still fits'
+      );
+      assert.equal(result.truncated.droppedItems, items.length - kept.length);
+      assert.equal(result.truncated.keptItems, kept.length);
+    });
+
+    it('truncates a 20k-item array in linear time (issue #61)', () => {
+      const items = Array.from({ length: 20_000 }, (_, i) => ({
+        id: i,
+        name: `item-${i}`,
+        price: i * 1.5,
+      }));
+      const start = performance.now();
+      const result = truncateResponse(items, { maxBytes: 50_000 });
+      const elapsed = performance.now() - start;
+      assert.ok(result.truncated !== false);
+      assert.ok(
+        elapsed < 1_500,
+        `truncation took ${Math.round(elapsed)}ms — pop-loop re-serialization is quadratic`
+      );
+    });
+
     it('truncates string fields when single item exceeds limit', () => {
       const items = [{
         id: 1,

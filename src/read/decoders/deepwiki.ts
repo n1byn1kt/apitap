@@ -1,6 +1,7 @@
 // src/read/decoders/deepwiki.ts
 import type { Decoder, ReadResult } from '../types.js';
-import { validateUrl } from '../../skill/ssrf.js';
+import { assertSsrfBypassAllowed } from '../../skill/ssrf.js';
+import { safeFetch } from '../../discovery/fetch.js';
 
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
@@ -36,31 +37,40 @@ export const deepwikiDecoder: Decoder = {
     const repo = match[3];
     const pagePath = match[4] || '';
 
-    // SSRF check
-    const ssrfResult = validateUrl(url);
-    if (!ssrfResult.safe) return null;
-
     // Sanitize extracted values for header injection
     const sanitize = (s: string) => s.replace(/[\r\n]/g, '');
 
     // Construct the path for the RSC request
     const fullPath = sanitize(`/${org}/${repo}${pagePath}`);
 
+    // Test-only base-URL override so hermetic tests can point the decoder
+    // at a local server (host is otherwise pinned to deepwiki.com). Gated
+    // to test contexts like every other SSRF-relevant escape hatch (#64).
+    assertSsrfBypassAllowed(options._testBaseUrl);
+    const fetchUrl = options._testBaseUrl
+      ? url.replace(/^https?:\/\/(www\.)?deepwiki\.com/, options._testBaseUrl)
+      : url;
+
     try {
-      const response = await fetch(url, {
+      // safeFetch: SSRF validation with DNS resolution, manual single-hop
+      // redirects with target re-validation, timeout, and body cap — the
+      // same pipeline every other decoder path gets (issue #63).
+      const response = await safeFetch(fetchUrl, {
+        skipSsrf: options.skipSsrf,
+        timeout: 10_000,
+        maxBodySize: 2 * 1024 * 1024,
         headers: {
           'RSC': '1',
           'Next-Url': fullPath,
           'User-Agent': 'Mozilla/5.0 (compatible; ApiTap/1.0)',
         },
-        signal: AbortSignal.timeout(10_000),
       });
 
-      if (!response.ok) {
+      if (!response || response.status < 200 || response.status >= 300) {
         return null;
       }
 
-      const rscPayload = await response.text();
+      const rscPayload = response.body;
 
       // Extract markdown content from RSC text nodes
       // Format: {id}:T{hexLength},{content}

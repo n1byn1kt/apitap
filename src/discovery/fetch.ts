@@ -13,6 +13,9 @@ export interface SafeFetchOptions {
   method?: 'GET' | 'HEAD';
   maxBodySize?: number;
   skipSsrf?: boolean; // bypass SSRF check (for testing with local servers)
+  /** Extra request headers, merged over the defaults (issue #63: lets
+   *  decoders route trick-header requests through safeFetch). */
+  headers?: Record<string, string>;
 }
 
 const DEFAULT_TIMEOUT = 5000;
@@ -47,6 +50,7 @@ export async function safeFetch(
       headers: {
         'User-Agent': USER_AGENT,
         'Accept': 'text/html,application/json,*/*',
+        ...options.headers,
       },
       redirect: 'manual',
     });

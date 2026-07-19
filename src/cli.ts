@@ -33,6 +33,9 @@ import { loadKnownSpecs, type KnownSpec } from './known-specs-loader.js';
 import { fetchApisGuruList, filterEntries, fetchSpec } from './skill/apis-guru.js';
 import { searchSwaggerHub, fetchSwaggerHubSpec } from './skill/swaggerhub.js';
 import { buildIndex, removeFromIndex } from './skill/index.js';
+import { runDoctor } from './doctor/index.js';
+import { restoreSkill } from './doctor/snapshot.js';
+import { formatDoctorReport } from './doctor/format.js';
 import {
   resolveGitHubToken,
   searchOrgSpecs,
@@ -114,6 +117,10 @@ function printUsage(): void {
     apitap audit --findings [--source=read|egress] [--scanner=NAME] [--since=ISO] [--json]
                                Query the trap-aware audit log ($XDG_STATE_HOME/apitap/findings.jsonl)
     apitap forget <domain>     Remove skill file and credentials for a domain
+    apitap doctor [domain]     Skill-store hygiene: report junk/dupes/stale (offline)
+      --fix                    Apply conservative fixes (quarantine + snapshot, restorable)
+      --restore <domain>       Undo a doctor fix or quarantine
+      --stale-days <n>         Staleness threshold (default 90)
     apitap stats               Show token savings report
     apitap index build         Rebuild search index (run after manual edits)
     apitap extension install   Register native messaging host for Chrome
@@ -2504,6 +2511,49 @@ async function handleForget(positional: string[]): Promise<void> {
   console.log(`Forgot ${domain} — ${parts.join(' and ')} removed`);
 }
 
+async function handleDoctor(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const skillsDir = SKILLS_DIR || join(APITAP_DIR, 'skills');
+  try {
+    if (typeof flags.restore === 'string') {
+      const source = await restoreSkill(skillsDir, flags.restore);
+      console.log(`Restored ${flags.restore} from ${source === 'orig' ? 'pre-doctor snapshot' : 'quarantine'}`);
+      return;
+    }
+    const machineId = await getEffectiveMachineId();
+    const signingKey = deriveSigningKey(machineId);
+    const staleDays = typeof flags['stale-days'] === 'string' ? Number(flags['stale-days']) : undefined;
+    if (staleDays !== undefined && (!Number.isFinite(staleDays) || staleDays < 0)) {
+      console.error('Error: --stale-days must be a non-negative number');
+      process.exit(2);
+    }
+    const report = await runDoctor({
+      skillsDir, signingKey,
+      fix: flags.fix === true,
+      domain: positional[0],
+      staleDays,
+    });
+    if (flags.json === true) {
+      console.log(JSON.stringify(report, null, 2));
+    } else {
+      console.log(formatDoctorReport(report, flags.fix === true));
+      // Auth orphan info for quarantined domains (report-only; quarantine
+      // deliberately does not touch auth.enc, unlike forget)
+      for (const domain of report.quarantined) {
+        try {
+          const authManager = new AuthManager(APITAP_DIR, machineId);
+          if (await authManager.has(domain)) {
+            console.log(`note: stored credentials for ${domain} kept — run \`apitap forget ${domain}\` if you also want auth gone`);
+          }
+        } catch { /* auth check is best-effort */ }
+      }
+    }
+    process.exit(report.remaining.length > 0 ? 1 : 0);
+  } catch (err: any) {
+    console.error(`Error: ${err.message}`);
+    process.exit(2);
+  }
+}
+
 async function handleIndex(positional: string[]): Promise<void> {
   const subcommand = positional[0];
   if (subcommand !== 'build') {
@@ -2597,6 +2647,9 @@ async function main(): Promise<void> {
       break;
     case 'show':
       await handleShow(positional, flags);
+      break;
+    case 'doctor':
+      await handleDoctor(positional, flags);
       break;
     case 'replay':
       await handleReplay(positional, flags);

@@ -127,4 +127,54 @@ describe('read', () => {
     const result = await read(baseUrl, { skipSsrf: true });
     assert.equal(result, null);
   });
+
+  it('labels a Reddit-style verification interstitial instead of claiming empty success', async () => {
+    // Real shape of Reddit's challenge page: challenge title + auto-submit
+    // "solution" form, zero article content, served with HTTP 200.
+    routes['/'] = {
+      status: 200,
+      contentType: 'text/html',
+      body: `<html><head><title>Reddit - Please wait for verification</title>
+        <script>document.addEventListener("DOMContentLoaded",async function(){var e=document.forms[0];e.elements.namedItem("solution").value="x";e.requestSubmit()});</script>
+        </head><body><main><form method="post"><input type="hidden" name="solution"></form></main></body></html>`,
+    };
+
+    const result = await read(baseUrl, { skipSsrf: true });
+    assert.ok(result);
+    assert.equal(result.botProtection, 'challenge');
+    assert.equal(result.metadata.source, 'challenge-page');
+    assert.ok(result.content.length > 0, 'content must not be silently empty');
+    assert.ok(/challenge|verification/i.test(result.content), `content: ${result.content}`);
+  });
+
+  it('labels a Cloudflare "Just a moment" challenge as botProtection=cloudflare', async () => {
+    routes['/'] = {
+      status: 200,
+      contentType: 'text/html',
+      body: `<html><head><title>Just a moment...</title></head>
+        <body><script src="/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1"></script>
+        <p>Verifying you are human. This may take a few seconds.</p></body></html>`,
+    };
+
+    const result = await read(baseUrl, { skipSsrf: true });
+    assert.ok(result);
+    assert.equal(result.botProtection, 'cloudflare');
+    assert.equal(result.metadata.source, 'challenge-page');
+  });
+
+  it('does not flag an article that merely talks about human verification', async () => {
+    routes['/'] = {
+      status: 200,
+      contentType: 'text/html',
+      body: `<html><head><title>How CAPTCHAs work</title></head><body><article>
+        <p>Sites often ask you to verify you are human. Checking your browser
+        for automation markers is a common technique used by bot walls.</p>
+        </article></body></html>`,
+    };
+
+    const result = await read(baseUrl, { skipSsrf: true });
+    assert.ok(result);
+    assert.equal(result.botProtection, undefined);
+    assert.equal(result.metadata.source, 'readability');
+  });
 });

@@ -1,7 +1,7 @@
 # ApiTap
 
 [![npm version](https://img.shields.io/npm/v/@apitap/core)](https://www.npmjs.com/package/@apitap/core)
-[![tests](https://img.shields.io/badge/tests-1587%20passing-brightgreen)](https://github.com/n1byn1kt/apitap)
+[![tests](https://img.shields.io/badge/tests-1590%20passing-brightgreen)](https://github.com/n1byn1kt/apitap)
 [![license](https://img.shields.io/badge/license-BSL--1.1-blue)](./LICENSE)
 
 **The CLI, MCP server, and npm library that turns any website into an API — no docs, no SDK, no browser.**

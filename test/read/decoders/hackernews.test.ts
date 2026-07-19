@@ -124,6 +124,44 @@ describe('hackernewsDecoder', () => {
       assert.equal(result!.links[0].href, 'https://github.com/example/apitap');
     });
 
+    it('converts HN comment HTML to readable text (entities, <p>, links)', async () => {
+      const story = {
+        id: 555,
+        title: 'Encoded story',
+        by: 'author',
+        score: 1,
+        text: 'First line.<p>Second paragraph with &#x27;quotes&#x27; &amp; ampersand.',
+        type: 'story',
+        time: 1700000000,
+        kids: [600],
+        descendants: 1,
+      };
+      const comment = {
+        id: 600,
+        by: 'linker',
+        text: 'See <a href="https:&#x2F;&#x2F;example.com&#x2F;page" rel="nofollow">https:&#x2F;&#x2F;example.com&#x2F;pa...</a> for details. Don&#x27;t skip it.',
+        type: 'comment',
+        time: 1700001000,
+      };
+      routes['/v0/item/555.json'] = { status: 200, contentType: 'application/json', body: JSON.stringify(story) };
+      routes['/v0/item/600.json'] = { status: 200, contentType: 'application/json', body: JSON.stringify(comment) };
+
+      const result = await hackernewsDecoder.decode(
+        'https://news.ycombinator.com/item?id=555',
+        { skipSsrf: true, _apiBaseUrl: baseUrl },
+      );
+
+      assert.ok(result);
+      // Entities decoded, <p> became a paragraph break, no raw tags remain
+      assert.ok(result!.content.includes("with 'quotes' & ampersand"), result!.content);
+      assert.ok(result!.content.includes('First line.\n\nSecond paragraph'), result!.content);
+      assert.ok(!result!.content.includes('<p>'));
+      assert.ok(!result!.content.includes('&#x27;'));
+      // Link href decoded and preserved
+      assert.ok(result!.content.includes('https://example.com/page'), result!.content);
+      assert.ok(result!.content.includes("Don't skip it."));
+    });
+
     it('decodes front page with top stories', async () => {
       const topStories = [1001, 1002, 1003];
 

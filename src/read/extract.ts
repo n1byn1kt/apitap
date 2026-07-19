@@ -32,7 +32,41 @@ const ENTITY_MAP: Record<string, string> = {
 };
 
 function decodeEntities(text: string): string {
-  return text.replace(/&(?:amp|lt|gt|quot|apos|nbsp|#39);/g, (m) => ENTITY_MAP[m] ?? m);
+  return text
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => safeFromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => safeFromCodePoint(parseInt(dec, 10)))
+    .replace(/&(?:amp|lt|gt|quot|apos|nbsp|#39);/g, (m) => ENTITY_MAP[m] ?? m);
+}
+
+function safeFromCodePoint(cp: number): string {
+  try {
+    return String.fromCodePoint(cp);
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Convert an HTML *fragment* (comment bodies from APIs like HN's Firebase,
+ * which return encoded rich text, e.g. `<p>`, `<i>`, `<a href>`, `&#x27;`)
+ * into readable plain text with paragraph breaks and markdown links.
+ * Not for full documents — use extractContent for those.
+ */
+export function htmlSnippetToText(html: string): string {
+  const converted = html
+    .replace(/<pre><code>([\s\S]*?)<\/code><\/pre>/gi, (_, code) => `\n\`\`\`\n${code}\n\`\`\`\n`)
+    .replace(/<p>/gi, '\n\n')
+    .replace(/<\/p>/gi, '')
+    .replace(/<i>([\s\S]*?)<\/i>/gi, '*$1*')
+    .replace(/<a\b[^>]*href=["']([^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi, (_, href, text) => {
+      const decodedHref = decodeEntities(href);
+      const label = decodeEntities(text.replace(/<[^>]+>/g, '')).trim();
+      // HN truncates link labels ("https://example.com/pa..."): label adds nothing
+      const labelIsUrlish = !label || decodedHref.startsWith(label.replace(/\.{3}$/, ''));
+      return labelIsUrlish ? decodedHref : `[${label}](${decodedHref})`;
+    })
+    .replace(/<[^>]+>/g, '');
+  return decodeEntities(converted).replace(/\n{3,}/g, '\n\n').trim();
 }
 
 // ---- parseHead ----

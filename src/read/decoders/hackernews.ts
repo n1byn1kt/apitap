@@ -1,6 +1,7 @@
 // src/read/decoders/hackernews.ts
 import type { Decoder, ReadResult } from '../types.js';
 import { safeFetch } from '../../discovery/fetch.js';
+import { htmlSnippetToText } from '../extract.js';
 
 const DEFAULT_API_BASE = 'https://hacker-news.firebaseio.com';
 
@@ -57,7 +58,7 @@ async function decodeItem(
     const author = item.by || null;
     const score = item.score ?? 0;
     const itemUrl = item.url || null;
-    const text = item.text || '';
+    const text = item.text ? htmlSnippetToText(item.text) : '';
 
     // Fetch top 10 comments
     const kids = item.kids || [];
@@ -65,7 +66,7 @@ async function decodeItem(
     const comments = await fetchComments(commentIds, apiBase, fetchOpts);
 
     const commentText = comments
-      .map((c: any) => `${c.by || '[deleted]'}: ${c.text || '[deleted]'}`)
+      .map((c: any) => `${c.by || '[deleted]'}: ${c.text ? htmlSnippetToText(c.text) : '[deleted]'}`)
       .join('\n\n');
 
     const contentParts: string[] = [];

@@ -29,6 +29,12 @@ describe('replayEndpoint', () => {
       } else if (req.url === '/api/item/99') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ id: 99, name: 'Dynamic' }));
+      } else if (req.url?.startsWith('/api/echo-query')) {
+        // Echoes query params back — and like open-meteo, returns an empty
+        // body on 200 when called with no query at all.
+        const query = Object.fromEntries(new URL(req.url, 'http://x').searchParams);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(Object.keys(query).length === 0 ? '' : JSON.stringify({ query }));
       } else if (req.url === '/api/empty-json') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end('');
@@ -167,6 +173,78 @@ describe('replayEndpoint', () => {
     const result = await replayEndpoint(skill, 'get-api-item', { _skipSsrfCheck: true });
     assert.equal(result.status, 200);
     assert.deepEqual(result.data, { id: 42, name: 'Special' });
+  });
+
+  it('seeds query params from the example URL when queryParams is empty', async () => {
+    // open-meteo class skill rot: queryParams {} but the example URL carries
+    // the required query string. Without seeding, the call goes out bare and
+    // the API returns an empty 200 — a silent false success.
+    const skill = makeSkill();
+    skill.endpoints.push({
+      id: 'get-forecast',
+      method: 'GET',
+      path: '/api/echo-query',
+      queryParams: {},
+      headers: {},
+      responseShape: { type: 'object' },
+      examples: {
+        request: { url: `${baseUrl}/api/echo-query?latitude=52.52&longitude=13.41&current=temperature_2m`, headers: {} },
+        responsePreview: null,
+      },
+    });
+
+    const result = await replayEndpoint(skill, 'get-forecast', { _skipSsrfCheck: true });
+    assert.equal(result.status, 200);
+    assert.deepEqual(result.data, {
+      query: { latitude: '52.52', longitude: '13.41', current: 'temperature_2m' },
+    });
+  });
+
+  it('explicit params override example-seeded query params', async () => {
+    const skill = makeSkill();
+    skill.endpoints.push({
+      id: 'get-forecast',
+      method: 'GET',
+      path: '/api/echo-query',
+      queryParams: {},
+      headers: {},
+      responseShape: { type: 'object' },
+      examples: {
+        request: { url: `${baseUrl}/api/echo-query?latitude=52.52&longitude=13.41`, headers: {} },
+        responsePreview: null,
+      },
+    });
+
+    const result = await replayEndpoint(skill, 'get-forecast', {
+      params: { latitude: '48.85', longitude: '2.35' },
+      _skipSsrfCheck: true,
+    });
+    assert.equal(result.status, 200);
+    assert.deepEqual(result.data, {
+      query: { latitude: '48.85', longitude: '2.35' },
+    });
+  });
+
+  it('does not seed from example URL when queryParams is populated', async () => {
+    // When the skill has real queryParams, those stay authoritative — extra
+    // junk in the example query string (trackers etc.) must not leak in.
+    const skill = makeSkill();
+    skill.endpoints.push({
+      id: 'get-echo',
+      method: 'GET',
+      path: '/api/echo-query',
+      queryParams: { limit: { type: 'string', example: '10' } },
+      headers: {},
+      responseShape: { type: 'object' },
+      examples: {
+        request: { url: `${baseUrl}/api/echo-query?limit=10&utm_source=tracker`, headers: {} },
+        responsePreview: null,
+      },
+    });
+
+    const result = await replayEndpoint(skill, 'get-echo', { _skipSsrfCheck: true });
+    assert.equal(result.status, 200);
+    assert.deepEqual(result.data, { query: { limit: '10' } });
   });
 
   it('returns structured truncation metadata when maxBytes cuts the response', async () => {

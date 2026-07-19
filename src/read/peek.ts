@@ -1,6 +1,6 @@
 // src/read/peek.ts
 import type { PeekResult } from './types.js';
-import { safeFetch } from '../discovery/fetch.js';
+import { safeFetchDetailed, type SafeFetchFailure } from '../discovery/fetch.js';
 import { assertSsrfBypassAllowed } from '../skill/ssrf.js';
 
 export interface PeekOptions {
@@ -16,21 +16,35 @@ export async function peek(url: string, options: PeekOptions = {}): Promise<Peek
   const signals: string[] = [];
 
   // Try HEAD first
-  let result = await safeFetch(url, {
+  const headAttempt = await safeFetchDetailed(url, {
     method: 'HEAD',
     skipSsrf: options.skipSsrf,
   });
+  let result = headAttempt.result;
+  let fetchError: SafeFetchFailure | null = headAttempt.error;
 
   // Fall back to GET if HEAD fails (null = network/SSRF error)
   if (!result) {
-    result = await safeFetch(url, {
+    const getAttempt = await safeFetchDetailed(url, {
       method: 'GET',
       skipSsrf: options.skipSsrf,
     });
+    result = getAttempt.result;
+    if (!result) fetchError = getAttempt.error ?? fetchError;
   }
 
-  // Both HEAD and GET failed
+  // Both HEAD and GET failed — say why, honestly. A client-side transport
+  // failure is NOT the site blocking us (Polymarket's huge CSP headers
+  // overflow undici while curl gets a 200).
   if (!result) {
+    if (fetchError?.kind === 'ssrf') {
+      signals.push(`blocked by SSRF protection: ${fetchError.message}`);
+    } else {
+      signals.push(`transport error: ${fetchError?.code ?? 'UNKNOWN'} (${fetchError?.message ?? 'fetch failed'})`);
+      if (fetchError?.code === 'UND_ERR_HEADERS_OVERFLOW') {
+        signals.push('response headers exceeded the HTTP client limit — not bot protection; the site may still be reachable');
+      }
+    }
     return {
       url,
       status: 0,
@@ -39,8 +53,8 @@ export async function peek(url: string, options: PeekOptions = {}): Promise<Peek
       server: null,
       framework: null,
       botProtection: null,
-      signals: ['fetch failed'],
-      recommendation: 'blocked',
+      signals,
+      recommendation: fetchError?.kind === 'ssrf' ? 'blocked' : 'error',
     };
   }
 

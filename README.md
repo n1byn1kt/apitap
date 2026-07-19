@@ -696,4 +696,4 @@ Questions, feedback, or issues? -> **[hello@apitap.io](mailto:hello@apitap.io)**
 
 ## License
 
-[Apache License 2.0](./LICENSE) — free and open source, no restrictions on use. ApiTap's BSL scheduled conversion to Apache 2.0 for 2029; we invoked the early-conversion clause on July 19, 2026 instead ([details](./LICENSE-CHANGE.md)).
+[Apache License 2.0](./LICENSE) — free and open source, no restrictions on use. ApiTap's BSL scheduled conversion to Apache 2.0 for 2029; we invoked the early-conversion clause on July 19, 2026 instead ([details](./RELICENSING.md)).

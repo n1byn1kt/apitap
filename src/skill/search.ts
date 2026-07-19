@@ -28,7 +28,7 @@ const DEFAULT_LIMIT = 50;
 const SUGGESTION_DOMAIN_CAP = 20;
 
 /** Lower rank = kept first when truncating */
-const TIER_RANK: Record<string, number> = { green: 0, yellow: 1, unknown: 2, orange: 3, red: 4 };
+export const TIER_RANK: Record<string, number> = { green: 0, yellow: 1, unknown: 2, orange: 3, red: 4 };
 
 /**
  * Check if a search term matches a target string.

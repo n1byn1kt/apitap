@@ -1,5 +1,32 @@
 # Changelog
 
+## v2.1.0 — 2026-07-19
+
+### Added
+- `apitap doctor` (#66): offline hygiene lint for the skill store. Reports
+  junk domains (ad/WAF/consent hosts), tracker beacon endpoints inside good
+  skills, duplicate endpoints, empty and stale skill files, never-verified
+  (`tier: unknown`) endpoints, unparameterized path families, and
+  unsigned/tampered/expired signatures. Exit codes: 0 clean, 1 findings,
+  2 operational error — cron-friendly. `--json` for machine output.
+- `apitap doctor --fix`: conservative repairs only. Whole files move to
+  `~/.apitap/skills/.quarantine/` (rename, non-clobbering — never deleted);
+  endpoint-level edits keep a first-touch original under
+  `~/.apitap/skills/.doctor/`; `apitap doctor --restore <domain>` undoes
+  either. Duplicate endpoints are auto-dropped only when strictly dominated
+  (the kept copy is at least as rich on every dimension and carries every
+  param/body key); beacon stripping requires both a tracker-path signal and
+  a contentless response. Everything else is report-only.
+
+### Security
+- Doctor edit fixes are refused on files whose HMAC signature does not
+  verify or whose filename does not match the embedded domain — editing and
+  re-signing unverified content would launder tampering into a validly
+  signed file. Re-signing preserves provenance (`signSkillFileAs` +
+  `provenanceForSigning`); quarantine and restore never re-sign. All
+  doctor path operations validate domain names before touching the
+  filesystem.
+
 ## v2.0.1 — 2026-07-19
 
 ### Fixed

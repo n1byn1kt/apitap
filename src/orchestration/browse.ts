@@ -85,11 +85,13 @@ async function tryBridgeCapture(
       // Pick the best endpoint and replay it
       let urlPath = '/';
       try { urlPath = new URL(fullUrl).pathname; } catch { /* use default */ }
-      const endpoint = pickEndpoint(primarySkill, urlPath);
+      const match = pickEndpoint(primarySkill, urlPath);
 
-      if (endpoint) {
+      if (match) {
+        const endpoint = match.endpoint;
         try {
           const replayResult = await replayEndpoint(primarySkill, endpoint.id, {
+            params: match.params,
             maxBytes: options.maxBytes,
             _skipSsrfCheck: options._skipSsrfCheck,
           });
@@ -291,25 +293,28 @@ export async function browse(
   }
 
   // Step 4: Pick best endpoint
-  const endpoint = pickEndpoint(skill, urlPath);
-  if (!endpoint) {
+  const match = pickEndpoint(skill, urlPath);
+  if (!match) {
     // Try extension bridge before giving up
     const bridgeResult3 = await tryBridgeCapture(domain, fullUrl, options);
     if (bridgeResult3) return bridgeResult3;
 
+    const hasCandidates = skill.endpoints.some(ep =>
+      ep.method === 'GET' && REPLAYABLE_TIERS.has(ep.replayability?.tier ?? 'unknown'));
     return {
       success: false,
-      reason: 'no_replayable_endpoints',
+      reason: hasCandidates ? 'path_not_captured' : 'no_replayable_endpoints',
       suggestion: 'capture_needed',
       domain,
       url: fullUrl,
       task,
     };
   }
+  const endpoint = match.endpoint;
 
   // Step 5: Replay
   try {
-    const result = await replayEndpoint(skill, endpoint.id, { maxBytes, _skipSsrfCheck: options._skipSsrfCheck });
+    const result = await replayEndpoint(skill, endpoint.id, { params: match.params, maxBytes, _skipSsrfCheck: options._skipSsrfCheck });
     const skillSource = source;
 
     // Check content-type: HTML responses are not usable API data
@@ -358,13 +363,47 @@ export async function browse(
 
 const REPLAYABLE_TIERS = new Set(['green', 'yellow', 'unknown']);
 
+interface EndpointMatch {
+  endpoint: SkillEndpoint;
+  /** Path params extracted from the requested URL, for :param substitution at replay */
+  params: Record<string, string>;
+}
+
 /**
- * Pick the best endpoint to replay. Prefers:
- * 1. GET endpoints with green/yellow/unknown tier
- * 2. Path overlap with the input URL
- * 3. First match as fallback
+ * Match a requested path against an endpoint's route template, segment by
+ * segment. Literal segments must be equal; `:param` segments capture the
+ * requested value. Returns the captured params, or null if the template
+ * does not cover the requested path.
  */
-function pickEndpoint(skill: SkillFile, urlPath: string): SkillEndpoint | null {
+function matchTemplate(template: string, urlPath: string): Record<string, string> | null {
+  const templateSegs = template.split('/').filter(Boolean);
+  const urlSegs = urlPath.split('/').filter(Boolean);
+  if (templateSegs.length !== urlSegs.length) return null;
+
+  const params: Record<string, string> = {};
+  for (let i = 0; i < templateSegs.length; i++) {
+    if (templateSegs[i].startsWith(':')) {
+      let value = urlSegs[i];
+      try { value = decodeURIComponent(value); } catch { /* keep raw */ }
+      params[templateSegs[i].slice(1)] = value;
+    } else if (templateSegs[i] !== urlSegs[i]) {
+      return null;
+    }
+  }
+  return params;
+}
+
+/**
+ * Pick the endpoint to replay.
+ *
+ * For a bare-domain request (path `/` or empty), any replayable endpoint is a
+ * reasonable entry point — return the first candidate.
+ *
+ * For a specific path, require a real route match (exact or :param template).
+ * A captured `GET /users` does NOT serve `/users/octocat` — falling back to a
+ * sibling endpoint silently returns wrong data (issue #52).
+ */
+function pickEndpoint(skill: SkillFile, urlPath: string): EndpointMatch | null {
   const candidates = skill.endpoints.filter(ep =>
     ep.method === 'GET' &&
     REPLAYABLE_TIERS.has(ep.replayability?.tier ?? 'unknown'),
@@ -372,11 +411,14 @@ function pickEndpoint(skill: SkillFile, urlPath: string): SkillEndpoint | null {
 
   if (candidates.length === 0) return null;
 
-  // Prefer path overlap
-  if (urlPath && urlPath !== '/') {
-    const match = candidates.find(ep => urlPath.includes(ep.path) || ep.path.includes(urlPath));
-    if (match) return match;
+  if (!urlPath || urlPath === '/') {
+    return { endpoint: candidates[0], params: {} };
   }
 
-  return candidates[0];
+  for (const ep of candidates) {
+    const params = matchTemplate(ep.path, urlPath);
+    if (params) return { endpoint: ep, params };
+  }
+
+  return null;
 }

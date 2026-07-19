@@ -56,6 +56,12 @@ describe('browse orchestration', () => {
       } else if (req.url === '/api/items') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify([{ id: 1 }, { id: 2 }]));
+      } else if (req.url === '/users') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify([{ login: 'mojombo' }, { login: 'defunkt' }]));
+      } else if (req.url === '/users/octocat') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ login: 'octocat', id: 583231 }));
       } else {
         res.writeHead(404);
         res.end();
@@ -166,6 +172,64 @@ describe('browse orchestration', () => {
 
     assert.equal(result.success, true);
     assert.equal(result.success && result.endpointId, 'get-api-search');
+  });
+
+  // Issue #52: path matching must not silently fall through to a wrong endpoint
+  it('does not serve a list endpoint for a detail path (issue #52 case 2)', async () => {
+    const machineId = await getMachineId();
+    const sigKey = deriveSigningKey(machineId);
+    await writeSkillFile(signSkillFile(makeSkill('localhost', baseUrl, [
+      { id: 'get-users-list', method: 'GET', path: '/users' },
+    ]), sigKey), testDir);
+
+    const result = await browse('http://localhost/users/octocat', {
+      skillsDir: testDir,
+      cache: new SessionCache(),
+      _skipSsrfCheck: true,
+      _bridgeSocketPath: join(testDir, 'nonexistent.sock'),
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(!result.success && result.reason, 'path_not_captured');
+    assert.equal(!result.success && result.suggestion, 'capture_needed');
+  });
+
+  it('does not serve the root endpoint for an uncaptured deep path (issue #52 case 1)', async () => {
+    const machineId = await getMachineId();
+    const sigKey = deriveSigningKey(machineId);
+    await writeSkillFile(signSkillFile(makeSkill('localhost', baseUrl, [
+      { id: 'get-meta-root', method: 'GET', path: '/' },
+    ]), sigKey), testDir);
+
+    const result = await browse('http://localhost/repos/foambubble/foam', {
+      skillsDir: testDir,
+      cache: new SessionCache(),
+      _skipSsrfCheck: true,
+      _bridgeSocketPath: join(testDir, 'nonexistent.sock'),
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(!result.success && result.reason, 'path_not_captured');
+  });
+
+  it('matches a :param route template and replays with the requested values', async () => {
+    const machineId = await getMachineId();
+    const sigKey = deriveSigningKey(machineId);
+    await writeSkillFile(signSkillFile(makeSkill('localhost', baseUrl, [
+      { id: 'get-users-list', method: 'GET', path: '/users' },
+      { id: 'get-users-by-username', method: 'GET', path: '/users/:username' },
+    ]), sigKey), testDir);
+
+    const result = await browse('http://localhost/users/octocat', {
+      skillsDir: testDir,
+      cache: new SessionCache(),
+      _skipSsrfCheck: true,
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.success && result.endpointId, 'get-users-by-username');
+    // Must fetch the *requested* resource, not the captured example
+    assert.deepEqual(result.success && result.data, { login: 'octocat', id: 583231 });
   });
 
   it('skips red-tier endpoints', async () => {

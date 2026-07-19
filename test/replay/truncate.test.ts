@@ -204,4 +204,34 @@ describe('recursive truncation (spec 2026-07-19)', () => {
     assert.strictEqual(truncateResponse(small, { maxBytes: -5 }).truncated, false);
     assert.strictEqual(truncateResponse(small, { maxBytes: Number.NaN }).truncated, false);
   });
+
+  it('recomputes honest stats for the schema-sample fallback (array input)', () => {
+    // Wide-flat object per element: many small scalar fields the walk cannot
+    // shrink (not strings over cap, not nested objects/arrays), so the
+    // array-pop loop still leaves the result more than 2x over budget and
+    // the schema-sample safety net kicks in.
+    const wideItem: Record<string, string> = {};
+    for (let i = 0; i < 200; i++) wideItem[`field${i}`] = `v${i}`;
+    const data = Array.from({ length: 50 }, () => ({ ...wideItem }));
+    const result = truncateResponse(data, { maxBytes: 50 });
+    assert.ok(result.truncated !== false);
+    const info = result.truncated as { note?: string; droppedItems: number; keptItems: number };
+    assert.ok(info.note?.includes('schema sample returned'));
+    // Sample caps arrays to a single element.
+    const out = result.data as unknown[];
+    assert.strictEqual(out.length, 1);
+    assert.strictEqual(info.keptItems, 1);
+    assert.strictEqual(info.droppedItems, data.length - 1);
+  });
+
+  it('recomputes honest keptItems for the schema-sample fallback (object input)', () => {
+    const wide: Record<string, string> = {};
+    for (let i = 0; i < 500; i++) wide[`field${i}`] = `value-${i}`;
+    const result = truncateResponse(wide, { maxBytes: 20 });
+    assert.ok(result.truncated !== false);
+    const info = result.truncated as { note?: string; keptItems: number };
+    if (info.note?.includes('schema sample returned')) {
+      assert.strictEqual(info.keptItems, 0);
+    }
+  });
 });

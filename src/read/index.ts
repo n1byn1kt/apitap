@@ -33,7 +33,7 @@ function dietLinks(links: Array<{ text: string; href: string }>): Array<{ text: 
     let text = link.text;
     const imgMd = /^!\[(.*?)\]\(.*\)$/.exec(text);
     if (imgMd) text = imgMd[1];
-    if (text.trim() === '') continue; // image link with no alt: drop
+    if (text.trim() === '') continue; // no visible text after image-markdown unwrapping: drop
     out.push({ text, href: link.href });
   }
   return out;
@@ -141,8 +141,8 @@ export async function read(url: string, options: ReadOptions = {}): Promise<Read
   }
 
   const dietedLinks = dietLinks(body.links);
-  let links = dietedLinks.slice(0, LINKS_CAP);
-  let linksOmitted = body.links.length - links.length;
+  const links = dietedLinks.slice(0, LINKS_CAP);
+  const linksOmitted = body.links.length - links.length;
 
   const images = options.includeImages ? dietImages(body.images) : [];
   const imagesOmitted = body.images.length - images.length;

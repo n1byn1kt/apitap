@@ -170,6 +170,16 @@ export function truncateResponse(data: unknown, options?: TruncateOptions): Trun
   if (size(result) > 2 * maxBytes) {
     result = schemaSample(data, 0);
     stats.note = 'response exceeded budget after truncation; schema sample returned';
+    // The walk's dropped/kept counts describe the discarded truncateValue
+    // attempt, not this sample — recompute honestly for the sample we
+    // actually return.
+    if (Array.isArray(data)) {
+      const sampleKept = Array.isArray(result) ? result.length : 0;
+      stats.keptItems = sampleKept;
+      stats.droppedItems = Math.max(data.length - sampleKept, 0);
+    } else {
+      stats.keptItems = Array.isArray(result) ? result.length : 0;
+    }
   }
 
   return {

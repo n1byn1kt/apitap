@@ -550,6 +550,16 @@ async function handleReplay(positional: string[], flags: Record<string, string |
     }
     console.log(`\n  Status: ${result.status}\n`);
     console.log(JSON.stringify(result.data, null, 2));
+    if (result.truncated) {
+      const t = result.truncated;
+      const fromKb = Math.round(t.originalBytes / 1024);
+      const toKb = Math.round(t.finalBytes / 1024);
+      const itemsClause =
+        t.droppedItems === 0 && t.keptItems === 0
+          ? ''
+          : `kept ${t.keptItems} items, dropped ${t.droppedItems}, `;
+      console.log(`  truncated: ${itemsClause}${fromKb} KB → ${toKb} KB`);
+    }
     console.log();
   }
 }

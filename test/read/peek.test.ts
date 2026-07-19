@@ -214,11 +214,42 @@ describe('peek', () => {
     assert.equal(challenged.botProtection, 'cloudflare');
   });
 
-  it('SSRF blocked URL returns blocked with fetch failed signal', async () => {
+  it('SSRF blocked URL returns blocked with an SSRF signal, not a generic fetch failure', async () => {
     // Without skipSsrf, localhost is blocked by SSRF protection
     const result = await peek('http://127.0.0.1:9999');
     assert.equal(result.accessible, false);
     assert.equal(result.recommendation, 'blocked');
-    assert.ok(result.signals.includes('fetch failed'));
+    assert.ok(result.signals.some(s => /ssrf/i.test(s)), `signals: ${result.signals}`);
+  });
+
+  it('connection-refused is reported as a transport error, not "blocked"', async () => {
+    // Nothing listens on this port — a client-side transport failure must not
+    // be mislabeled as the site blocking us.
+    await teardownServer();
+    const deadUrl = baseUrl; // server just closed, port now refuses
+    const result = await peek(deadUrl, { skipSsrf: true });
+    assert.equal(result.status, 0);
+    assert.equal(result.accessible, false);
+    assert.equal(result.recommendation, 'error');
+    assert.ok(result.signals.some(s => s.includes('ECONNREFUSED')), `signals: ${result.signals}`);
+    await setupServer(); // restore for afterEach teardown
+  });
+
+  it('oversized response headers surface UND_ERR_HEADERS_OVERFLOW, not "blocked"', async () => {
+    // Polymarket class: enormous CSP headers overflow undici's client-side
+    // header limit. curl gets a 200 — this is not bot protection.
+    responseHeaders['content-security-policy'] = 'x'.repeat(128 * 1024);
+    const result = await peek(baseUrl, { skipSsrf: true });
+    assert.equal(result.status, 0);
+    assert.equal(result.accessible, false);
+    assert.equal(result.recommendation, 'error');
+    assert.ok(
+      result.signals.some(s => s.includes('UND_ERR_HEADERS_OVERFLOW')),
+      `signals: ${result.signals}`,
+    );
+    assert.ok(
+      result.signals.some(s => /not bot protection/i.test(s)),
+      `signals: ${result.signals}`,
+    );
   });
 });

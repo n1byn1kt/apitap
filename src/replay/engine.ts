@@ -331,6 +331,19 @@ export async function replayEndpoint(
 
   const url = new URL(resolvedPath, skill.baseUrl);
 
+  // When the skill carries no queryParams but the captured example URL does,
+  // seed from the example — otherwise the request goes out bare and APIs like
+  // open-meteo answer 200 with an empty body (silent false success).
+  if (Object.keys(endpoint.queryParams).length === 0) {
+    try {
+      for (const [key, val] of new URL(endpoint.examples.request.url).searchParams) {
+        url.searchParams.set(key, val);
+      }
+    } catch {
+      // Invalid example URL — nothing to seed
+    }
+  }
+
   // Apply query params: start with captured defaults, override with provided params
   for (const [key, val] of Object.entries(endpoint.queryParams)) {
     if (shouldOmitQueryParam(val)) continue;

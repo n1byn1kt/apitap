@@ -10,7 +10,8 @@ export interface PeekResult {
   framework: string | null;
   botProtection: string | null;
   signals: string[];
-  recommendation: 'read' | 'capture' | 'auth_required' | 'blocked';
+  /** 'error' = client-side transport failure (timeout, headers overflow) — the site did NOT block us. */
+  recommendation: 'read' | 'capture' | 'auth_required' | 'blocked' | 'error';
 }
 
 export interface ReadResult {

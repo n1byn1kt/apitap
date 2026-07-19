@@ -224,7 +224,7 @@ describe('recursive truncation (spec 2026-07-19)', () => {
     assert.strictEqual(info.droppedItems, data.length - 1);
   });
 
-  it('recomputes honest keptItems for the schema-sample fallback (object input)', () => {
+  it('recomputes honest keptItems for the schema-sample fallback (object input, no nested array)', () => {
     const wide: Record<string, string> = {};
     for (let i = 0; i < 500; i++) wide[`field${i}`] = `value-${i}`;
     const result = truncateResponse(wide, { maxBytes: 20 });
@@ -233,5 +233,24 @@ describe('recursive truncation (spec 2026-07-19)', () => {
     if (info.note?.includes('schema sample returned')) {
       assert.strictEqual(info.keptItems, 0);
     }
+  });
+
+  it('recomputes honest keptItems for the schema-sample fallback (object-topped input, nested array survives)', () => {
+    // Object-topped response (polymarket shape) whose nested array is what
+    // actually gets sampled down to 1 element — keptItems must reflect that
+    // surviving element, not "0" just because the top level isn't an array.
+    const wideItem: Record<string, string> = {};
+    for (let i = 0; i < 200; i++) wideItem[`field${i}`] = `v${i}`;
+    const data = {
+      $schema: 'https://example.com/schema.json',
+      data: Array.from({ length: 50 }, () => ({ ...wideItem })),
+    };
+    const result = truncateResponse(data, { maxBytes: 50 });
+    assert.ok(result.truncated !== false);
+    const info = result.truncated as { note?: string; keptItems: number };
+    assert.ok(info.note?.includes('schema sample returned'));
+    const out = result.data as { data: unknown[] };
+    assert.strictEqual(out.data.length, 1);
+    assert.strictEqual(info.keptItems, 1);
   });
 });

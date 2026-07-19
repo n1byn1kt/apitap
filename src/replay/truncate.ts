@@ -44,6 +44,23 @@ function capString(value: string): string {
   return value.length > STRING_CAP ? value.slice(0, STRING_CAP) + '... [truncated]' : value;
 }
 
+/** Largest array length found anywhere in a value (schemaSample caps every array to <= 1). */
+function maxArrayLength(value: unknown): number {
+  if (Array.isArray(value)) {
+    let max = value.length;
+    for (const item of value) max = Math.max(max, maxArrayLength(item));
+    return max;
+  }
+  if (value !== null && typeof value === 'object') {
+    let max = 0;
+    for (const v of Object.values(value as Record<string, unknown>)) {
+      max = Math.max(max, maxArrayLength(v));
+    }
+    return max;
+  }
+  return 0;
+}
+
 /** Aggressive last-resort shape sample: structure survives, bulk does not. */
 function schemaSample(value: unknown, depth: number): unknown {
   if (depth > MAX_DEPTH) return '[truncated: depth]';
@@ -172,13 +189,13 @@ export function truncateResponse(data: unknown, options?: TruncateOptions): Trun
     stats.note = 'response exceeded budget after truncation; schema sample returned';
     // The walk's dropped/kept counts describe the discarded truncateValue
     // attempt, not this sample — recompute honestly for the sample we
-    // actually return.
+    // actually return. keptItems is the largest array surviving anywhere
+    // in the sample (schemaSample caps every array to <= 1 element), not
+    // just a top-level array — a nested array can survive even when the
+    // top level is an object.
+    stats.keptItems = maxArrayLength(result);
     if (Array.isArray(data)) {
-      const sampleKept = Array.isArray(result) ? result.length : 0;
-      stats.keptItems = sampleKept;
-      stats.droppedItems = Math.max(data.length - sampleKept, 0);
-    } else {
-      stats.keptItems = Array.isArray(result) ? result.length : 0;
+      stats.droppedItems = Math.max(data.length - stats.keptItems, 0);
     }
   }
 

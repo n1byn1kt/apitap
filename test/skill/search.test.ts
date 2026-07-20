@@ -8,7 +8,11 @@ import { writeSkillFile } from '../../src/skill/store.js';
 import { searchSkills } from '../../src/skill/search.js';
 import type { SkillFile } from '../../src/types.js';
 
-function makeSkill(domain: string, endpoints: Array<{ id: string; method: string; path: string; tier?: string }>): SkillFile {
+function makeSkill(
+  domain: string,
+  endpoints: Array<{ id: string; method: string; path: string; tier?: string }>,
+  provenance: string = 'self',
+): SkillFile {
   return {
     version: '1.2',
     domain,
@@ -32,7 +36,7 @@ function makeSkill(domain: string, endpoints: Array<{ id: string; method: string
       },
     })),
     metadata: { captureCount: 1, filteredCount: 0, toolVersion: '0.4.0' },
-    provenance: 'self',
+    provenance: provenance as SkillFile['provenance'],
   };
 }
 
@@ -173,6 +177,74 @@ describe('searchSkills', () => {
       assert.equal(results.found, false);
       assert.ok(results.suggestion!.length < 1500, `suggestion too long: ${results.suggestion!.length}`);
       assert.match(results.suggestion!, /and \d+ more/);
+    });
+  });
+
+  describe('search ranking', () => {
+    beforeEach(async () => {
+      // api.github.com already exists from the outer beforeEach:
+      // provenance 'self', tier green/yellow, path /repos and /issues (domain match on 'github').
+      // apis.guru: provenance 'imported', tier unknown, 3 endpoints with 'github' in the path only.
+      await writeSkillFile(makeSkill('apis.guru', [
+        { id: 'get-repos-github', method: 'GET', path: '/repos/github', tier: 'unknown' },
+        { id: 'get-orgs-github', method: 'GET', path: '/orgs/github', tier: 'unknown' },
+        { id: 'get-users-github', method: 'GET', path: '/users/github', tier: 'unknown' },
+      ], 'imported'), testDir);
+
+      // 'widget' path match, equal tier (unknown), differing provenance.
+      await writeSkillFile(makeSkill('store-imported.example.com', [
+        { id: 'get-item', method: 'GET', path: '/widget/1', tier: 'unknown' },
+      ], 'imported'), testDir);
+      await writeSkillFile(makeSkill('store-self.example.com', [
+        { id: 'get-item', method: 'GET', path: '/widget/2', tier: 'unknown' },
+      ], 'self'), testDir);
+
+      // 'gadget' path match, equal locality, differing tier — tier should decide over provenance.
+      await writeSkillFile(makeSkill('shopa.example.com', [
+        { id: 'get-item', method: 'GET', path: '/gadget/a', tier: 'green' },
+      ], 'imported'), testDir);
+      await writeSkillFile(makeSkill('shopb.example.com', [
+        { id: 'get-item', method: 'GET', path: '/gadget/b', tier: 'unknown' },
+      ], 'self'), testDir);
+
+      // 'thing' — domain match (red tier) must outrank path-substring match (green tier).
+      await writeSkillFile(makeSkill('api.thing.com', [
+        { id: 'get-root', method: 'GET', path: '/root', tier: 'red' },
+      ], 'self'), testDir);
+      await writeSkillFile(makeSkill('other.example.com', [
+        { id: 'get-item', method: 'GET', path: '/thing/1', tier: 'green' },
+      ], 'self'), testDir);
+    });
+
+    it('domain match outranks path-substring match regardless of count', async () => {
+      const res = await searchSkills('github', testDir);
+      assert.equal(res.results![0].domain, 'api.github.com');
+    });
+
+    it('self provenance outranks imported at equal tier and locality', async () => {
+      const res = await searchSkills('widget', testDir);
+      assert.equal(res.results![0].provenance, 'self');
+    });
+
+    it('tier beats provenance after locality: green-imported above unknown-self', async () => {
+      const res = await searchSkills('gadget', testDir);
+      assert.equal(res.results![0].tier, 'green');
+    });
+
+    it('locality beats tier: red-tier domain match outranks green-tier path-substring match (deliberate)', async () => {
+      const res = await searchSkills('thing', testDir);
+      assert.equal(res.results![0].domain, 'api.thing.com');
+    });
+
+    it('results carry provenance', async () => {
+      const res = await searchSkills('github', testDir);
+      assert.ok(res.results!.every(r => typeof r.provenance === 'string'));
+    });
+
+    it('sorts even when under the limit', async () => {
+      const res = await searchSkills('github', testDir, { limit: 50 });
+      // domain-match block first, then ordered by tier within same locality — no unknown before green at same locality
+      assert.equal(res.results![0].domain, 'api.github.com');
     });
   });
 });

@@ -1,5 +1,39 @@
 # Changelog
 
+## v2.2.0 — 2026-07-20
+
+Closes out the 2026-07-19 dogfood gauntlet (PRs #69, #70, #71, #73).
+
+### Changed
+- `apitap doctor` is summary-first (#69): per-check counts by severity +
+  severity-weighted top-10 domains instead of a 376-line WARN dump.
+  `--verbose` restores the full listing; `doctor <domain>` keeps full
+  detail; `--json` unchanged. `doctor --help` now prints help instead of
+  running a scan.
+- Search ranking demotes import noise (#70): results sort by match
+  locality (domain > endpoint > path) → replayability tier → provenance
+  (own captures above imports). `search github` returns `api.github.com`
+  before 500 apis.guru path hits. Results now carry `provenance`.
+- `maxBytes` is a hard envelope cap (#71): it bounds the full serialized
+  response on `replay`, `replay_batch` (per result), `browse`, and `read`
+  — CLI and MCP. Every response reports `envelopeBytes`. Data budget
+  floors at 512 bytes with the envelope skeleton never dropped, so
+  impossible budgets yield an honest, bounded overshoot instead of
+  dropped metadata. Gauntlet headline case: ~16 KB of stdout at
+  `--max-bytes 4000` → ~4.5 KB (documented floor case).
+- Wikipedia reads the whole article (#73): full plain-text body via the
+  action API when the lede is far under budget (2 MB body cap — the
+  512 KB default silently truncated to the lede forever). 301 chars →
+  full article with honest `contentTruncated`.
+- `--json` runs keep stderr clean (#73): warning-class messages (auth
+  hints, SSRF banner, upgrade notes) move into a `notices` array inside
+  the JSON envelope — capped and never dropped. Hard errors still exit
+  non-zero on stderr.
+
+### Added
+- Native lobste.rs decoder (#73): structured story listings via the JSON
+  endpoints, no more avatar/login noise.
+
 ## v2.1.1 — 2026-07-19
 
 ### Fixed

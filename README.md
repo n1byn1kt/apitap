@@ -237,7 +237,7 @@ apitap read https://en.wikipedia.org/wiki/Node.js --max-bytes 4000
 How the cap is honoured:
 
 - **Read path** — links are shrunk first (deduped, then halved), then content is re-sliced byte-accurately. When content is cut, the envelope carries `contentTruncated: true` so the truncation is never silent.
-- **Replay path** — the data payload is trimmed to fit under the same budget, flooring at a **512-byte data minimum** so a pathologically small `--max-bytes` still returns usable data (the only documented case where the envelope may exceed the cap).
+- **Replay path** — the data payload is trimmed to fit under the same budget, flooring at a **512-byte data minimum** so a pathologically small `--max-bytes` still returns usable data (the only documented case where the envelope may exceed the cap). Concretely: a dense real-world payload replayed at `--max-bytes 4000` can land around 4.5–4.7 KB — irreducible smallest item plus the never-dropped envelope skeleton — and that is the floor working as designed, not a leak.
 - **`envelopeBytes`** — every capped response reports its own actual serialized size in bytes. It is recorded after the diet runs, so `envelopeBytes ≤ maxBytes` (within a few bytes of fixed-width measurement slack), except in the floor case above where irreducible data plus never-dropped metadata can honestly exceed the budget. Use it to see how much of the budget a response actually consumed.
 
 ## Pre-Loaded APIs

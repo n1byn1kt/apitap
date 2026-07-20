@@ -69,7 +69,7 @@ describe('CLI replay auth persistence', () => {
       value: secret,
     });
 
-    const { stderr } = await execFileAsync(
+    const { stdout } = await execFileAsync(
       'node',
       ['--import', 'tsx', 'src/cli.ts', 'replay', domain, endpointId, '--trust-unsigned', '--danger-disable-ssrf', '--json'],
       {
@@ -83,9 +83,12 @@ describe('CLI replay auth persistence', () => {
       },
     );
 
+    // On --json runs the SSRF banner is routed into the envelope's notices
+    // array (stderr stays clean) rather than printed to stderr.
+    const parsed = JSON.parse(stdout);
     assert.ok(
-      stderr.includes('SSRF protection is disabled'),
-      'expected replay command to execute with warning',
+      parsed.notices?.some((n: string) => n.includes('SSRF protection is disabled')),
+      'expected replay command to surface the SSRF warning in notices',
     );
 
     const persisted = await readFile(skillPath, 'utf-8');

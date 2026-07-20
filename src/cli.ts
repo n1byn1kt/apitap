@@ -449,6 +449,12 @@ async function handleReplay(positional: string[], flags: Record<string, string |
     process.exit(1);
   }
 
+  // Parsed up front (ordering trap): the auth warning below fires before the
+  // rest of the flags are read, so `json` and the `notices` sink must exist
+  // by then to keep --json stderr clean.
+  const json = flags.json === true;
+  const notices: string[] = [];
+
   const machineId = await getMachineId();
   const signingKey = deriveSigningKey(machineId);
   const trustUnsigned = flags['trust-unsigned'] === true;
@@ -481,8 +487,9 @@ async function handleReplay(positional: string[], flags: Record<string, string |
     };
     const hasStoredPlaceholder = Object.values(replayEndpoint.headers).some(v => v === '[stored]');
     if (hasStoredPlaceholder && !storedAuth) {
-      console.error(`Warning: Endpoint requires auth but no stored credentials found for "${domain}".`);
-      console.error(`  Run \`apitap capture ${domain}\` to capture fresh credentials.\n`);
+      const warnAuth = `Endpoint requires auth but no stored credentials found for "${domain}". Run \`apitap capture ${domain}\` to capture fresh credentials.`;
+      if (json) notices.push(warnAuth);
+      else console.error(`Warning: ${warnAuth}`);
     }
 
     // Inject stored auth into replay-only endpoint headers (never mutate persisted skill template)
@@ -497,12 +504,13 @@ async function handleReplay(positional: string[], flags: Record<string, string |
   }
 
   const fresh = flags.fresh === true;
-  const json = flags.json === true;
   const maxBytes = typeof flags['max-bytes'] === 'string' ? parseInt(flags['max-bytes'], 10) : undefined;
   const dangerDisableSsrf = flags['danger-disable-ssrf'] === true;
   if (dangerDisableSsrf) {
-    console.error('[apitap] WARNING: SSRF protection is disabled via --danger-disable-ssrf');
-    process.env.APITAP_DANGER_DISABLE_SSRF = '1'; // acknowledged operator override (see assertSsrfBypassAllowed)
+    const ssrfBanner = '[apitap] WARNING: SSRF protection is disabled via --danger-disable-ssrf';
+    if (json) notices.push(ssrfBanner);
+    else console.error(ssrfBanner);
+    process.env.APITAP_DANGER_DISABLE_SSRF = '1'; // acknowledged operator override (see assertSsrfBypassAllowed) — runs regardless of json mode
   }
 
   let egressCheckOverride: false | 'annotate' | 'block' | undefined = undefined;
@@ -533,10 +541,15 @@ async function handleReplay(positional: string[], flags: Record<string, string |
     // Re-sign and write
     const signed = signSkillFile(skill, signingKey);
     await writeSkillFile(signed, SKILLS_DIR);
-    if (!json) {
-      console.error('  \u2713 Endpoint upgraded to captured (confidence 1.0)');
-    }
+    const upgradeNote = '\u2713 Endpoint upgraded to captured (confidence 1.0)';
+    if (json) notices.push(upgradeNote);
+    else console.error(`  ${upgradeNote}`);
   }
+
+  // Confidence hint is computed for both modes: routed to notices on --json,
+  // printed to stderr otherwise.
+  const hint = endpoint ? getConfidenceHint(endpoint.confidence, endpoint.endpointProvenance) : null;
+  if (hint && json) notices.push(`Note: ${hint}`);
 
   if (json) {
     const { envelope, envelopeBytes } = capEnvelope(
@@ -546,6 +559,7 @@ async function handleReplay(positional: string[], flags: Record<string, string |
         ...(truncated ? { truncated } : {}),
         ...(result.contractWarnings?.length ? { contractWarnings: result.contractWarnings } : {}),
         ...(result.warnings?.length ? { warnings: result.warnings } : {}),
+        ...(notices.length ? { notices } : {}),
         envelopeBytes: 999_999_999, // placeholder, same order of magnitude → stable width
       }),
       result.data,
@@ -555,7 +569,6 @@ async function handleReplay(positional: string[], flags: Record<string, string |
     );
     console.log(JSON.stringify({ ...envelope, envelopeBytes }, null, 2));
   } else {
-    const hint = endpoint ? getConfidenceHint(endpoint.confidence, endpoint.endpointProvenance) : null;
     if (hint) {
       console.error(`  Note: ${hint}`);
     }
@@ -2221,6 +2234,7 @@ async function handleBrowse(positional: string[], flags: Record<string, string |
   }
 
   const json = flags.json === true;
+  const notices: string[] = [];
   const fullUrl = url.startsWith('http') ? url : `https://${url}`;
 
   if (!json) {
@@ -2233,8 +2247,10 @@ async function handleBrowse(positional: string[], flags: Record<string, string |
   const { SessionCache } = await import('./orchestration/cache.js');
 
   if (flags['danger-disable-ssrf'] === true) {
-    console.error('[apitap] WARNING: SSRF protection is disabled via --danger-disable-ssrf');
-    process.env.APITAP_DANGER_DISABLE_SSRF = '1'; // acknowledged operator override (see assertSsrfBypassAllowed)
+    const ssrfBanner = '[apitap] WARNING: SSRF protection is disabled via --danger-disable-ssrf';
+    if (json) notices.push(ssrfBanner);
+    else console.error(ssrfBanner);
+    process.env.APITAP_DANGER_DISABLE_SSRF = '1'; // acknowledged operator override (see assertSsrfBypassAllowed) — runs regardless of json mode
   }
   const result = await browse(fullUrl, {
     skillsDir: SKILLS_DIR,
@@ -2250,6 +2266,7 @@ async function handleBrowse(positional: string[], flags: Record<string, string |
           ...result,
           data,
           ...(truncated ? { truncated } : {}),
+          ...(notices.length ? { notices } : {}),
           envelopeBytes: 999_999_999, // placeholder, same order of magnitude → stable width
         }),
         result.data,
@@ -2261,9 +2278,9 @@ async function handleBrowse(positional: string[], flags: Record<string, string |
     } else {
       // Guidance responses carry no bulk `data` field — no bisection needed,
       // just measure with the same placeholder-then-patch trick for stable width.
-      const withPlaceholder = { ...result, envelopeBytes: 999_999_999 };
+      const withPlaceholder = { ...result, ...(notices.length ? { notices } : {}), envelopeBytes: 999_999_999 };
       const envelopeBytes = Buffer.byteLength(JSON.stringify(withPlaceholder, null, 2), 'utf-8');
-      console.log(JSON.stringify({ ...result, envelopeBytes }, null, 2));
+      console.log(JSON.stringify({ ...result, ...(notices.length ? { notices } : {}), envelopeBytes }, null, 2));
     }
     return;
   }

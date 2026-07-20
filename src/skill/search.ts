@@ -8,6 +8,7 @@ export interface SearchResult {
   path: string;
   tier: string;
   verified: boolean;
+  provenance: string;
 }
 
 export interface SearchResponse {
@@ -30,6 +31,11 @@ const SUGGESTION_DOMAIN_CAP = 20;
 /** Lower rank = kept first when truncating */
 export const TIER_RANK: Record<string, number> = { green: 0, yellow: 1, unknown: 2, orange: 3, red: 4 };
 
+/** Lower rank = kept first when tier and locality tie */
+export const PROVENANCE_RANK: Record<string, number> = {
+  self: 0, 'imported-signed': 1, imported: 2, unsigned: 3,
+};
+
 /**
  * Check if a search term matches a target string.
  * Supports prefix matching: "payment" matches "payments", "pay" matches "payouts".
@@ -43,6 +49,13 @@ function termMatches(term: string, text: string): boolean {
   }
   // Also check plain substring for multi-word or partial path matches
   return text.includes(term);
+}
+
+/** 0 = every term matches the domain, 1 = every term matches domain or endpoint id, 2 = path/method only */
+function matchLocality(terms: string[], domain: string, endpointId: string): number {
+  if (terms.every(t => termMatches(t, domain))) return 0;
+  if (terms.every(t => termMatches(t, domain) || termMatches(t, endpointId))) return 1;
+  return 2;
 }
 
 /**
@@ -69,6 +82,7 @@ export async function searchSkills(
 
   const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
   const results: SearchResult[] = [];
+  const localities: number[] = [];
   const matchedDomains = new Set<string>();
 
   for (const [domain, entry] of Object.entries(index.domains)) {
@@ -91,7 +105,9 @@ export async function searchSkills(
           path: ep.path,
           tier: ep.tier ?? 'unknown',
           verified: ep.verified ?? false,
+          provenance: entry.provenance ?? 'unsigned',
         });
+        localities.push(matchLocality(terms, domainLower, endpointIdLower));
       }
     }
   }
@@ -109,21 +125,28 @@ export async function searchSkills(
   }
 
   const domainPlural = `domain${matchedDomains.size === 1 ? '' : 's'}`;
+
+  // Rank by match locality (domain > endpoint > path), then replayability tier,
+  // then provenance (own captures above imports), stable within ties.
+  const ranked = results
+    .map((r, i) => ({ r, i, loc: localities[i] }))
+    .sort((a, b) =>
+      a.loc - b.loc ||
+      (TIER_RANK[a.r.tier] ?? 2) - (TIER_RANK[b.r.tier] ?? 2) ||
+      (PROVENANCE_RANK[a.r.provenance] ?? 3) - (PROVENANCE_RANK[b.r.provenance] ?? 3) ||
+      a.i - b.i,
+    )
+    .map(({ r }) => r);
+
   if (results.length > limit) {
-    // Keep the most replayable results; stable within tier
-    const kept = results
-      .map((r, i) => ({ r, i }))
-      .sort((a, b) => (TIER_RANK[a.r.tier] ?? 2) - (TIER_RANK[b.r.tier] ?? 2) || a.i - b.i)
-      .slice(0, limit)
-      .map(({ r }) => r);
     return {
       found: true,
-      results: kept,
+      results: ranked.slice(0, limit),
       truncated: true,
       summary: `showing ${limit} of ${results.length} endpoints across ${matchedDomains.size} ${domainPlural} — narrow the query or raise limit`,
     };
   }
 
   const summary = `${results.length} endpoints across ${matchedDomains.size} ${domainPlural}`;
-  return { found: true, results, summary };
+  return { found: true, results: ranked.slice(0, limit), summary };
 }

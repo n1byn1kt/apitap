@@ -3,6 +3,7 @@
 import { capture } from './capture/monitor.js';
 import { writeSkillFile, readSkillFile, listSkillFiles } from './skill/store.js';
 import { replayEndpoint, getConfidenceHint } from './replay/engine.js';
+import { capEnvelope } from './replay/envelope.js';
 import { AuthManager, getMachineId } from './auth/manager.js';
 import { deriveSigningKey } from './auth/crypto.js';
 import { signSkillFile, signSkillFileAs, provenanceForSigning } from './skill/signing.js';
@@ -538,13 +539,21 @@ async function handleReplay(positional: string[], flags: Record<string, string |
   }
 
   if (json) {
-    console.log(JSON.stringify({
-      status: result.status,
-      data: result.data,
-      ...(result.truncated ? { truncated: result.truncated } : {}),
-      ...(result.contractWarnings?.length ? { contractWarnings: result.contractWarnings } : {}),
-      ...(result.warnings?.length ? { warnings: result.warnings } : {}),
-    }, null, 2));
+    const { envelope, envelopeBytes } = capEnvelope(
+      (data, truncated) => ({
+        status: result.status,
+        data,
+        ...(truncated ? { truncated } : {}),
+        ...(result.contractWarnings?.length ? { contractWarnings: result.contractWarnings } : {}),
+        ...(result.warnings?.length ? { warnings: result.warnings } : {}),
+        envelopeBytes: 999_999_999, // placeholder, same order of magnitude → stable width
+      }),
+      result.data,
+      result.truncated ?? false,
+      maxBytes,
+      env => JSON.stringify(env, null, 2),
+    );
+    console.log(JSON.stringify({ ...envelope, envelopeBytes }, null, 2));
   } else {
     const hint = endpoint ? getConfidenceHint(endpoint.confidence, endpoint.endpointProvenance) : null;
     if (hint) {
@@ -2235,7 +2244,27 @@ async function handleBrowse(positional: string[], flags: Record<string, string |
   });
 
   if (json) {
-    console.log(JSON.stringify(result, null, 2));
+    if (result.success) {
+      const { envelope, envelopeBytes } = capEnvelope(
+        (data, truncated) => ({
+          ...result,
+          data,
+          ...(truncated ? { truncated } : {}),
+          envelopeBytes: 999_999_999, // placeholder, same order of magnitude → stable width
+        }),
+        result.data,
+        result.truncated ?? false,
+        maxBytes,
+        env => JSON.stringify(env, null, 2),
+      );
+      console.log(JSON.stringify({ ...envelope, envelopeBytes }, null, 2));
+    } else {
+      // Guidance responses carry no bulk `data` field — no bisection needed,
+      // just measure with the same placeholder-then-patch trick for stable width.
+      const withPlaceholder = { ...result, envelopeBytes: 999_999_999 };
+      const envelopeBytes = Buffer.byteLength(JSON.stringify(withPlaceholder, null, 2), 'utf-8');
+      console.log(JSON.stringify({ ...result, envelopeBytes }, null, 2));
+    }
     return;
   }
 

@@ -352,7 +352,11 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
       });
       // Always mark as untrusted — failed results may contain attacker-controlled strings (H7 fix)
       if (!result.success) {
-        return wrapExternalContent(result, 'apitap_browse');
+        // Guidance responses carry no bulk `data` field — no bisection needed,
+        // just measure with the same placeholder-then-patch trick for stable width.
+        const withPlaceholder = { ...result, envelopeBytes: 999_999_999 };
+        const envelopeBytes = Buffer.byteLength(JSON.stringify(withPlaceholder), 'utf-8');
+        return wrapExternalContent({ ...result, envelopeBytes }, 'apitap_browse');
       }
       const { envelope, envelopeBytes } = capEnvelope(
         (data, truncated) => ({

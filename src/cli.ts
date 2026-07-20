@@ -35,7 +35,7 @@ import { searchSwaggerHub, fetchSwaggerHubSpec } from './skill/swaggerhub.js';
 import { buildIndex, removeFromIndex } from './skill/index.js';
 import { runDoctor } from './doctor/index.js';
 import { restoreSkill } from './doctor/snapshot.js';
-import { formatDoctorReport } from './doctor/format.js';
+import { formatDoctorReport, formatDoctorSummary } from './doctor/format.js';
 import {
   resolveGitHubToken,
   searchOrgSpecs,
@@ -120,6 +120,7 @@ function printUsage(): void {
     apitap doctor [domain]     Skill-store hygiene: report junk/dupes/stale (offline)
       --fix                    Apply conservative fixes (quarantine + snapshot, restorable)
       --restore <domain>       Undo a doctor fix or quarantine
+      --verbose                Full per-finding line output (default is a summary)
       --stale-days <n>         Staleness threshold (default 90)
     apitap stats               Show token savings report
     apitap index build         Rebuild search index (run after manual edits)
@@ -187,6 +188,21 @@ function printUsage(): void {
     --no-auth                  Skip loading stored auth
   `.trim());
 }
+
+const DOCTOR_USAGE = `
+  Usage: apitap doctor [domain] [options]
+
+  Skill-store hygiene: report junk domains, beacons, duplicates, stale
+  captures, and invalid skill files. Offline — never makes network calls.
+
+  Options:
+    --fix                  Apply safe fixes (quarantine + edit with .orig snapshot)
+    --restore <domain>     Undo a doctor fix or quarantine
+    --verbose              Full per-finding line output (default is a summary)
+    --stale-days <n>       Stale-capture threshold in days (default 90)
+    --json                 Machine-readable full report
+    --help, -h             Show this help
+`;
 
 const APITAP_DIR = process.env.APITAP_DIR || join(homedir(), '.apitap');
 const SKILLS_DIR = process.env.APITAP_SKILLS_DIR || undefined;
@@ -2512,6 +2528,10 @@ async function handleForget(positional: string[]): Promise<void> {
 }
 
 async function handleDoctor(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  if (flags.help === true || typeof flags.help === 'string' || positional.includes('-h')) {
+    console.log(DOCTOR_USAGE);
+    return;
+  }
   const skillsDir = SKILLS_DIR || join(APITAP_DIR, 'skills');
   try {
     if (typeof flags.restore === 'string') {
@@ -2542,6 +2562,11 @@ async function handleDoctor(positional: string[], flags: Record<string, string |
       jsonFlag = true;
       if (domain === undefined) domain = flags.json;
     }
+    let verboseFlag = flags.verbose === true;
+    if (typeof flags.verbose === 'string') {
+      verboseFlag = true;
+      if (domain === undefined) domain = flags.verbose;
+    }
     const report = await runDoctor({
       skillsDir, signingKey,
       fix: fixFlag,
@@ -2551,7 +2576,8 @@ async function handleDoctor(positional: string[], flags: Record<string, string |
     if (jsonFlag) {
       console.log(JSON.stringify(report, null, 2));
     } else {
-      console.log(formatDoctorReport(report, fixFlag));
+      const fullDetail = verboseFlag || domain !== undefined;
+      console.log(fullDetail ? formatDoctorReport(report, fixFlag) : formatDoctorSummary(report, fixFlag));
       // Auth orphan info for quarantined domains (report-only; quarantine
       // deliberately does not touch auth.enc, unlike forget)
       for (const domain of report.quarantined) {

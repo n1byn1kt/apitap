@@ -142,4 +142,90 @@ describe('wikipediaDecoder', () => {
       assert.ok(result!.content.includes('stub article'));
     });
   });
+
+  describe('full-article fetch (action-API extracts)', () => {
+    function setupSummary(title: string, extractLength: number) {
+      routes[`/api/rest_v1/page/summary/${title}`] = {
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          title,
+          extract: 'S'.repeat(extractLength),
+          description: 'Programming language',
+          content_urls: { desktop: { page: `https://en.wikipedia.org/wiki/${title}` } },
+        }),
+      };
+    }
+
+    it('fetches full article body when summary is far under budget', async () => {
+      setupSummary('X', 300);
+      routes['/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&format=json&titles=X'] = {
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ query: { pages: { '123': { extract: 'FULL '.repeat(2000) } } } }),
+      };
+
+      const result = await wikipediaDecoder.decode(
+        'https://en.wikipedia.org/wiki/X',
+        { skipSsrf: true, _apiBaseUrl: baseUrl, maxBytes: 8000 },
+      );
+
+      assert.ok(result);
+      assert.equal(result!.metadata.source, 'wikipedia-action-extracts');
+      assert.ok(result!.content.length > 1000);
+    });
+
+    it('falls back to lede when action API fails', async () => {
+      setupSummary('Y', 300);
+      routes['/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&format=json&titles=Y'] = {
+        status: 500,
+        contentType: 'application/json',
+        body: 'error',
+      };
+
+      const result = await wikipediaDecoder.decode(
+        'https://en.wikipedia.org/wiki/Y',
+        { skipSsrf: true, _apiBaseUrl: baseUrl, maxBytes: 8000 },
+      );
+
+      assert.ok(result);
+      assert.equal(result!.metadata.source, 'wikipedia-rest');
+      assert.ok(result!.content.length > 0);
+    });
+
+    it('keeps lede-only when summary already fills the budget', async () => {
+      setupSummary('Z', 300);
+      routes['/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&format=json&titles=Z'] = {
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ query: { pages: { '123': { extract: 'FULL '.repeat(2000) } } } }),
+      };
+
+      const result = await wikipediaDecoder.decode(
+        'https://en.wikipedia.org/wiki/Z',
+        { skipSsrf: true, _apiBaseUrl: baseUrl, maxBytes: 400 },
+      );
+
+      assert.ok(result);
+      assert.equal(result!.metadata.source, 'wikipedia-rest');
+    });
+
+    it('articles larger than 512 KB still use the full body (maxBodySize raised)', async () => {
+      setupSummary('Big', 300);
+      const bigExtract = 'W'.repeat(700 * 1024);
+      routes['/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&format=json&titles=Big'] = {
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ query: { pages: { '123': { extract: bigExtract } } } }),
+      };
+
+      const result = await wikipediaDecoder.decode(
+        'https://en.wikipedia.org/wiki/Big',
+        { skipSsrf: true, _apiBaseUrl: baseUrl, maxBytes: 900_000 },
+      );
+
+      assert.ok(result);
+      assert.equal(result!.metadata.source, 'wikipedia-action-extracts');
+    });
+  });
 });

@@ -16,7 +16,30 @@ describe('read envelope diet', () => {
   let base: string;
 
   before(async () => {
+    // Firebase-style routes for the HN decoder fixture: one item with ~50 KB
+    // of body text so the decoder path must engage the envelope diet.
+    const bigText = 'Decoder content that must be capped. '.repeat(1400); // ~52 KB
+    const firebaseRoutes: Record<string, unknown> = {
+      '/v0/item/12345.json': {
+        id: 12345,
+        title: 'Big decoder story',
+        by: 'testuser',
+        score: 150,
+        text: bigText,
+        type: 'story',
+        time: 1700000000,
+        kids: [],
+        descendants: 0,
+      },
+    };
+
     server = createServer((req, res) => {
+      const firebase = firebaseRoutes[req.url ?? ''];
+      if (firebase) {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(firebase));
+        return;
+      }
       res.writeHead(200, { 'content-type': 'text/html' });
       if (req.url === '/big') {
         // Large content, zero links: link shrinking cannot rescue the envelope.
@@ -31,6 +54,16 @@ describe('read envelope diet', () => {
   });
 
   after(() => server.close());
+
+  // Fixture helpers — generic HTML read and HN-style decoder read.
+  const readWithFixture = (opts: { maxBytes?: number } = {}) =>
+    read(`${base}/page`, { skipSsrf: true, ...opts });
+  const readDecoderFixture = (opts: { maxBytes?: number } = {}) =>
+    read('https://news.ycombinator.com/item?id=12345', {
+      skipSsrf: true,
+      _apiBaseUrl: base,
+      ...opts,
+    });
 
   it('dedupes links by href and caps at 100 with linksOmitted', async () => {
     const result = await read(`${base}/page`, { skipSsrf: true });
@@ -82,6 +115,25 @@ describe('read envelope diet', () => {
     const result = await read(`${base}/big`, { skipSsrf: true, maxBytes: 100_000 });
     assert.ok(result);
     assert.strictEqual(result.contentTruncated, undefined);
+  });
+
+  it('read envelope reports envelopeBytes matching its serialized size', async () => {
+    const result = await readWithFixture({ maxBytes: 5000 });
+    assert.ok(result);
+    assert.equal(typeof result.envelopeBytes, 'number');
+    const measured = Buffer.byteLength(JSON.stringify(result), 'utf-8');
+    // envelopeBytes was measured with a fixed-width placeholder — allow ±16 bytes
+    assert.ok(Math.abs(measured - result.envelopeBytes!) <= 16, `${measured} vs ${result.envelopeBytes}`);
+    assert.ok(result.envelopeBytes! <= 5000 + 16);
+  });
+
+  it('DECODER results are envelope-capped too (grok P0-1 regression test)', async () => {
+    const result = await readDecoderFixture({ maxBytes: 4000 });
+    assert.ok(result);
+    const measured = Buffer.byteLength(JSON.stringify(result), 'utf-8');
+    assert.ok(measured <= 4000 + 16, `decoder envelope ${measured} > 4000`);
+    assert.equal(result.contentTruncated, true);
+    assert.equal(typeof result.envelopeBytes, 'number');
   });
 
   it('scan:false keeps the legacy envelope (no diet)', async () => {

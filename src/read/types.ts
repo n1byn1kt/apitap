@@ -40,6 +40,11 @@ export interface ReadResult {
     siteName: string | null;
   };
   cost: { tokens: number };
+  /** Actual serialized size of this envelope in bytes, recorded after the
+   *  maxBytes diet runs. When maxBytes was set, this is ≤ maxBytes (modulo the
+   *  fixed-width placeholder used during measurement). Absent on the legacy
+   *  (scan: false) path. */
+  envelopeBytes?: number;
   /** Trap scanner findings. Present when the scanner ran. Absent when scan: false. */
   findings?: ReadFinding[];
 }

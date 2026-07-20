@@ -188,6 +188,21 @@ function printUsage(): void {
   `.trim());
 }
 
+const DOCTOR_USAGE = `
+  Usage: apitap doctor [domain] [options]
+
+  Skill-store hygiene: report junk domains, beacons, duplicates, stale
+  captures, and invalid skill files. Offline — never makes network calls.
+
+  Options:
+    --fix                  Apply safe fixes (quarantine + edit with .orig snapshot)
+    --restore <domain>     Undo a doctor fix or quarantine
+    --verbose              Full per-finding line output (default is a summary)
+    --stale-days <n>       Stale-capture threshold in days (default 90)
+    --json                 Machine-readable full report
+    --help, -h             Show this help
+`;
+
 const APITAP_DIR = process.env.APITAP_DIR || join(homedir(), '.apitap');
 const SKILLS_DIR = process.env.APITAP_SKILLS_DIR || undefined;
 
@@ -2512,6 +2527,10 @@ async function handleForget(positional: string[]): Promise<void> {
 }
 
 async function handleDoctor(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  if (flags.help === true || typeof flags.help === 'string' || positional.includes('-h')) {
+    console.log(DOCTOR_USAGE);
+    return;
+  }
   const skillsDir = SKILLS_DIR || join(APITAP_DIR, 'skills');
   try {
     if (typeof flags.restore === 'string') {

@@ -7,8 +7,9 @@ import { hackernewsDecoder } from './hackernews.js';
 import { grokipediaDecoder } from './grokipedia.js';
 import { twitterDecoder } from './twitter.js';
 import { deepwikiDecoder } from './deepwiki.js';
+import { lobstersDecoder } from './lobsters.js';
 
-const decoders: Decoder[] = [redditDecoder, youtubeDecoder, wikipediaDecoder, hackernewsDecoder, grokipediaDecoder, twitterDecoder, deepwikiDecoder];
+const decoders: Decoder[] = [redditDecoder, youtubeDecoder, wikipediaDecoder, hackernewsDecoder, grokipediaDecoder, twitterDecoder, deepwikiDecoder, lobstersDecoder];
 
 export function findDecoder(url: string): Decoder | null {
   return decoders.find(d => d.patterns.some(p => p.test(url))) ?? null;

@@ -145,7 +145,7 @@ function printUsage(): void {
   Replay options:
     --json                     Output machine-readable JSON
     --fresh                    Force token refresh before replay
-    --max-bytes <bytes>        Truncate response to fit within byte limit
+    --max-bytes <bytes>        Cap the full serialized response at this many bytes
     --egress-check             Enable egress scanning for this call (annotate mode)
     --egress-check=annotate    Explicit annotate mode
     --egress-check=block       Explicit block mode (refuses on high-severity)
@@ -158,14 +158,14 @@ function printUsage(): void {
 
   Browse options:
     --json                     Output machine-readable JSON
-    --max-bytes <bytes>        Truncate response to fit within byte limit (default: 50000)
+    --max-bytes <bytes>        Cap the full serialized response at this many bytes (default: 50000)
 
   Peek options:
     --json                     Output machine-readable JSON
 
   Read options:
     --json                     Output machine-readable JSON
-    --max-bytes <bytes>        Truncate content to fit within byte limit
+    --max-bytes <bytes>        Cap the full serialized response at this many bytes
     --scan                     Enable trap-aware content scanning (default)
     --no-scan                  Disable trap-aware content scanning
     --images                   Include the images array (deduped, capped at 50)
@@ -2359,7 +2359,7 @@ async function handleRead(positional: string[], flags: Record<string, string | b
   }
 
   if (json) {
-    console.log(JSON.stringify(result, null, 2));
+    console.log(JSON.stringify(result));
     return;
   }
 

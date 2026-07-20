@@ -79,3 +79,4 @@ monitoring/
 .traction-state
 tasks/
 launch-monitor-baseline.json
+implementation-notes.md

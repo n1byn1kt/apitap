@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { searchSkills } from './skill/search.js';
 import { readSkillFile } from './skill/store.js';
 import { replayEndpoint } from './replay/engine.js';
+import { capEnvelope } from './replay/envelope.js';
 import { AuthManager, getMachineId } from './auth/manager.js';
 import { deriveSigningKey } from './auth/crypto.js';
 import { requestAuth } from './auth/handoff.js';
@@ -180,7 +181,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
         endpointId: z.string().describe('Endpoint ID from search results (e.g. "get-events", "post-graphql-GetPosts")'),
         params: z.object({}).passthrough().optional().describe('Optional key-value parameters: path params (id), query params, or body variables (variables.limit for GraphQL)'),
         fresh: z.boolean().optional().describe('Force token refresh before replay (opens browser to capture fresh CSRF/session tokens)'),
-        maxBytes: z.number().optional().describe('Maximum response size in bytes. Large responses are truncated to fit. Omit for unlimited.'),
+        maxBytes: z.number().optional().describe('Maximum size in bytes of the full serialized response. Large responses are truncated to fit.'),
         egress_check: z.union([z.literal(false), z.enum(['annotate', 'block'])]).optional().describe('Per-call egress check override. false forces off; "annotate" or "block" force on with that action. Unset falls through to skill file and global config.'),
       }),
       annotations: {
@@ -226,18 +227,24 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
         const cached = sessionCache.get(domain);
         const skillSource = cached?.source ?? 'disk';
 
-        return wrapExternalContent({
+        const { envelope, envelopeBytes } = capEnvelope(
+          (data, truncated) => ({
             status: result.status,
-            data: result.data,
+            data,
             domain,
             endpointId,
             tier: endpoint.replayability?.tier ?? 'unknown',
             skillSource,
             capturedAt: skill.capturedAt,
             ...(result.refreshed ? { refreshed: result.refreshed } : {}),
-            ...(result.truncated ? { truncated: result.truncated } : {}),
+            ...(truncated ? { truncated } : {}),
             ...(result.contractWarnings?.length ? { contractWarnings: result.contractWarnings } : {}),
-          }, 'apitap_replay');
+            envelopeBytes: 999_999_999,
+          }),
+          result.data, result.truncated ?? false, maxBytes,
+          env => JSON.stringify(env),
+        );
+        return wrapExternalContent({ ...envelope, envelopeBytes }, 'apitap_replay');
       } catch (err: any) {
         return {
           content: [{ type: 'text' as const, text: `Replay failed: ${err.message}` }],
@@ -260,7 +267,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
           endpointId: z.string().describe('Endpoint ID from search results'),
           params: z.object({}).passthrough().optional().describe('Optional key-value parameters'),
         })).describe('Array of replay requests to execute in parallel'),
-        maxBytes: z.number().optional().describe('Maximum response size in bytes per result. Large responses are truncated to fit.'),
+        maxBytes: z.number().optional().describe('Maximum size in bytes of the full serialized response. Large responses are truncated to fit.'),
       }),
       annotations: {
         readOnlyHint: true,
@@ -281,7 +288,27 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
         params: r.params as Record<string, string> | undefined,
       }));
       const results = await replayMultiple(typed, { skillsDir, maxBytes, _skipSsrfCheck: options._skipSsrfCheck });
-      return wrapExternalContent(results, 'apitap_replay_batch');
+      const capped = results.map(r => {
+        const { envelope, envelopeBytes } = capEnvelope(
+          (data, truncated) => ({
+            domain: r.domain,
+            endpointId: r.endpointId,
+            status: r.status,
+            data,
+            ...(r.error !== undefined ? { error: r.error } : {}),
+            ...(r.tier !== undefined ? { tier: r.tier } : {}),
+            ...(r.capturedAt !== undefined ? { capturedAt: r.capturedAt } : {}),
+            ...(truncated ? { truncated } : {}),
+            ...(r.contractWarnings?.length ? { contractWarnings: r.contractWarnings } : {}),
+            ...(r.skillSource !== undefined ? { skillSource: r.skillSource } : {}),
+            envelopeBytes: 999_999_999,
+          }),
+          r.data, r.truncated ?? false, maxBytes,
+          env => JSON.stringify(env),
+        );
+        return { ...envelope, envelopeBytes };
+      });
+      return wrapExternalContent(capped, 'apitap_replay_batch');
     },
   );
 
@@ -295,7 +322,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
       inputSchema: z.object({
         url: z.string().describe('URL to browse (e.g. "https://zillow.com/rentals/portland")'),
         task: z.string().optional().describe('Optional task description (e.g. "find apartments under $1500") — passed through in response for correlation'),
-        maxBytes: z.number().optional().describe('Maximum response size in bytes (default: 50000). Large responses are truncated to fit.'),
+        maxBytes: z.number().optional().describe('Maximum size in bytes of the full serialized response. Large responses are truncated to fit.'),
       }),
       annotations: {
         readOnlyHint: true,
@@ -313,17 +340,38 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
         }
       }
       const { browse: doBrowse } = await import('./orchestration/browse.js');
+      const effectiveMaxBytes = maxBytes ?? 50_000;
       const result = await doBrowse(url, {
         skillsDir,
         cache: sessionCache,
         task,
-        maxBytes: maxBytes ?? 50_000,
+        maxBytes: effectiveMaxBytes,
         _skipSsrfCheck: options._skipSsrfCheck,
         // In test mode, disable bridge to avoid connecting to real socket
         ...(options._skipSsrfCheck ? { _bridgeSocketPath: '/nonexistent' } : {}),
       });
       // Always mark as untrusted — failed results may contain attacker-controlled strings (H7 fix)
-      return wrapExternalContent(result, 'apitap_browse');
+      if (!result.success) {
+        return wrapExternalContent(result, 'apitap_browse');
+      }
+      const { envelope, envelopeBytes } = capEnvelope(
+        (data, truncated) => ({
+          success: true as const,
+          data,
+          status: result.status,
+          domain: result.domain,
+          endpointId: result.endpointId,
+          tier: result.tier,
+          skillSource: result.skillSource,
+          capturedAt: result.capturedAt,
+          ...(result.task !== undefined ? { task: result.task } : {}),
+          ...(truncated ? { truncated } : {}),
+          envelopeBytes: 999_999_999,
+        }),
+        result.data, result.truncated ?? false, effectiveMaxBytes,
+        env => JSON.stringify(env),
+      );
+      return wrapExternalContent({ ...envelope, envelopeBytes }, 'apitap_browse');
     },
   );
 
@@ -374,7 +422,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
         'HTML extraction elsewhere. Returns clean markdown. ~10K tokens vs 200K for browser.',
       inputSchema: z.object({
         url: z.string().describe('URL to read (e.g. "https://en.wikipedia.org/wiki/TypeScript")'),
-        maxBytes: z.number().optional().describe('Maximum content size in bytes. Content is truncated to fit.'),
+        maxBytes: z.number().optional().describe('Maximum size in bytes of the full serialized response. Large responses are truncated to fit.'),
         scan: z.boolean().optional().describe('Enable trap-aware content scanning (default: true). Set to false to skip scanning and preserve the legacy response envelope shape.'),
         includeImages: z.boolean().optional().describe('Include the images array (deduped, capped at 50). Default: false.'),
       }),

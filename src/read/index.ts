@@ -25,10 +25,79 @@ export interface ReadOptions {
   scan?: boolean;
   /** Include the images array in the envelope (deduped, capped). Default: false. */
   includeImages?: boolean;
+  /** Testing-only override for a decoder's API base URL. Forwarded to the
+   *  matched decoder so tests can point it at a local fixture server. */
+  _apiBaseUrl?: string;
 }
 
 const LINKS_CAP = 100;
 const IMAGES_CAP = 50;
+
+/**
+ * Fit a ReadResult envelope inside maxBytes (issue #62 semantics): shrink the
+ * links array by halving first, then binary-search the largest content prefix
+ * whose fully serialized envelope fits. Byte-accurate — measured against
+ * JSON.stringify(envelope), so any field already on the object (findings,
+ * envelopeBytes placeholder, cost) is counted. Sets contentTruncated when the
+ * content had to be cut. Applied to BOTH the generic and decoder return paths
+ * so maxBytes is one hard cap everywhere. No-op when maxBytes is undefined.
+ * Callers record envelopeBytes and recompute cost.tokens after this returns.
+ */
+function fitReadEnvelope(envelope: ReadResult, maxBytes: number | undefined): void {
+  if (maxBytes) {
+    // cost.tokens is recomputed by the caller after this returns; measure with
+    // its widest possible value here so the final (smaller) number never grows
+    // the envelope past the budget we just enforced.
+    envelope.cost.tokens = Math.ceil(maxBytes / 4);
+
+    // Shrink links (halving) before touching content.
+    while (
+      Buffer.byteLength(JSON.stringify(envelope), 'utf-8') > maxBytes &&
+      envelope.links.length > 0
+    ) {
+      const keep = Math.floor(envelope.links.length / 2);
+      envelope.linksOmitted = (envelope.linksOmitted ?? 0) + (envelope.links.length - keep);
+      envelope.links = envelope.links.slice(0, keep);
+    }
+
+    // Links exhausted but still over budget: binary-search the largest content
+    // prefix whose full envelope fits (issue #62). Byte-accurate. Only fixed
+    // metadata larger than maxBytes itself can still overshoot.
+    if (
+      Buffer.byteLength(JSON.stringify(envelope), 'utf-8') > maxBytes &&
+      envelope.content.length > 0
+    ) {
+      const full = envelope.content;
+      const suffix = '... [truncated]';
+      // Set the signal BEFORE measuring so its own bytes are budgeted.
+      envelope.contentTruncated = true;
+      let lo = 0;
+      let hi = full.length;
+      while (lo < hi) {
+        const mid = (lo + hi + 1) >> 1;
+        envelope.content = full.slice(0, mid) + suffix;
+        if (Buffer.byteLength(JSON.stringify(envelope), 'utf-8') <= maxBytes) {
+          lo = mid;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      envelope.content = full.slice(0, lo) + suffix;
+    }
+  }
+}
+
+/**
+ * Record envelopeBytes (fixed-width placeholder trick) and recompute cost.tokens
+ * as the final mutations, in that order — cost.tokens is last so it stays an
+ * exact measure of the settled envelope. Shared by both read return paths.
+ */
+function fitAndFinalize(envelope: ReadResult, maxBytes: number | undefined): void {
+  envelope.envelopeBytes = 999_999_999; // placeholder counted by the re-slice budget
+  fitReadEnvelope(envelope, maxBytes);
+  envelope.envelopeBytes = Buffer.byteLength(JSON.stringify(envelope), 'utf-8');
+  envelope.cost = { tokens: Math.ceil(JSON.stringify(envelope).length / 4) };
+}
 
 function dietLinks(links: Array<{ text: string; href: string }>): Array<{ text: string; href: string }> {
   const seen = new Set<string>();
@@ -76,13 +145,20 @@ export async function read(url: string, options: ReadOptions = {}): Promise<Read
   // Try site-specific decoder first
   const decoder = findDecoder(url);
   if (decoder) {
-    const result = await decoder.decode(url, { skipSsrf: options.skipSsrf });
+    const result = await decoder.decode(url, {
+      skipSsrf: options.skipSsrf,
+      ...(options._apiBaseUrl ? { _apiBaseUrl: options._apiBaseUrl } : {}),
+    });
     if (result) {
+      // Cheap first pass: char-slice to roughly bound content, then run the
+      // same byte-accurate envelope diet the generic path uses (grok P0-1:
+      // decoder results must honour maxBytes as a hard cap, not just a
+      // character slice, and must report envelopeBytes like every other path).
       if (options.maxBytes && result.content.length > options.maxBytes) {
         result.content = result.content.slice(0, options.maxBytes);
-        result.cost.tokens = Math.ceil(result.content.length / 4);
         result.contentTruncated = true;
       }
+      fitAndFinalize(result, options.maxBytes);
       // Decoders bypass scanning — they extract from structured sources.
       // Do NOT attach a findings field; preserve existing decoder envelope.
       return result;
@@ -193,48 +269,10 @@ export async function read(url: string, options: ReadOptions = {}): Promise<Read
     ...(findings !== undefined ? { findings } : {}),
   };
 
-  // maxBytes bounds the envelope: shrink links (halving) before touching content.
-  if (options.maxBytes) {
-    // cost.tokens is recomputed after shrinking; measure with its widest
-    // possible value so the final number never grows the envelope past
-    // the budget we just enforced.
-    envelope.cost.tokens = Math.ceil(options.maxBytes / 4);
-    while (
-      Buffer.byteLength(JSON.stringify(envelope), 'utf-8') > options.maxBytes &&
-      envelope.links.length > 0
-    ) {
-      const keep = Math.floor(envelope.links.length / 2);
-      envelope.linksOmitted = (envelope.linksOmitted ?? 0) + (envelope.links.length - keep);
-      envelope.links = envelope.links.slice(0, keep);
-    }
-
-    // Links exhausted but still over budget: binary-search the largest
-    // content prefix whose full envelope fits (issue #62). Byte-accurate —
-    // measured against the serialized envelope, not content length. Only
-    // fixed metadata larger than maxBytes itself can still overshoot.
-    if (
-      Buffer.byteLength(JSON.stringify(envelope), 'utf-8') > options.maxBytes &&
-      envelope.content.length > 0
-    ) {
-      const full = envelope.content;
-      const suffix = '... [truncated]';
-      // Set the signal BEFORE measuring so its own bytes are budgeted.
-      envelope.contentTruncated = true;
-      let lo = 0;
-      let hi = full.length;
-      while (lo < hi) {
-        const mid = (lo + hi + 1) >> 1;
-        envelope.content = full.slice(0, mid) + suffix;
-        if (Buffer.byteLength(JSON.stringify(envelope), 'utf-8') <= options.maxBytes) {
-          lo = mid;
-        } else {
-          hi = mid - 1;
-        }
-      }
-      envelope.content = full.slice(0, lo) + suffix;
-    }
-  }
-
-  envelope.cost = { tokens: Math.ceil(JSON.stringify(envelope).length / 4) };
+  // maxBytes bounds the envelope: shrink links (halving) before touching
+  // content. envelopeBytes is measured with a fixed-width placeholder so its
+  // own bytes are budgeted during the diet, then overwritten with the real
+  // serialized size (fitReadEnvelope also recomputes cost.tokens).
+  fitAndFinalize(envelope, options.maxBytes);
   return envelope;
 }

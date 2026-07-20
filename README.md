@@ -225,6 +225,21 @@ apitap read https://example.com/blog/post
 
 For MCP agents, `apitap_peek` and `apitap_read` are the fastest way to consume web content — use them before reaching for `apitap_browse` or `apitap_capture`.
 
+### Bounding response size with `--max-bytes`
+
+`--max-bytes` (MCP: `maxBytes`) is a **hard cap on the full serialized response envelope**, not just on the data or content field. It applies uniformly across `apitap replay`, `apitap browse`, and `apitap read` (including every built-in decoder — Wikipedia, Hacker News, Reddit, etc.), so a bounded call returns a bounded envelope no matter which path served it.
+
+```bash
+apitap replay gamma-api.polymarket.com get-events --json --max-bytes 4000
+apitap read https://en.wikipedia.org/wiki/Node.js --max-bytes 4000
+```
+
+How the cap is honoured:
+
+- **Read path** — links are shrunk first (deduped, then halved), then content is re-sliced byte-accurately. When content is cut, the envelope carries `contentTruncated: true` so the truncation is never silent.
+- **Replay path** — the data payload is trimmed to fit under the same budget, flooring at a **512-byte data minimum** so a pathologically small `--max-bytes` still returns usable data (the only documented case where the envelope may exceed the cap).
+- **`envelopeBytes`** — every capped response reports its own actual serialized size in bytes. It is recorded after the diet runs, so `envelopeBytes ≤ maxBytes` (within a few bytes of fixed-width measurement slack), except in the floor case above where irreducible data plus never-dropped metadata can honestly exceed the budget. Use it to see how much of the budget a response actually consumed.
+
 ## Pre-Loaded APIs
 
 ApiTap can instantly import from the [APIs.guru](https://apis.guru) directory of 2,500+ public API specs. A single command populates your local pattern database:

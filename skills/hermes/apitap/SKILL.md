@@ -40,7 +40,9 @@ Where it sits next to tools you already have:
 - **vs browser automation** — no browser process, no selectors, no waiting on
   a page to settle.
 - **vs a hand-written scraper** — the artifact is a signed skill file on disk,
-  reusable in later sessions and copyable to another machine.
+  reusable across sessions. Signatures are machine-bound, so move one to
+  another machine with `apitap import` (re-signs it locally) rather than
+  copying the raw file.
 
 Requires `@apitap/core` 2.2.0 or newer.
 
@@ -90,7 +92,9 @@ stale-search-index warning go to stderr, so parse stdout only.
 
 ## Quick Reference
 
-Every command accepts `--json`.
+Every command in this table accepts `--json`. The one exception anywhere in
+this file is `apitap index build` (see Pitfalls) — it takes no flags and
+always prints human-readable text.
 
 | Command | What it does |
 |---|---|
@@ -157,7 +161,11 @@ Handy flags: `--max-bytes <n>` caps a response (`apitap read`, `apitap browse`,
 
 ## Verification
 
-- With `--json`, every command exits 0 and prints parseable JSON on stdout.
+- Any command failure — `--json` or not — exits non-zero and prints an
+  `Error: <message>` line on stderr.
+- On success, `--json` makes every table command in Quick Reference print
+  parseable JSON on stdout. `apitap index build` is the exception: it has no
+  `--json` mode and always prints human-readable text.
 - `apitap list --json` shows the new skill file after an `apitap capture`,
   `apitap discover --save`, or `apitap import`.
 - `apitap stats --json` reports endpoints and token savings per domain.

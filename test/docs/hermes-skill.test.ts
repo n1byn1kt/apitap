@@ -71,17 +71,36 @@ describe('hermes skill file', () => {
   });
 
   it('contains no invisible unicode', () => {
-    const invisible = /[​-‍⁠⁢-⁤﻿‪-‮⁦-⁩]/;
+    // Zero-width space/joiners (U+200B-U+200D), word joiner (U+2060),
+    // invisible math operators (U+2062-U+2064), BOM/zero-width no-break
+    // space (U+FEFF), and bidi control characters (U+202A-U+202E,
+    // U+2066-U+2069). Written as \u escapes so the class itself is
+    // reviewable in a diff/editor, not as literal invisible characters.
+    const invisible = /[\u200B-\u200D\u2060\u2062-\u2064\uFEFF\u202A-\u202E\u2066-\u2069]/;
     assert.ok(!invisible.test(readSkill()));
   });
 });
 
 const cliPath = join(repoRoot, 'src', 'cli.ts');
 
-/** Commands the real CLI dispatches on, parsed from its switch statement. */
+/**
+ * Commands the real CLI dispatches on, parsed from main()'s command-dispatch
+ * switch specifically — not just any `case '...':` in the file, so an
+ * unrelated future string switch elsewhere in src/cli.ts can't silently
+ * widen this oracle.
+ */
 function cliCommands(): Set<string> {
   const source = readFileSync(cliPath, 'utf8');
-  const found = new Set([...source.matchAll(/^\s*case '([a-z][a-z-]*)':/gm)].map((m) => m[1]));
+  const dispatch = source.match(
+    /async function main\(\)[\s\S]*?switch \(command\) \{([\s\S]*?)\n\s*\}\n\}\n\nmain\(\)\.catch/,
+  );
+  assert.ok(
+    dispatch,
+    "couldn't locate main()'s command-dispatch switch in src/cli.ts — cliCommands()'s anchor needs updating to match the refactor",
+  );
+  const found = new Set(
+    [...dispatch![1].matchAll(/^\s*case '([a-z][a-z-]*)':/gm)].map((m) => m[1]),
+  );
   // Sanity-check the parse itself before trusting it as an oracle.
   for (const anchor of ['read', 'peek', 'replay', 'capture', 'browse']) {
     assert.ok(found.has(anchor), `CLI parse looks wrong — no case for '${anchor}'`);
@@ -89,17 +108,30 @@ function cliCommands(): Set<string> {
   return found;
 }
 
-/** Every `apitap <cmd>` that appears in a code span or fenced code block. */
-function documentedCommands(source: string): string[] {
-  const codeChunks = [
+/** Every code span or fenced code block in the document, as raw text chunks. */
+function codeChunks(source: string): string[] {
+  return [
     ...[...source.matchAll(/`([^`\n]+)`/g)].map((m) => m[1]),
     ...[...source.matchAll(/```[a-z]*\n([\s\S]*?)```/g)].map((m) => m[1]),
   ];
+}
+
+/** Every `apitap <cmd>` that appears in a code span or fenced code block. */
+function documentedCommands(source: string): string[] {
   const commands = new Set<string>();
-  for (const chunk of codeChunks) {
+  for (const chunk of codeChunks(source)) {
     for (const match of chunk.matchAll(/\bapitap ([a-z][a-z-]*)/g)) commands.add(match[1]);
   }
   return [...commands].sort();
+}
+
+/** Every `--flag` token that appears in a code span or fenced code block. */
+function documentedFlags(source: string): string[] {
+  const flags = new Set<string>();
+  for (const chunk of codeChunks(source)) {
+    for (const match of chunk.matchAll(/--([a-z][a-z-]*)/g)) flags.add(match[1]);
+  }
+  return [...flags].sort();
 }
 
 describe('hermes skill documents the real CLI', () => {
@@ -132,6 +164,36 @@ describe('hermes skill documents the real CLI', () => {
     assert.match(body, /@apitap\/core/);
     assert.match(body, /2\.2\.0/);
     assert.match(body, /playwright install chromium/);
+  });
+
+  it('documents flags that actually exist in src/cli.ts', () => {
+    const cliSource = readFileSync(cliPath, 'utf8');
+    const flags = documentedFlags(readSkill());
+    assert.ok(flags.length > 0, 'expected the skill to document at least one --flag');
+    for (const flag of flags) {
+      const readsFlag = new RegExp(`flags(\\.${flag}\\b|\\[['"]${flag}['"]\\])`);
+      assert.ok(
+        readsFlag.test(cliSource),
+        `SKILL.md documents '--${flag}', which src/cli.ts never reads (flags.${flag} / flags['${flag}'])`,
+      );
+    }
+  });
+
+  it('replay still parses positional key=value arguments, not --params', () => {
+    const cliSource = readFileSync(cliPath, 'utf8');
+    const fnMatch = cliSource.match(/async function handleReplay\([\s\S]*?\n\}/);
+    assert.ok(fnMatch, 'src/cli.ts no longer has a handleReplay function — replay arg parsing needs re-checking');
+    const fnBody = fnMatch[0];
+    assert.match(
+      fnBody,
+      /\[\s*domain\s*,\s*endpointId\s*,\s*\.\.\.\s*paramArgs\s*\]\s*=\s*positional/,
+      'handleReplay no longer destructures [domain, endpointId, ...paramArgs] from positional args — replay may have moved off positional key=value, but SKILL.md still documents that shape',
+    );
+    assert.match(
+      fnBody,
+      /\.indexOf\(['"]=['"]\)/,
+      'handleReplay no longer splits params on "=" — replay may have moved off positional key=value, but SKILL.md still documents that shape',
+    );
   });
 });
 

@@ -124,7 +124,7 @@ always prints human-readable text.
 |---|---|
 | `apitap peek <url>` | Triage from HTTP headers: status, framework, bot protection, and a recommended next step. Sends a HEAD, falling back to a GET if the HEAD errors. The result is built from headers only either way, so it stays near-free in tokens — but the GET fallback downloads the entire response body before discarding it, so it is not free in bandwidth on large pages. |
 | `apitap read <url>` | Extract page content without a browser. Site-aware decoders for Reddit, Hacker News, YouTube, Wikipedia and more; generic HTML extraction otherwise. Unbounded unless you pass `--max-bytes <n>`. |
-| `apitap browse <url>` | One-shot escalation — replays a saved skill file if one matches; with no saved file it tries discovery, then falls back to reading the page. When a saved file exists but does not cover the requested path, browse stops with guidance (`path_not_captured`) instead of escalating further. Never launches a browser; tells you when a capture is the only way forward. |
+| `apitap browse <url>` | One-shot escalation — replays a saved skill file if one matches; with no saved file it tries discovery, then falls back to reading the page. When a saved file exists but does not cover the requested path, browse stops with guidance instead of escalating further — `path_not_captured` when the file has other replayable GET endpoints, `no_replayable_endpoints` when it has none. Never launches a browser; tells you when a capture is the only way forward. |
 | `apitap search <query>` | Search saved skill files for a domain or an endpoint. |
 | `apitap list` | List every saved skill file. |
 | `apitap show <domain>` | Show the endpoints saved for one domain. Use `--json` — the human output omits the endpoint ids that `replay` needs. |
@@ -245,8 +245,9 @@ values either, so a non-numeric one is discarded just as quietly.
   before assuming the site is at fault. Later builds skip the bad file and keep escalating instead — the JSON
   guidance then carries a `skillFileError` field saying why the saved file was
   skipped (and the reason `unreadable_skill_file` when nothing else worked),
-  and the original file is preserved under `~/.apitap/skills/.quarantine/`
-  before anything overwrites it. If you see `skillFileError`, the recovery is
+  and before anything overwrites the bad file a copy is saved (best-effort —
+  a failed copy never blocks the new capture) under
+  `~/.apitap/skills/.quarantine/`. If you see `skillFileError`, the recovery is
   the same re-capture or re-import as above.
 
 ## Verification

@@ -7,7 +7,7 @@ import { validateSkillFile } from './validate.js';
 import { scrubPII } from '../capture/scrubber.js';
 import { updateIndex, ensureIndex } from './index.js';
 
-const DEFAULT_SKILLS_DIR = join(homedir(), '.apitap', 'skills');
+export const DEFAULT_SKILLS_DIR = join(homedir(), '.apitap', 'skills');
 
 const BASE_GITIGNORE = `# ApiTap — prevent accidental credential commits
 auth.enc

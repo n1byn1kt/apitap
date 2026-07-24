@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer, type Server } from 'node:http';
@@ -8,7 +8,7 @@ import net from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { browse } from '../../src/orchestration/browse.js';
 import { SessionCache } from '../../src/orchestration/cache.js';
-import { writeSkillFile } from '../../src/skill/store.js';
+import { writeSkillFile, readSkillFile } from '../../src/skill/store.js';
 import { signSkillFile } from '../../src/skill/signing.js';
 import { deriveSigningKey } from '../../src/auth/crypto.js';
 import { getMachineId } from '../../src/auth/manager.js';
@@ -454,5 +454,208 @@ describe('browse with bridge escalation', () => {
     if (!result.success) {
       assert.equal(result.suggestion, 'capture_needed');
     }
+  });
+
+  it('keeps escalating when the saved skill file cannot be read', async () => {
+    // A stale or tampered signature makes readSkillFile throw. browse exists
+    // to escalate, so one unreadable file must not abort the whole run before
+    // discovery and the read fallback get their turn.
+    const machineId = await getMachineId();
+    const sigKey = deriveSigningKey(machineId);
+    const signed = signSkillFile(makeSkill('localhost', baseUrl, [
+      { id: 'get-api-search', method: 'GET', path: '/api/search' },
+    ]), sigKey);
+    signed.signature = 'deadbeef'.repeat(8);
+    await writeSkillFile(signed, testDir);
+
+    const result = await browse('http://localhost/api/search', {
+      skillsDir: testDir,
+      skipDiscovery: true,
+      _skipSsrfCheck: true,
+    });
+
+    // Must not throw. Whatever it decides, it has to come back with a result.
+    assert.ok(result !== undefined);
+    assert.equal(result.success, false);
+    if (!result.success) {
+      assert.equal(result.reason, 'unreadable_skill_file');
+      // Assert the field itself, not just the reason string — the reason
+      // alone contains "unreadable", so a looser match would still pass if
+      // the explanation were dropped.
+      assert.ok(result.skillFileError, 'browse must carry why the file was skipped');
+      assert.match(result.skillFileError, /signature/i);
+    }
+  });
+
+  it('carries the skipped-skill-file reason through a bridge exit', async () => {
+    // The bridge short-circuits before the guidance returns that spread
+    // skillFileError, and tryBridgeCapture builds its own result objects.
+    // A user_denied (or timeout, or saved-capture) exit must not become the
+    // one path that hides a failed integrity check.
+    const machineId = await getMachineId();
+    const sigKey = deriveSigningKey(machineId);
+    const signed = signSkillFile(makeSkill('localhost', baseUrl, [
+      { id: 'get-api-search', method: 'GET', path: '/api/search' },
+    ]), sigKey);
+    signed.signature = 'deadbeef'.repeat(8);
+    await writeSkillFile(signed, testDir);
+
+    await startBridgeServer(() => ({ success: false, error: 'user_denied' }));
+
+    const result = await browse('http://localhost/api/search', {
+      skillsDir: testDir,
+      skipDiscovery: true,
+      _skipSsrfCheck: true,
+      _bridgeSocketPath: socketPath,
+    });
+
+    assert.equal(result.success, false);
+    if (!result.success) {
+      assert.equal(result.reason, 'user_denied');
+      assert.ok(result.skillFileError, 'bridge exit dropped the skipped-skill-file explanation');
+    }
+  });
+
+  it('preserves the unreadable file when a bridge capture overwrites it', async () => {
+    // Discovery is not the only writer: a successful bridge capture also
+    // writeSkillFile()s over the live file. The unreadable original must be
+    // copied into .quarantine before that overwrite, same as the discovery
+    // self-heal path.
+    const machineId = await getMachineId();
+    const sigKey = deriveSigningKey(machineId);
+    const signed = signSkillFile(makeSkill('localhost', baseUrl, [
+      { id: 'get-api-old', method: 'GET', path: '/api/old' },
+    ]), sigKey);
+    signed.signature = 'deadbeef'.repeat(8);
+    await writeSkillFile(signed, testDir);
+
+    await startBridgeServer((msg) => ({
+      success: true,
+      skillFiles: [makeSkill(msg.domain, baseUrl, [
+        { id: 'get-api-data', method: 'GET', path: '/api/data' },
+      ])],
+    }));
+
+    const result = await browse('http://localhost/api/data', {
+      skillsDir: testDir,
+      skipDiscovery: true,
+      _skipSsrfCheck: true,
+      _bridgeSocketPath: socketPath,
+    });
+
+    assert.equal(result.success, true);
+
+    // The corrupt original survives in quarantine...
+    const quarantined = JSON.parse(
+      await readFile(join(testDir, '.quarantine', 'localhost.json'), 'utf-8'),
+    );
+    assert.equal(quarantined.signature, 'deadbeef'.repeat(8));
+    assert.equal(quarantined.endpoints[0].id, 'get-api-old');
+
+    // ...and the live file is the bridge-captured, verifiable one.
+    const live = await readSkillFile('localhost', testDir);
+    assert.ok(live, 'bridge-captured skill file must be readable and verified');
+    assert.equal(live!.endpoints[0]?.id, 'get-api-data');
+  });
+
+  it('still explains a skipped skill file when discovery runs and finds nothing', async () => {
+    // The reason rides more than one exit. Discovery running (rather than
+    // being skipped) leaves through no_replayable_endpoints, which dropped
+    // the explanation in the first version of this fix.
+    const machineId = await getMachineId();
+    const sigKey = deriveSigningKey(machineId);
+    const signed = signSkillFile(makeSkill('localhost', baseUrl, [
+      { id: 'get-api-search', method: 'GET', path: '/api/search' },
+    ]), sigKey);
+    signed.signature = 'deadbeef'.repeat(8);
+    await writeSkillFile(signed, testDir);
+
+    const result = await browse('http://localhost/nothing-here', {
+      skillsDir: testDir,
+      _skipSsrfCheck: true,
+    });
+
+    assert.equal(result.success, false);
+    if (!result.success) {
+      assert.ok(
+        result.skillFileError,
+        `exit '${result.reason}' dropped the skipped-skill-file explanation`,
+      );
+    }
+  });
+});
+
+describe('browse quarantines an unreadable skill file before discovery overwrites it', () => {
+  let testDir: string;
+  let httpServer: Server;
+  let baseUrl: string;
+  let domain: string;
+
+  beforeEach(async () => {
+    testDir = await mkdtemp(join(tmpdir(), 'apitap-browse-quarantine-'));
+    httpServer = createServer((req, res) => {
+      if (req.url === '/openapi.json') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          openapi: '3.0.0',
+          info: { title: 'Test API', version: '1.0.0' },
+          paths: {
+            '/api/users': {
+              get: { operationId: 'getUsers', responses: { '200': { description: 'OK' } } },
+            },
+          },
+        }));
+      } else if (req.url === '/api/users') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify([{ id: 1 }]));
+      } else {
+        res.writeHead(404);
+        res.end('Not Found');
+      }
+    });
+    await new Promise<void>(r => httpServer.listen(0, '127.0.0.1', r));
+    baseUrl = `http://127.0.0.1:${(httpServer.address() as AddressInfo).port}`;
+    domain = '127.0.0.1';
+  });
+
+  afterEach(async () => {
+    await new Promise<void>(r => httpServer.close(() => r()));
+    await rm(testDir, { recursive: true, force: true });
+  });
+
+  it('moves the bad file to .quarantine instead of destroying it', async () => {
+    // Before this fix the overwrite path was unreachable: an unreadable file
+    // aborted browse before discovery ran. Now that browse skips the file,
+    // a successful discovery would silently clobber it — including a
+    // cryptographically valid but stale capture that is recoverable by
+    // re-signing. Preserve the evidence; the overwrite still self-heals.
+    const machineId = await getMachineId();
+    const sigKey = deriveSigningKey(machineId);
+    const signed = signSkillFile(makeSkill(domain, baseUrl, [
+      { id: 'get-api-old', method: 'GET', path: '/api/old' },
+    ]), sigKey);
+    signed.signature = 'deadbeef'.repeat(8);
+    await writeSkillFile(signed, testDir);
+
+    const result = await browse(`${baseUrl}/api/users`, {
+      skillsDir: testDir,
+      _skipSsrfCheck: true,
+      _bridgeSocketPath: join(testDir, 'nonexistent.sock'),
+    });
+
+    // Discovery found the OpenAPI spec, so browse self-heals and replays.
+    assert.equal(result.success, true);
+
+    // The corrupt original survives for inspection...
+    const quarantined = JSON.parse(
+      await readFile(join(testDir, '.quarantine', `${domain}.json`), 'utf-8'),
+    );
+    assert.equal(quarantined.signature, 'deadbeef'.repeat(8));
+    assert.equal(quarantined.endpoints[0].id, 'get-api-old');
+
+    // ...and the live file is the freshly discovered, verifiable one.
+    const live = await readSkillFile(domain, testDir);
+    assert.ok(live, 'discovered skill file must be readable and verified');
+    assert.notEqual(live!.endpoints[0]?.id, 'get-api-old');
   });
 });

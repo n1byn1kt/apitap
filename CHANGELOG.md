@@ -1,5 +1,32 @@
 # Changelog
 
+## v2.2.1 — 2026-07-24
+
+Both changes came out of driving the Hermes skill with a live agent
+(PRs #75, #76).
+
+### Fixed
+- One unreadable skill file no longer disables `apitap browse` for its
+  domain (#75). A stale or tampered signature used to abort the whole
+  run — `Error:` on stderr, no JSON, exit 1 — before discovery and the
+  read fallback got their turn. browse now skips the bad file and keeps
+  escalating; the guidance carries why in a `skillFileError` field
+  (reason `unreadable_skill_file` when nothing else worked). Before
+  anything overwrites the bad file — discovery self-heal or a bridge
+  capture — a best-effort copy lands in `~/.apitap/skills/.quarantine/`,
+  and the overwrite keeps its atomic semantics. `apitap replay` still
+  hard-fails on the same file; nothing from an unverified file ever
+  shapes a request.
+
+### Changed
+- The Hermes skill's claims now match the code (#76): capture's
+  `--duration` is documented as mandatory in practice, the equals flag
+  form (`--flag=value`) is called out as silently dropped, replay's
+  browser conditions are stated precisely, peek/browse cost claims are
+  scoped honestly, and the login-wall guidance routes through real
+  behaviour. Each load-bearing claim is pinned by a behaviour guard in
+  `test/docs/hermes-skill.test.ts` that fails when the code drifts.
+
 ## v2.2.0 — 2026-07-20
 
 Closes out the 2026-07-19 dogfood gauntlet (PRs #69, #70, #71, #73).

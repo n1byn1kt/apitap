@@ -76,11 +76,15 @@ and — when you need structured records — `apitap discover` or `apitap import
    `apitap show`, `apitap discover`, `apitap import`, `apitap stats`.
 
    `apitap replay` is the in-between case. Normally it is a plain `fetch()`
-   with no browser. But when a saved endpoint's stored credentials are expired
-   — or you pass `--fresh` — replay tries to re-mint them, and if the skill
-   file declares refreshable tokens or a refresh URL that re-mint launches
-   Playwright. So replay on an authenticated domain can open a browser, and
-   fails in a sandbox that has none. Replay of a public endpoint never does.
+   with no browser. But replay tries to re-mint credentials when they look
+   expired, when you pass `--fresh`, and reactively whenever the site answers
+   401 or 403 — and if the skill file declares refreshable tokens or a refresh
+   URL, that re-mint launches Playwright. The trigger is the **skill file**,
+   not the endpoint: a file captured while logged in carries refreshable
+   tokens for the whole domain, so replaying even a public endpoint from it can
+   open a browser if the site answers 403. Replay from a skill file that
+   declares no refreshable tokens and no refresh URL never does. In a sandbox
+   with no browser, that re-mint fails the whole call.
 
 Sandboxed terminal backends (Docker, Modal) are the weak spot. A global npm
 install may be refused, and an ephemeral filesystem loses both the install and
@@ -125,6 +129,11 @@ always prints human-readable text.
 Handy flags: `--max-bytes <n>` caps a response (`apitap read`, `apitap browse`,
 `apitap replay`); `--limit <n>` and `--search <term>` bound an import.
 
+**Write flag values space-separated: `--max-bytes 50000`, never
+`--max-bytes=50000`.** The equals form is not parsed — the flag is silently
+dropped, with no error and no clue that it was ignored. Nothing validates flag
+values either, so a non-numeric one is discarded just as quietly.
+
 ## Procedure
 
 **Day one, nothing saved yet — the normal case.**
@@ -163,8 +172,11 @@ Handy flags: `--max-bytes <n>` caps a response (`apitap read`, `apitap browse`,
   traffic. Needs a browser on the host plus `npx playwright install chromium`.
   **`--duration` is not optional in practice**: without it capture waits for a
   Ctrl+C that an agent session never sends, and under `--json` it prints
-  nothing at all while it waits, so it looks like a hang. Do not lead with this
-  command, and expect it to be unavailable in a sandbox.
+  nothing at all while it waits, so it looks like a hang. Two ways to get that
+  hang while believing you passed the flag: `--duration=30` (the equals form is
+  dropped) and `--duration abc` (a non-numeric value is discarded). Write
+  `--duration 30`. Do not lead with this command, and expect it to be
+  unavailable in a sandbox.
 
 ## Pitfalls
 
@@ -199,10 +211,13 @@ Handy flags: `--max-bytes <n>` caps a response (`apitap read`, `apitap browse`,
 - **Do not judge success by the exit code alone, and do not expect one error
   shape.** The reliable check is to read stdout, stderr, and the exit code
   together, then look at the payload:
-  - For every command in this file, a missing or malformed argument prints
-    `Error: <message>` on stderr and exits 1 even with `--json`. The same is
-    true when `replay` or `show` cannot find a skill file, and for anything
-    that throws mid-run. Do not assume `--json` redirects these to stdout.
+  - For every command in this file, a missing required argument prints a
+    message on stderr — usually `Error: <message>`, a bare usage line for
+    `apitap index` — and exits 1 even with `--json`. The same is true when
+    `replay` or `show` cannot find a skill file, and for anything that throws
+    mid-run. Do not assume `--json` redirects these to stdout. A *malformed*
+    flag value produces no error at all: it is silently dropped (see Quick
+    Reference).
   - Handled failures under `--json` print JSON on stdout and exit 1, but the
     shape varies by command: `{"error": ...}` from `read` and `discover`,
     `{"success": false, "reason": ...}` from `import`.

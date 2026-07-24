@@ -236,13 +236,34 @@ describe('hermes skill states behaviour the code actually has', () => {
     // auth/handoff.ts both do it via `launchBrowser` from capture/browser.js,
     // which is the module that imports playwright (dynamically, at that). So
     // guard the real entry points, not the library name.
-    const browserEntryPoints = /from ['"].*capture\/(browser|monitor|session)\.js['"]|launchBrowser|from ['"]playwright['"]/;
+    // auth/refresh.js is on this list because it is how replay/engine.ts
+    // acquired its browser path — the drift that round 3 caught.
+    // NOT statically guardable: browse.ts could become browser-capable by
+    // passing an authManager into its existing replayEndpoint call, with no
+    // new import to detect. If that changes, this guard will not tell you.
+    const browserEntryPoints = /from ['"].*capture\/(browser|monitor|session)\.js['"]|from ['"].*auth\/(refresh|handoff)\.js['"]|launchBrowser|refreshTokens|requestAuth|from ['"]playwright['"]/;
     for (const rel of ['read/index.ts', 'read/peek.ts', 'orchestration/browse.ts', 'discovery/index.ts']) {
       assert.ok(
         !browserEntryPoints.test(src(rel)),
         `src/${rel} now reaches a browser entry point — SKILL.md lists that path as never launching a browser`,
       );
     }
+  });
+
+  it('states the condition that actually gates the browser refresh', () => {
+    // SKILL.md's load-bearing conditional: replay opens a browser only when
+    // the skill file declares refreshable tokens or a refresh URL. That is
+    // one expression in auth/refresh.ts; if it grows a third term, the
+    // document's condition is incomplete.
+    const needsBrowser = src('auth/refresh.ts').match(/const needsBrowser = ([^;]+);/);
+    assert.ok(needsBrowser, 'auth/refresh.ts no longer computes needsBrowser — the replay caveat condition needs re-deriving');
+    // Equality, not a substring match: an added term must fail, and a
+    // contains-check would happily pass `somethingElse || <expected>`.
+    assert.equal(
+      needsBrowser[1].replace(/\s+/g, ' ').trim(),
+      'tokenNames.size > 0 || (skill.auth?.refreshUrl && !oauthRefreshed)',
+      `the browser-refresh condition changed to \`${needsBrowser[1].trim()}\` — SKILL.md says it is "refreshable tokens or a refresh URL"`,
+    );
   });
 
   it('keeps the replay-may-open-a-browser caveat while replay can refresh', () => {

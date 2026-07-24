@@ -229,6 +229,21 @@ describe('hermes skill states behaviour the code actually has', () => {
     );
   });
 
+  it('never lists a browser-driving command as one that never launches one', () => {
+    // Guards the document's own list, which the module-scanning test below
+    // cannot see: if someone adds capture/inspect/refresh/attach/replay to the
+    // "These never launch one" sentence, that is a false claim regardless of
+    // what any src/ module imports.
+    const neverLaunch = readSkill().match(/These never launch one:([\s\S]*?)\n\n/);
+    assert.ok(neverLaunch, 'SKILL.md no longer carries the "These never launch one" list');
+    for (const cmd of ['capture', 'inspect', 'refresh', 'attach', 'replay']) {
+      assert.ok(
+        !new RegExp(`\`apitap ${cmd}\``).test(neverLaunch[1]),
+        `SKILL.md lists 'apitap ${cmd}' as never launching a browser, but it can`,
+      );
+    }
+  });
+
   it('only claims browser-free for commands with no browser dependency', () => {
     // SKILL.md names the browser-driving commands and lists the rest as
     // never launching one. Checking for a `playwright` import is not enough:
@@ -275,11 +290,20 @@ describe('hermes skill states behaviour the code actually has', () => {
     const canRefresh = /from ['"]\.\.\/auth\/refresh\.js['"]/.test(engine) && /refreshTokens\(/.test(engine);
     const body = readSkill();
     if (canRefresh) {
+      // Pin the CONDITION, not a phrase. An earlier version of this guard
+      // required the words "re-mint expired", which locked in wording that
+      // was itself wrong — expiry is only one of three triggers.
       assert.match(
         body,
-        /re-mint expired/,
-        'replay/engine.ts still calls refreshTokens (which can launch a browser) but SKILL.md dropped the caveat that replay may open one',
+        /refreshable tokens/,
+        'replay/engine.ts still calls refreshTokens (which can launch a browser) but SKILL.md no longer states the refreshable-tokens condition that gates it',
       );
+      for (const trigger of ['--fresh', '401/403']) {
+        assert.ok(
+          body.includes(trigger),
+          `SKILL.md no longer names '${trigger}' as a replay refresh trigger, but engine.ts still refreshes on it`,
+        );
+      }
     } else {
       assert.fail(
         'replay/engine.ts no longer imports refreshTokens — replay may now be unconditionally browser-free, so SKILL.md can drop its caveat and this guard should be revisited',

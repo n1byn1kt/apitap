@@ -46,7 +46,11 @@ export interface BrowseGuidance {
   domain: string;
   url: string;
   task?: string;
-  /** Set when a saved skill file existed but could not be read (stale or tampered signature). */
+  /**
+   * Set when a saved skill file existed but could not be read or verified —
+   * usually a stale or tampered signature, but any readSkillFile failure
+   * (invalid JSON, schema violation, permissions) lands here too.
+   */
   skillFileError?: string;
 }
 
@@ -191,6 +195,11 @@ export async function browse(
   let source: 'disk' | 'discovered' | 'captured' = 'disk';
   let skillFileError: string | undefined;
 
+  // Every guidance exit must carry the skipped-skill-file reason — including
+  // results built by tryBridgeCapture, which never sees skillFileError.
+  const withSkillFileError = (result: BrowseResult): BrowseResult =>
+    !result.success && skillFileError ? { ...result, skillFileError } : result;
+
   if (cache?.has(domain)) {
     skill = cache.get(domain)!.skillFile;
     source = cache.get(domain)!.source;
@@ -216,7 +225,7 @@ export async function browse(
   if (!skill && !skipDiscovery) {
     try {
       const { discover } = await import('../discovery/index.js');
-      const discovery = await discover(fullUrl);
+      const discovery = await discover(fullUrl, { skipSsrf: options._skipSsrfCheck });
 
       if (discovery.skillFile && discovery.skillFile.endpoints.length > 0 &&
           (discovery.confidence === 'high' || discovery.confidence === 'medium')) {
@@ -227,7 +236,20 @@ export async function browse(
         const machineId = await getMachineId();
         const sigKey = deriveSigningKey(machineId);
         skill = signSkillFile(skill, sigKey);
-        const { writeSkillFile: writeSF } = await import('../skill/store.js');
+        const { writeSkillFile: writeSF, DEFAULT_SKILLS_DIR } = await import('../skill/store.js');
+        if (skillFileError) {
+          // The file on disk failed an integrity check. Overwriting it would
+          // destroy the evidence (and, for a stale-but-valid signature, a
+          // recoverable capture) — move it to .quarantine first, same place
+          // apitap doctor puts suspect files.
+          try {
+            const { quarantineSkill } = await import('../doctor/snapshot.js');
+            await quarantineSkill(skillsDir ?? DEFAULT_SKILLS_DIR, domain);
+          } catch {
+            // Quarantine is best-effort — self-healing still wins if the
+            // file vanished or can't be moved.
+          }
+        }
         await writeSF(skill, skillsDir);
         cache?.set(domain, skill, 'discovered');
       } else {
@@ -252,7 +274,7 @@ export async function browse(
         }
         // Try extension bridge before giving up
         const bridgeResult1 = await tryBridgeCapture(domain, fullUrl, options);
-        if (bridgeResult1) return bridgeResult1;
+        if (bridgeResult1) return withSkillFileError(bridgeResult1);
 
         return {
           success: false,
@@ -294,7 +316,7 @@ export async function browse(
     }
     // Try extension bridge before giving up
     const bridgeResult2 = await tryBridgeCapture(domain, fullUrl, options);
-    if (bridgeResult2) return bridgeResult2;
+    if (bridgeResult2) return withSkillFileError(bridgeResult2);
 
     return {
       success: false,
@@ -312,18 +334,18 @@ export async function browse(
   if (!match) {
     // Try extension bridge before giving up
     const bridgeResult3 = await tryBridgeCapture(domain, fullUrl, options);
-    if (bridgeResult3) return bridgeResult3;
+    if (bridgeResult3) return withSkillFileError(bridgeResult3);
 
     const hasCandidates = skill.endpoints.some(ep =>
       ep.method === 'GET' && REPLAYABLE_TIERS.has(ep.replayability?.tier ?? 'unknown'));
-    return {
+    return withSkillFileError({
       success: false,
       reason: hasCandidates ? 'path_not_captured' : 'no_replayable_endpoints',
       suggestion: 'capture_needed',
       domain,
       url: fullUrl,
       task,
-    };
+    });
   }
   const endpoint = match.endpoint;
 
@@ -337,7 +359,7 @@ export async function browse(
     if (contentType.includes('text/html')) {
       // Invalidate stale cache so next call reads fresh skill file from disk
       cache?.invalidate(domain);
-      return {
+      return withSkillFileError({
         success: false,
         reason: 'non_api_response',
         discoveryConfidence: source === 'discovered' ? 'medium' : undefined,
@@ -345,7 +367,7 @@ export async function browse(
         domain,
         url: fullUrl,
         task,
-      };
+      });
     }
 
     return {
@@ -363,16 +385,16 @@ export async function browse(
   } catch {
     // Try extension bridge before giving up
     const bridgeResult4 = await tryBridgeCapture(domain, fullUrl, options);
-    if (bridgeResult4) return bridgeResult4;
+    if (bridgeResult4) return withSkillFileError(bridgeResult4);
 
-    return {
+    return withSkillFileError({
       success: false,
       reason: 'replay_failed',
       suggestion: 'capture_needed',
       domain,
       url: fullUrl,
       task,
-    };
+    });
   }
 }
 

@@ -2308,6 +2308,11 @@ async function handleBrowse(positional: string[], flags: Record<string, string |
     console.log();
   } else {
     console.log(`  ✗ ${result.reason}`);
+    if (result.skillFileError) {
+      // A skipped skill file is a failed integrity check, not just a miss —
+      // say so on stderr rather than letting escalation hide it.
+      console.error(`  Warning: skipped the saved skill file for ${result.domain}: ${result.skillFileError}`);
+    }
     if (result.suggestion === 'capture_needed') {
       console.log(`\n  Recommendation: apitap capture ${result.url}\n`);
     }

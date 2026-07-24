@@ -207,9 +207,15 @@ values either, so a non-numeric one is discarded just as quietly.
   for a domain that already has a skill file, and fails with "No skill file
   found" otherwise.
 
-  So: on a desktop host with a header-auth site, `apitap capture` after a
-  manual sign-in is worth trying. Otherwise report that the site needs a human
-  login and stop, rather than routing around it.
+  And capture only shows a window when the environment sets `DISPLAY` — that
+  is the sole switch, and the CLI has no flag to override it. On macOS, on
+  headless servers, and in sandboxes, `DISPLAY` is unset, so capture runs
+  headless and nobody can sign in to it.
+
+  So the manual-sign-in route is worth trying only on a Linux desktop session
+  with `DISPLAY` set, against a site that authenticates by header. In every
+  other case, report that the site needs a human login and stop, rather than
+  routing around it.
 - `apitap replay` parameters are positional `key=value` arguments.
 - Sandboxed backends lose `~/.apitap` between runs, so saved skill files can
   vanish. Re-check with `apitap list` instead of assuming.

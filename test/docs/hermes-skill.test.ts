@@ -347,6 +347,26 @@ describe('hermes skill states behaviour the code actually has', () => {
     );
   });
 
+  it('ties the capture sign-in advice to the DISPLAY switch that governs it', () => {
+    // capture is headless unless DISPLAY is set, and no CLI flag overrides
+    // it — which is why the doc limits manual sign-in to a Linux desktop.
+    const monitor = src('capture/monitor.ts');
+    assert.match(
+      monitor,
+      /headless:\s*options\.headless \?\? \(process\.env\.DISPLAY \? false : true\)/,
+      'capture no longer keys headless off DISPLAY — SKILL.md limits the manual sign-in route on exactly that basis',
+    );
+    assert.ok(
+      !/flags\.head(ed|less)|flags\[['"]head(ed|less)['"]\]/.test(readFileSync(cliPath, 'utf8')),
+      'the CLI gained a headed/headless flag — SKILL.md says there is none, so the sign-in advice can be widened',
+    );
+    assert.match(
+      readSkill(),
+      /DISPLAY/,
+      'SKILL.md no longer explains the DISPLAY condition that decides whether a human can sign in to capture',
+    );
+  });
+
   it('warns about equals-form flags for as long as the parser drops them', () => {
     // Load-bearing: `--duration=30` being silently dropped puts capture back
     // in the indefinite SIGINT wait while the agent believes it passed the
@@ -375,6 +395,15 @@ describe('hermes skill states behaviour the code actually has', () => {
     assert.ok(
       readFallbackSucceeds,
       "browse's read fallback no longer returns success for any non-empty page — re-check what SKILL.md says about login walls",
+    );
+    // The other success:true path: after a replay, browse rejects only an
+    // HTML content-type. If it ever starts rejecting 401/403 too, a JSON
+    // login wall stops being reported as success and the doc overwarns.
+    const replayStep = browse.match(/\/\/ Step 5: Replay[\s\S]*?return \{\s*success: true/);
+    assert.ok(replayStep, 'browse.ts no longer has the Step 5 replay path this warning describes');
+    assert.ok(
+      !/status === 401|status === 403|status >= 400/.test(replayStep[0]),
+      'browse now screens replay status codes — a JSON 401/403 may no longer surface as success:true, so re-check the login-wall warning',
     );
     assert.match(
       readSkill(),

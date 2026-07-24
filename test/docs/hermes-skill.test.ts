@@ -134,3 +134,24 @@ describe('hermes skill documents the real CLI', () => {
     assert.match(body, /playwright install chromium/);
   });
 });
+
+describe('README documents the Hermes install', () => {
+  const readme = () => readFileSync(join(repoRoot, 'README.md'), 'utf8');
+
+  it('has a Use with Hermes section', () => {
+    assert.match(readme(), /^## Use with Hermes$/m);
+  });
+
+  it('gives the GitHub identifier form first, then the raw URL form', () => {
+    const body = readme();
+    const identifier = body.indexOf('hermes skills install n1byn1kt/apitap/skills/hermes/apitap');
+    const rawUrl = body.indexOf('https://raw.githubusercontent.com/n1byn1kt/apitap/main/skills/hermes/apitap/SKILL.md');
+    assert.ok(identifier > -1, 'missing the GitHub identifier install form');
+    assert.ok(rawUrl > -1, 'missing the raw URL install form');
+    assert.ok(identifier < rawUrl, 'the GitHub identifier form carries provenance — document it first');
+  });
+
+  it('points at a path that exists in the repo', () => {
+    assert.ok(existsSync(skillPath));
+  });
+});

@@ -85,6 +85,27 @@ That's it. 12 MCP tools, ready to go. Requires Node.js 20+.
 > ```
 > The `read`, `peek`, `discover`, and `import` tools work without it.
 
+## Use with Hermes
+
+[Hermes Agent](https://github.com/NousResearch/hermes-agent) users can install ApiTap as a skill:
+
+```bash
+hermes skills install n1byn1kt/apitap/skills/hermes/apitap
+```
+
+Or straight from the raw file:
+
+```bash
+hermes skills install https://raw.githubusercontent.com/n1byn1kt/apitap/main/skills/hermes/apitap/SKILL.md
+```
+
+The skill drives the `apitap` CLI through Hermes' `terminal` toolset, so it
+needs `npm install -g @apitap/core` on the machine running Hermes. Once
+installed it is also a slash command: `/apitap read <url>`.
+
+For heavy use, wire the MCP server into `config.yaml` instead — the skill's
+last section has the block.
+
 ## Quick Start
 
 ### Import APIs instantly

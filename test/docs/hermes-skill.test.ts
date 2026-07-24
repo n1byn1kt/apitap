@@ -298,12 +298,20 @@ describe('hermes skill states behaviour the code actually has', () => {
         /refreshable tokens/,
         'replay/engine.ts still calls refreshTokens (which can launch a browser) but SKILL.md no longer states the refreshable-tokens condition that gates it',
       );
-      for (const trigger of ['--fresh', '401/403']) {
+      for (const trigger of ['--fresh', '401/403', 'expired']) {
         assert.ok(
           body.includes(trigger),
           `SKILL.md no longer names '${trigger}' as a replay refresh trigger, but engine.ts still refreshes on it`,
         );
       }
+      // Both disjuncts of needsBrowser must survive in the prose, not just
+      // the first: a reader who only learns about refreshable tokens will
+      // wrongly conclude a refreshUrl-only skill file is browser-free.
+      assert.match(
+        body,
+        /refresh URL/,
+        'SKILL.md dropped the refresh-URL half of the browser-refresh condition, but needsBrowser still tests skill.auth?.refreshUrl',
+      );
     } else {
       assert.fail(
         'replay/engine.ts no longer imports refreshTokens — replay may now be unconditionally browser-free, so SKILL.md can drop its caveat and this guard should be revisited',
@@ -354,6 +362,24 @@ describe('hermes skill states behaviour the code actually has', () => {
       readSkill(),
       /never\s+`--max-bytes=50000`/,
       'parseArgs still drops --flag=value, but SKILL.md no longer warns about it',
+    );
+  });
+
+  it('warns that browse reports success on a login wall, both ways it can', () => {
+    // browse returns success:true for a JSON 401/403 (it only rejects an HTML
+    // content-type after replay) and success:true again on the cold-start
+    // read fallback, which accepts any non-empty non-spa-shell page including
+    // a login form. Agents that trust the flag mistake both for data.
+    const browse = src('orchestration/browse.ts');
+    const readFallbackSucceeds = /readResult\.content\.trim\(\)\.length > 0 && readResult\.metadata\.source !== 'spa-shell'/.test(browse);
+    assert.ok(
+      readFallbackSucceeds,
+      "browse's read fallback no longer returns success for any non-empty page — re-check what SKILL.md says about login walls",
+    );
+    assert.match(
+      readSkill(),
+      /"success": true` from browse means "I got\s+something"/,
+      'browse still reports success:true for login walls, but SKILL.md dropped the warning',
     );
   });
 

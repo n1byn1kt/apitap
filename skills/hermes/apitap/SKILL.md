@@ -41,8 +41,9 @@ Where it sits next to tools you already have:
 
 - **vs `web_extract`** — that returns generic page text; ApiTap returns the
   site's own structured JSON once an endpoint is known.
-- **vs browser automation** — no browser process, no selectors, no waiting on
-  a page to settle.
+- **vs browser automation** — no selectors, no waiting on a page to settle,
+  and normally no browser process at all (the exception is the credential
+  re-mint described in Setup).
 - **vs a hand-written scraper** — the artifact is a signed skill file on disk,
   reusable by every later session on that machine. Signatures are
   machine-bound, so a skill file does not transfer to another machine as-is.
@@ -69,9 +70,11 @@ and — when you need structured records — `apitap discover` or `apitap import
 4. Still "command not found"? The npm global bin directory is not on PATH. Run
    `npm prefix -g` and invoke the binary as `<prefix>/bin/apitap`.
 5. Some commands drive a browser: `apitap capture` and `apitap inspect` launch
-   one through Playwright, `apitap refresh` launches one unless refreshing the
-   credentials turns out to be a pure OAuth exchange, and `apitap attach`
-   connects to a Chrome you already have running. Before using any of them, run
+   one through Playwright, `apitap refresh` launches one under the same
+   condition as replay below (refreshable tokens, or a refresh URL that an
+   OAuth exchange did not already satisfy) and otherwise does not, and
+   `apitap attach` connects to a Chrome you already have running. Before using
+   any of them, run
    `npx playwright install chromium`. These never launch one: `apitap peek`,
    `apitap read`, `apitap browse`, `apitap search`, `apitap list`,
    `apitap show`, `apitap discover`, `apitap import`, `apitap stats`.
@@ -189,16 +192,24 @@ values either, so a non-numeric one is discarded just as quietly.
   be.
 - **Login walls need a human at a real browser.** `apitap peek` reports
   `"recommendation": "auth_required"` on a 401/407; `apitap replay` returns
-  `"error": "Authentication required"` on a 401/403, and warns when an endpoint
-  wants credentials that are not stored. The fix is `apitap capture <domain>`
-  on a machine with a visible browser: the person signs in, and capture stores
-  the credentials it extracts. That is what `replay` itself recommends. What
-  will *not* work: `apitap refresh <domain>` is not a sign-in flow — it
-  re-mints tokens for a domain that already has a skill file, and fails with
-  "No skill file found" otherwise. There is also a dedicated login handoff, but
-  only as the `apitap_auth_request` MCP tool, with no CLI equivalent. On a
-  headless host, report that the site needs a human login and stop rather than
-  routing around it.
+  `"error": "Authentication required"` on a 401/403, and separately warns when
+  an endpoint wants credentials that are not stored, telling you to run
+  `apitap capture <domain>`.
+
+  That capture route works only for header-based auth. Capture extracts and
+  stores `Authorization`, `x-api-key`, and high-entropy custom headers it sees
+  after the person signs in — it does **not** persist the browser session, so a
+  site that authenticates with cookies alone will not be fixed this way. The
+  handoff that does store a session exists only as the `apitap_auth_request`
+  MCP tool, with no CLI equivalent.
+
+  `apitap refresh <domain>` is not a sign-in flow either: it re-mints tokens
+  for a domain that already has a skill file, and fails with "No skill file
+  found" otherwise.
+
+  So: on a desktop host with a header-auth site, `apitap capture` after a
+  manual sign-in is worth trying. Otherwise report that the site needs a human
+  login and stop, rather than routing around it.
 - `apitap replay` parameters are positional `key=value` arguments.
 - Sandboxed backends lose `~/.apitap` between runs, so saved skill files can
   vanish. Re-check with `apitap list` instead of assuming.
@@ -229,10 +240,12 @@ values either, so a non-numeric one is discarded just as quietly.
   - `browse`, `peek`, `search`, `list` and `stats` **exit 0 even when they did
     not get what you wanted**. Judge those on the payload: `browse` on
     `"success": false` plus its `reason`/`suggestion`, `peek` on
-    `recommendation`, `search` on `found`. `browse` is the sharp edge here — a
-    login wall can come back as `"success": true` with the 401/403 body inside
-    `data` (an HTML login page instead reports `"success": false`), so check
-    `data` for `"error": "Authentication required"` as well.
+    `recommendation`, `search` on `found`. `browse` is the sharp edge here: a
+    login wall routinely comes back as `"success": true` — either with the
+    401/403 body inside `data`, or, on a cold start, as the login page's own
+    text from the read fallback. `"success": true` from browse means "I got
+    something", not "I got what you asked for". Inspect `data` before trusting
+    it, including for `"error": "Authentication required"`.
   - `replay` exits 0 on an HTTP error from the target site; the status is in
     the response payload.
 - On success, `--json` makes every table command in Quick Reference print

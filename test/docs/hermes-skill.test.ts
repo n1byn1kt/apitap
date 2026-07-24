@@ -237,10 +237,31 @@ describe('hermes skill states behaviour the code actually has', () => {
     // which is the module that imports playwright (dynamically, at that). So
     // guard the real entry points, not the library name.
     const browserEntryPoints = /from ['"].*capture\/(browser|monitor|session)\.js['"]|launchBrowser|from ['"]playwright['"]/;
-    for (const rel of ['read/index.ts', 'read/peek.ts', 'orchestration/browse.ts', 'replay/engine.ts', 'discovery/index.ts']) {
+    for (const rel of ['read/index.ts', 'read/peek.ts', 'orchestration/browse.ts', 'discovery/index.ts']) {
       assert.ok(
         !browserEntryPoints.test(src(rel)),
         `src/${rel} now reaches a browser entry point — SKILL.md lists that path as never launching a browser`,
+      );
+    }
+  });
+
+  it('keeps the replay-may-open-a-browser caveat while replay can refresh', () => {
+    // replay is deliberately NOT in the browser-free list above: engine.ts
+    // calls refreshTokens, which launches Playwright when a skill file
+    // declares refreshable tokens or a refresh URL. The document has to keep
+    // saying so for as long as that call exists.
+    const engine = src('replay/engine.ts');
+    const canRefresh = /from ['"]\.\.\/auth\/refresh\.js['"]/.test(engine) && /refreshTokens\(/.test(engine);
+    const body = readSkill();
+    if (canRefresh) {
+      assert.match(
+        body,
+        /re-mint expired/,
+        'replay/engine.ts still calls refreshTokens (which can launch a browser) but SKILL.md dropped the caveat that replay may open one',
+      );
+    } else {
+      assert.fail(
+        'replay/engine.ts no longer imports refreshTokens — replay may now be unconditionally browser-free, so SKILL.md can drop its caveat and this guard should be revisited',
       );
     }
   });

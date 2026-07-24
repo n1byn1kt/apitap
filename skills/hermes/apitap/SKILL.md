@@ -20,7 +20,9 @@ metadata:
 Sites render themselves from their own JSON APIs. ApiTap gets you that JSON
 instead of HTML: pull page content with no browser, or record a site's API
 traffic once, save it as a signed skill file, and replay those endpoints on
-demand with a plain HTTP call — no browser anywhere in the replay path.
+demand with a plain HTTP call. Replay is an ordinary `fetch()` — the one
+exception is that it may open a browser to re-mint expired credentials, see
+Setup.
 
 **Most tasks only need `apitap read <url>`.** Start there and work down only
 when it falls short.
@@ -28,7 +30,7 @@ when it falls short.
 | Path | Typical tokens | Needs a browser |
 |---|---|---|
 | `apitap peek` — HTTP triage, headers only | ~0 | no |
-| `apitap replay` — saved endpoint | 1–5K | no |
+| `apitap replay` — saved endpoint | 1–5K | only to re-mint expired auth |
 | `apitap read` — page text | 0–10K typical, unbounded | no |
 | driving a real browser | 50–200K | yes |
 
@@ -71,8 +73,14 @@ and — when you need structured records — `apitap discover` or `apitap import
    to a Chrome you already have running. Before using any of them, run
    `npx playwright install chromium`. These never launch one: `apitap peek`,
    `apitap read`, `apitap browse`, `apitap search`, `apitap list`,
-   `apitap show`, `apitap replay`, `apitap discover`, `apitap import`,
-   `apitap stats`.
+   `apitap show`, `apitap discover`, `apitap import`, `apitap stats`.
+
+   `apitap replay` is the in-between case. Normally it is a plain `fetch()`
+   with no browser. But when a saved endpoint's stored credentials are expired
+   — or you pass `--fresh` — replay tries to re-mint them, and if the skill
+   file declares refreshable tokens or a refresh URL that re-mint launches
+   Playwright. So replay on an authenticated domain can open a browser, and
+   fails in a sandbox that has none. Replay of a public endpoint never does.
 
 Sandboxed terminal backends (Docker, Modal) are the weak spot. A global npm
 install may be refused, and an ephemeral filesystem loses both the install and
@@ -140,7 +148,9 @@ Handy flags: `--max-bytes <n>` caps a response (`apitap read`, `apitap browse`,
 4. `apitap search <query> --json` to find the domain or endpoint, then
    `apitap show <domain> --json` to read the endpoint ids.
 5. `apitap replay <domain> <endpoint-id> key=value --json` — the cheapest
-   structured data available: no browser, no HTML, just the response.
+   structured data available: no HTML, just the response. On a public endpoint
+   this is a plain `fetch()`; on an authenticated one it may open a browser to
+   re-mint expired credentials (see Setup).
 
 **When you cannot tell which case you are in.**
 
@@ -167,8 +177,8 @@ Handy flags: `--max-bytes <n>` caps a response (`apitap read`, `apitap browse`,
   `"recommendation": "auth_required"` on a 401/407; `apitap replay` returns
   `"error": "Authentication required"` on a 401/403. Neither can be resolved
   from the command line: `apitap refresh <domain>` is not a sign-in flow — it
-  re-mints tokens for a domain that *already* has a skill file and stored
-  session, and it fails with "No skill file found" otherwise. The interactive
+  re-mints tokens for a domain that *already* has a skill file, and fails with
+  "No skill file found" otherwise. The interactive
   human-login handoff exists only as the `apitap_auth_request` MCP tool. From
   the CLI, report that the site needs a human login and stop. Do not try to
   route around it.
@@ -190,9 +200,9 @@ Handy flags: `--max-bytes <n>` caps a response (`apitap read`, `apitap browse`,
   shape.** The reliable check is to read stdout, stderr, and the exit code
   together, then look at the payload:
   - For every command in this file, a missing or malformed argument prints
-    `Error: <message>` on stderr and exits 1 even with `--json` — that check
-    runs before the flag is read. The same is true when `replay` or `show`
-    cannot find a skill file, and for anything that throws mid-run.
+    `Error: <message>` on stderr and exits 1 even with `--json`. The same is
+    true when `replay` or `show` cannot find a skill file, and for anything
+    that throws mid-run. Do not assume `--json` redirects these to stdout.
   - Handled failures under `--json` print JSON on stdout and exit 1, but the
     shape varies by command: `{"error": ...}` from `read` and `discover`,
     `{"success": false, "reason": ...}` from `import`.

@@ -166,6 +166,8 @@ describe('hermes skill documents the real CLI', () => {
     assert.match(body, /playwright install chromium/);
   });
 
+  // Existence only, not per-command: a flag read by any handler passes. So
+  // dropping --max-bytes from replay while read still reads it stays green.
   it('documents flags that actually exist in src/cli.ts', () => {
     const cliSource = readFileSync(cliPath, 'utf8');
     const flags = documentedFlags(readSkill());

@@ -1,6 +1,6 @@
 ---
 name: apitap
-description: Use when the user wants data from a website or a web API without driving a browser — free HEAD triage, no-browser page extraction, and direct replay of a site's own API endpoints from saved skill files. Browser capture is the last resort. Try this BEFORE Playwright or browser tools. Runs as a CLI with JSON output on every command.
+description: Use when the user wants data from a website or a web API without driving a browser — free HEAD triage, no-browser page extraction, and direct replay of a site's own API endpoints from saved skill files. Browser capture is the last resort. Try this BEFORE Playwright or browser tools. Runs as a CLI with JSON output on every data command.
 version: 1.0.0
 author: ApiTap Contributors
 license: Apache-2.0
@@ -19,9 +19,8 @@ metadata:
 
 Sites render themselves from their own JSON APIs. ApiTap gets you that JSON
 instead of HTML: pull page content with no browser, or record a site's API
-traffic once, save it as a portable signed skill file, and replay those
-endpoints forever with a plain HTTP call — no browser anywhere in the replay
-path.
+traffic once, save it as a signed skill file, and replay those endpoints
+forever with a plain HTTP call — no browser anywhere in the replay path.
 
 **Most tasks only need `apitap read <url>`.** Start there and work down only
 when it falls short.
@@ -40,9 +39,8 @@ Where it sits next to tools you already have:
 - **vs browser automation** — no browser process, no selectors, no waiting on
   a page to settle.
 - **vs a hand-written scraper** — the artifact is a signed skill file on disk,
-  reusable across sessions. Signatures are machine-bound, so move one to
-  another machine with `apitap import` (re-signs it locally) rather than
-  copying the raw file.
+  reusable by every later session on that machine. Signatures are
+  machine-bound, so a skill file does not transfer to another machine as-is.
 
 Requires `@apitap/core` 2.2.0 or newer.
 
@@ -161,8 +159,10 @@ Handy flags: `--max-bytes <n>` caps a response (`apitap read`, `apitap browse`,
 
 ## Verification
 
-- Any command failure — `--json` or not — exits non-zero and prints an
-  `Error: <message>` line on stderr.
+- Failures exit non-zero. Without `--json` the reason is an `Error: <message>`
+  line on stderr; with `--json` most commands instead print
+  `{"success": false, "reason": ...}` on stdout. Check both channels before
+  reporting a failure as unexplained.
 - On success, `--json` makes every table command in Quick Reference print
   parseable JSON on stdout. `apitap index build` is the exception: it has no
   `--json` mode and always prints human-readable text.

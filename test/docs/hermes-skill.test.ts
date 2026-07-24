@@ -23,10 +23,11 @@ describe('hermes skill file', () => {
   it('has the frontmatter Hermes needs', () => {
     const fm = frontmatter(readSkill());
     assert.equal(fm.name, 'apitap');
-    assert.equal(fm.version, '1.0.0');
+    assert.match(fm.version, /^\d+\.\d+\.\d+$/);
     assert.equal(fm.license, 'Apache-2.0');
     assert.equal(fm.author, 'ApiTap Contributors');
-    assert.deepEqual(fm.platforms, ['linux', 'macos', 'windows']);
+    // No windows: the Setup steps use `command -v` and a POSIX <prefix>/bin path.
+    assert.deepEqual(fm.platforms, ['linux', 'macos']);
     assert.deepEqual(fm.metadata.hermes.requires_toolsets, ['terminal']);
     assert.ok(Array.isArray(fm.metadata.hermes.tags) && fm.metadata.hermes.tags.length > 0);
   });
@@ -195,6 +196,80 @@ describe('hermes skill documents the real CLI', () => {
       fnBody,
       /\.indexOf\(['"]=['"]\)/,
       'handleReplay no longer splits params on "=" — replay may have moved off positional key=value, but SKILL.md still documents that shape',
+    );
+  });
+});
+
+// The document's factual claims about runtime behaviour — the class of defect
+// that name-only guards above cannot catch. Each test pins one claim to the
+// source that makes it true, so the claim fails loudly when the code moves.
+describe('hermes skill states behaviour the code actually has', () => {
+  const src = (rel: string) => readFileSync(join(repoRoot, 'src', rel), 'utf8');
+
+  it('names MCP tools that the MCP server registers', () => {
+    const yamlBlock = readSkill().match(/```yaml\n([\s\S]*?)```/);
+    assert.ok(yamlBlock, 'SKILL.md no longer has the MCP config block');
+    const documented = [...yamlBlock[1].matchAll(/- (apitap_[a-z_]+)/g)].map((m) => m[1]);
+    assert.ok(documented.length > 0, 'MCP block documents no tools');
+    const mcpSource = src('mcp.ts');
+    for (const tool of documented) {
+      assert.ok(
+        mcpSource.includes(`'${tool}'`) || mcpSource.includes(`"${tool}"`),
+        `SKILL.md's MCP include list names '${tool}', which src/mcp.ts does not register — a Hermes tools.include filter naming a nonexistent tool silently exposes nothing`,
+      );
+    }
+  });
+
+  it('quotes the real signature-expiry window', () => {
+    const days = src('skill/store.ts').match(/MAX_SIGNATURE_AGE_DAYS\s*=\s*(\d+)/);
+    assert.ok(days, 'MAX_SIGNATURE_AGE_DAYS is gone from src/skill/store.ts');
+    assert.ok(
+      readSkill().includes(`${days[1]} days`),
+      `SKILL.md must state the real signature expiry (${days[1]} days) — it drifted from src/skill/store.ts`,
+    );
+  });
+
+  it('only claims browser-free for commands with no browser dependency', () => {
+    // SKILL.md tells agents capture/refresh/attach drive a browser and nothing
+    // else does. That holds only while Playwright stays out of these paths.
+    for (const rel of ['read/index.ts', 'read/peek.ts', 'orchestration/browse.ts', 'replay/engine.ts', 'discovery/index.ts']) {
+      assert.ok(
+        !/from ['"]playwright['"]/.test(src(rel)),
+        `src/${rel} now imports playwright — SKILL.md claims that path is browser-free`,
+      );
+    }
+  });
+
+  it('warns about capture blocking, for as long as capture blocks', () => {
+    const monitor = src('capture/monitor.ts');
+    const blocksOnSigint = /else\s*\{\s*await new Promise<void>\(resolve => \{\s*process\.once\('SIGINT', resolve\);/.test(monitor);
+    assert.ok(
+      blocksOnSigint,
+      'capture no longer waits indefinitely on SIGINT — SKILL.md still tells agents --duration is mandatory, so re-check that warning',
+    );
+    assert.match(
+      readSkill(),
+      /--duration\b/,
+      'capture blocks until SIGINT without --duration, but SKILL.md never documents --duration',
+    );
+  });
+
+  it('confines the auth_required string to the commands that emit it', () => {
+    // SKILL.md tells agents peek reports auth_required and replay does not.
+    assert.match(src('read/peek.ts'), /'auth_required'/, "peek no longer emits 'auth_required' — SKILL.md says it does");
+    assert.ok(
+      !/'auth_required'/.test(src('replay/engine.ts')),
+      "replay/engine.ts now emits 'auth_required' — SKILL.md tells agents replay reports 'Authentication required' instead",
+    );
+  });
+
+  it('keeps index build outside the --json contract', () => {
+    const cliSource = readFileSync(cliPath, 'utf8');
+    const fnMatch = cliSource.match(/async function handleIndex\([\s\S]*?\n\}/);
+    assert.ok(fnMatch, 'src/cli.ts no longer has handleIndex');
+    assert.ok(
+      !/flags\.json/.test(fnMatch[0]),
+      'handleIndex now reads flags.json — SKILL.md documents `apitap index build` as the one command with no --json mode',
     );
   });
 });

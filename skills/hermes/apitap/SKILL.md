@@ -75,9 +75,10 @@ and — when you need structured records — `apitap discover` or `apitap import
    when none is found (`--launch` forces a launch), `apitap refresh` launches one under the same
    condition as replay below (refreshable tokens, or a refresh URL that an
    OAuth exchange did not already satisfy) and otherwise does not, and
-   `apitap attach` connects to a Chrome you already have running. Before using
-   any of them, run
-   `npx playwright install chromium`. These never launch one: `apitap peek`,
+   `apitap attach` connects to a Chrome you already have running over plain
+   CDP and needs no Playwright browser at all. Before using capture, inspect
+   or refresh, run `npx playwright install chromium` in case the launch
+   fallback is needed. These never launch one: `apitap peek`,
    `apitap read`, `apitap browse`, `apitap search`, `apitap list`,
    `apitap show`, `apitap discover`, `apitap import`, `apitap stats`.
 
@@ -121,9 +122,9 @@ always prints human-readable text.
 
 | Command | What it does |
 |---|---|
-| `apitap peek <url>` | Triage from HTTP headers: status, framework, bot protection, and a recommended next step. Sends a HEAD, falling back to a GET if the HEAD errors. The result is built from headers only either way, so it stays near-free in tokens — but the GET fallback does download up to 512KB before discarding the body, so it is not always free in bandwidth. |
+| `apitap peek <url>` | Triage from HTTP headers: status, framework, bot protection, and a recommended next step. Sends a HEAD, falling back to a GET if the HEAD errors. The result is built from headers only either way, so it stays near-free in tokens — but the GET fallback downloads the entire response body before discarding it, so it is not free in bandwidth on large pages. |
 | `apitap read <url>` | Extract page content without a browser. Site-aware decoders for Reddit, Hacker News, YouTube, Wikipedia and more; generic HTML extraction otherwise. Unbounded unless you pass `--max-bytes <n>`. |
-| `apitap browse <url>` | One-shot escalation — replays a saved skill file if one matches, else tries discovery, else falls back to reading the page. Never launches a browser; tells you when a capture is the only way forward. |
+| `apitap browse <url>` | One-shot escalation — replays a saved skill file if one matches; with no saved file it tries discovery, then falls back to reading the page. When a saved file exists but does not cover the requested path, browse stops with guidance (`path_not_captured`) instead of escalating further. Never launches a browser; tells you when a capture is the only way forward. |
 | `apitap search <query>` | Search saved skill files for a domain or an endpoint. |
 | `apitap list` | List every saved skill file. |
 | `apitap show <domain>` | Show the endpoints saved for one domain. Use `--json` — the human output omits the endpoint ids that `replay` needs. |
@@ -238,10 +239,10 @@ values either, so a non-numeric one is discarded just as quietly.
   file is refreshed: re-capture the domain, or re-import its spec with
   `apitap import <file-or-url>` — a plain re-import replaces the unreadable
   file, no extra flag needed. An unreadable file also affects `apitap browse`
-  for that domain, and the behaviour depends on the version. On 2.2.0 browse
-  aborts: an `Error:` on stderr and no JSON at all, so if `browse --json`
-  prints nothing, check `apitap show <domain>` before assuming the site is at
-  fault. Newer builds skip the bad file and keep escalating instead — the JSON
+  for that domain, and the behaviour depends on the version. Releases up to
+  and including npm 2.2.0 abort browse: an `Error:` on stderr and no JSON at
+  all, so if `browse --json` prints nothing, check `apitap show <domain>`
+  before assuming the site is at fault. Later builds skip the bad file and keep escalating instead — the JSON
   guidance then carries a `skillFileError` field saying why the saved file was
   skipped (and the reason `unreadable_skill_file` when nothing else worked),
   and the original file is preserved under `~/.apitap/skills/.quarantine/`

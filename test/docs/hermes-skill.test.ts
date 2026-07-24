@@ -419,7 +419,7 @@ describe('hermes skill states behaviour the code actually has', () => {
       parser[0].includes('rest[i].slice(2)'),
       'parseArgs no longer takes the whole token as the flag key — re-verify whether --flag=value is still dropped',
     );
-    const literals = parser[0].match(/'[^'\n]*'|"[^"\n]*"|\/[^/\n ]+\//g) ?? [];
+    const literals = parser[0].match(/'[^'\n]*'|"[^"\n]*"|`[^`\n]*`|\/[^/\n ]+\//g) ?? [];
     assert.ok(
       !literals.some(l => l.includes('=')),
       'parseArgs now mentions "=" in a literal — it may understand --flag=value, so re-verify the SKILL.md equals-form warning',
@@ -439,16 +439,27 @@ describe('hermes skill states behaviour the code actually has', () => {
     // 2.2.0 abort and this skip-and-escalate contract; if either side
     // changes, the passage needs re-deriving.
     const browse = src('orchestration/browse.ts');
-    assert.match(browse, /skillFileError/,
-      'browse.ts no longer carries skillFileError — SKILL.md still describes skip-and-escalate on unreadable files');
+    // Pin the mechanism, not just the identifier: the catch around
+    // readSkillFile is what turns abort-on-unreadable into skip-and-escalate.
+    // If the catch goes, `skillFileError` could survive as a dead field while
+    // the behaviour reverts.
+    assert.match(browse, /catch\s*\([^)]*\)\s*\{[^}]*skillFileError =/,
+      'browse.ts no longer catches readSkillFile failures into skillFileError — it may abort on unreadable files again, so re-derive the SKILL.md passage');
     assert.match(browse, /'unreadable_skill_file'/,
       "browse.ts no longer emits reason 'unreadable_skill_file' — SKILL.md still documents it");
     assert.match(browse, /preserveSkillFile/,
       'browse.ts no longer preserves the unreadable file before overwriting — SKILL.md still promises a .quarantine copy');
+    // The directory name SKILL.md prints comes from doctor/snapshot.ts.
+    assert.match(src('doctor/snapshot.ts'), /QUARANTINE_DIR = '\.quarantine'/,
+      "the quarantine directory is no longer '.quarantine' — SKILL.md's ~/.apitap/skills/.quarantine/ path is stale");
     assert.match(readSkill(), /skillFileError/,
       'browse reports skillFileError on skipped files, but SKILL.md never mentions it');
     assert.match(readSkill(), /\.quarantine/,
       'browse preserves skipped files under .quarantine, but SKILL.md never says where');
+    // Both halves of the dual-version passage are load-bearing: the abort
+    // wording for the npm 2.2.0 release, the skip wording for later builds.
+    assert.match(readSkill(), /npm 2\.2\.0 abort browse/,
+      'SKILL.md dropped the 2.2.0 abort behaviour — agents on the npm release still hit it');
   });
 
   it('warns about the discover --json --save double document while it prints one', () => {
@@ -458,10 +469,20 @@ describe('hermes skill states behaviour the code actually has', () => {
     // about it. If the CLI ever collapses this to a single envelope, the
     // warning becomes false and should go.
     const cliSource = readFileSync(cliPath, 'utf8');
+    // Scope to handleDiscover — the same snippet elsewhere in cli.ts must not
+    // keep this green — and pin BOTH prints: the warning is only true while
+    // the result document AND the {"saved"} document are separate writes.
+    const handler = cliSource.match(/async function handleDiscover\([\s\S]*?\n\}/);
+    assert.ok(handler, 'src/cli.ts no longer has handleDiscover — re-derive the two-JSON warning');
     assert.match(
-      cliSource,
-      /JSON\.stringify\(\{ saved: path \}\)/,
+      handler[0],
+      /console\.log\(JSON\.stringify\(\{ saved: path \}\)\)/,
       'discover --json --save no longer prints a separate {"saved"} document — drop the two-JSON warning from SKILL.md',
+    );
+    assert.match(
+      handler[0],
+      /console\.log\(JSON\.stringify\(\{ \.\.\.result/,
+      'handleDiscover no longer prints the result as its own document — the SKILL.md two-document warning is stale',
     );
     assert.match(
       readSkill(),

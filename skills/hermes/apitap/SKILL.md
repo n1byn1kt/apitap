@@ -235,7 +235,10 @@ values either, so a non-numeric one is discarded just as quietly.
   with an invalid-signature error. Either way `apitap replay` refuses until the
   file is refreshed: re-capture the domain, or re-import its spec with
   `apitap import <file-or-url>` — a plain re-import replaces the unreadable
-  file, no extra flag needed.
+  file, no extra flag needed. An unreadable file can also stop `apitap browse`
+  for that domain: on 2.2.0 it aborts with an `Error:` on stderr and no JSON at
+  all, so if `browse --json` prints nothing, check `apitap show <domain>`
+  before assuming the site is at fault.
 
 ## Verification
 

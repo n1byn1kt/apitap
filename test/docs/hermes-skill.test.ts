@@ -75,3 +75,62 @@ describe('hermes skill file', () => {
     assert.ok(!invisible.test(readSkill()));
   });
 });
+
+const cliPath = join(repoRoot, 'src', 'cli.ts');
+
+/** Commands the real CLI dispatches on, parsed from its switch statement. */
+function cliCommands(): Set<string> {
+  const source = readFileSync(cliPath, 'utf8');
+  const found = new Set([...source.matchAll(/^\s*case '([a-z][a-z-]*)':/gm)].map((m) => m[1]));
+  // Sanity-check the parse itself before trusting it as an oracle.
+  for (const anchor of ['read', 'peek', 'replay', 'capture', 'browse']) {
+    assert.ok(found.has(anchor), `CLI parse looks wrong — no case for '${anchor}'`);
+  }
+  return found;
+}
+
+/** Every `apitap <cmd>` that appears in a code span or fenced code block. */
+function documentedCommands(source: string): string[] {
+  const codeChunks = [
+    ...[...source.matchAll(/`([^`\n]+)`/g)].map((m) => m[1]),
+    ...[...source.matchAll(/```[a-z]*\n([\s\S]*?)```/g)].map((m) => m[1]),
+  ];
+  const commands = new Set<string>();
+  for (const chunk of codeChunks) {
+    for (const match of chunk.matchAll(/\bapitap ([a-z][a-z-]*)/g)) commands.add(match[1]);
+  }
+  return [...commands].sort();
+}
+
+describe('hermes skill documents the real CLI', () => {
+  it('documents commands that actually exist', () => {
+    const documented = documentedCommands(readSkill());
+    assert.ok(documented.length >= 8, `expected the quick reference to cover the core commands, got ${documented.length}`);
+    const real = cliCommands();
+    for (const cmd of documented) {
+      assert.ok(real.has(cmd), `SKILL.md documents 'apitap ${cmd}', which src/cli.ts does not dispatch`);
+    }
+  });
+
+  it('covers the cold-start path and the replay path', () => {
+    const documented = new Set(documentedCommands(readSkill()));
+    for (const cmd of ['peek', 'read', 'discover', 'import', 'search', 'show', 'replay', 'browse', 'capture', 'list', 'stats']) {
+      assert.ok(documented.has(cmd), `quick reference is missing 'apitap ${cmd}'`);
+    }
+  });
+
+  it('leads with the no-browser path, not capture', () => {
+    const body = readSkill();
+    const firstRead = body.indexOf('apitap read');
+    const firstCapture = body.indexOf('apitap capture');
+    assert.ok(firstRead > -1 && firstCapture > -1);
+    assert.ok(firstRead < firstCapture, 'capture must not appear before read');
+  });
+
+  it('states the package floor and the browser prerequisite', () => {
+    const body = readSkill();
+    assert.match(body, /@apitap\/core/);
+    assert.match(body, /2\.2\.0/);
+    assert.match(body, /playwright install chromium/);
+  });
+});

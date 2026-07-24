@@ -478,10 +478,37 @@ describe('browse with bridge escalation', () => {
     assert.ok(result !== undefined);
     assert.equal(result.success, false);
     if (!result.success) {
-      assert.match(
-        JSON.stringify(result),
-        /signature|unreadable|tampered/i,
-        'browse should say why the saved skill file was skipped',
+      assert.equal(result.reason, 'unreadable_skill_file');
+      // Assert the field itself, not just the reason string — the reason
+      // alone contains "unreadable", so a looser match would still pass if
+      // the explanation were dropped.
+      assert.ok(result.skillFileError, 'browse must carry why the file was skipped');
+      assert.match(result.skillFileError, /signature/i);
+    }
+  });
+
+  it('still explains a skipped skill file when discovery runs and finds nothing', async () => {
+    // The reason rides more than one exit. Discovery running (rather than
+    // being skipped) leaves through no_replayable_endpoints, which dropped
+    // the explanation in the first version of this fix.
+    const machineId = await getMachineId();
+    const sigKey = deriveSigningKey(machineId);
+    const signed = signSkillFile(makeSkill('localhost', baseUrl, [
+      { id: 'get-api-search', method: 'GET', path: '/api/search' },
+    ]), sigKey);
+    signed.signature = 'deadbeef'.repeat(8);
+    await writeSkillFile(signed, testDir);
+
+    const result = await browse('http://localhost/nothing-here', {
+      skillsDir: testDir,
+      _skipSsrfCheck: true,
+    });
+
+    assert.equal(result.success, false);
+    if (!result.success) {
+      assert.ok(
+        result.skillFileError,
+        `exit '${result.reason}' dropped the skipped-skill-file explanation`,
       );
     }
   });

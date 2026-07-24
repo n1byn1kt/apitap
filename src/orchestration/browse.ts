@@ -262,6 +262,7 @@ export async function browse(
           domain,
           url: fullUrl,
           task,
+          ...(skillFileError ? { skillFileError } : {}),
         };
       }
     } catch {

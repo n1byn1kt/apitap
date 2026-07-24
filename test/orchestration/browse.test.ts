@@ -455,4 +455,34 @@ describe('browse with bridge escalation', () => {
       assert.equal(result.suggestion, 'capture_needed');
     }
   });
+
+  it('keeps escalating when the saved skill file cannot be read', async () => {
+    // A stale or tampered signature makes readSkillFile throw. browse exists
+    // to escalate, so one unreadable file must not abort the whole run before
+    // discovery and the read fallback get their turn.
+    const machineId = await getMachineId();
+    const sigKey = deriveSigningKey(machineId);
+    const signed = signSkillFile(makeSkill('localhost', baseUrl, [
+      { id: 'get-api-search', method: 'GET', path: '/api/search' },
+    ]), sigKey);
+    signed.signature = 'deadbeef'.repeat(8);
+    await writeSkillFile(signed, testDir);
+
+    const result = await browse('http://localhost/api/search', {
+      skillsDir: testDir,
+      skipDiscovery: true,
+      _skipSsrfCheck: true,
+    });
+
+    // Must not throw. Whatever it decides, it has to come back with a result.
+    assert.ok(result !== undefined);
+    assert.equal(result.success, false);
+    if (!result.success) {
+      assert.match(
+        JSON.stringify(result),
+        /signature|unreadable|tampered/i,
+        'browse should say why the saved skill file was skipped',
+      );
+    }
+  });
 });

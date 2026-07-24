@@ -46,6 +46,8 @@ export interface BrowseGuidance {
   domain: string;
   url: string;
   task?: string;
+  /** Set when a saved skill file existed but could not be read (stale or tampered signature). */
+  skillFileError?: string;
 }
 
 export type BrowseResult = BrowseSuccess | BrowseGuidance;
@@ -187,6 +189,7 @@ export async function browse(
   // Step 1: Check session cache
   let skill: SkillFile | null = null;
   let source: 'disk' | 'discovered' | 'captured' = 'disk';
+  let skillFileError: string | undefined;
 
   if (cache?.has(domain)) {
     skill = cache.get(domain)!.skillFile;
@@ -195,7 +198,14 @@ export async function browse(
 
   // Step 2: Check disk
   if (!skill) {
-    skill = await readSkillFile(domain, skillsDir);
+    try {
+      skill = await readSkillFile(domain, skillsDir);
+    } catch (err: any) {
+      // A stale or tampered signature makes readSkillFile throw. browse exists
+      // to escalate, so an unreadable saved file must not abort the run before
+      // discovery and the read fallback get their turn — report it instead.
+      skillFileError = err?.message ?? String(err);
+    }
     if (skill) {
       source = 'disk';
       cache?.set(domain, skill, 'disk');
@@ -287,11 +297,12 @@ export async function browse(
 
     return {
       success: false,
-      reason: 'no_skill_file',
+      reason: skillFileError ? 'unreadable_skill_file' : 'no_skill_file',
       suggestion: 'capture_needed',
       domain,
       url: fullUrl,
       task,
+      ...(skillFileError ? { skillFileError } : {}),
     };
   }
 

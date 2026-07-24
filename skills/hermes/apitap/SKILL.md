@@ -207,15 +207,24 @@ values either, so a non-numeric one is discarded just as quietly.
   for a domain that already has a skill file, and fails with "No skill file
   found" otherwise.
 
-  And capture only shows a window when the environment sets `DISPLAY` — that
-  is the sole switch, and the CLI has no flag to override it. On macOS, on
-  headless servers, and in sandboxes, `DISPLAY` is unset, so capture runs
-  headless and nobody can sign in to it.
+  Whether a person can actually sign in depends on which browser capture ends
+  up with. There are two routes:
 
-  So the manual-sign-in route is worth trying only on a Linux desktop session
-  with `DISPLAY` set, against a site that authenticates by header. In every
-  other case, report that the site needs a human login and stop, rather than
-  routing around it.
+  - **Capture joins a Chrome you already have open.** Unless you pass
+    `--launch`, capture first tries to connect to a Chrome running with a
+    remote-debugging port, and `apitap attach` does the same deliberately.
+    That is the user's own visible browser, so this route works on **any
+    platform, macOS included** — the person relaunches Chrome with
+    `--remote-debugging-port=9222`, signs in there, and capture harvests the
+    headers.
+  - **Capture launches its own browser.** That one is headless unless the
+    environment sets `DISPLAY`, which is the only switch — the CLI has no flag
+    to force a window. So a launched browser is visible on a Linux desktop
+    session and headless on macOS, on servers, and in sandboxes, where nobody
+    can sign in to it.
+
+  If neither route is available, report that the site needs a human login and
+  stop, rather than routing around it.
 - `apitap replay` parameters are positional `key=value` arguments.
 - Sandboxed backends lose `~/.apitap` between runs, so saved skill files can
   vanish. Re-check with `apitap list` instead of assuming.

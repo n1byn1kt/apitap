@@ -130,6 +130,11 @@ function documentedCommands(source: string): string[] {
 function documentedFlags(source: string): string[] {
   const flags = new Set<string>();
   for (const chunk of codeChunks(source)) {
+    // Only apitap's own flags. The document also shows flags belonging to
+    // other tools (Chrome's --remote-debugging-port, npx playwright), and
+    // src/cli.ts is not the authority on those.
+    if (/\b(?:npx|google-chrome|chrome)\b/.test(chunk)) continue;
+    if (/--remote-debugging-port/.test(chunk)) continue;
     for (const match of chunk.matchAll(/--([a-z][a-z-]*)/g)) flags.add(match[1]);
   }
   return [...flags].sort();
@@ -348,8 +353,10 @@ describe('hermes skill states behaviour the code actually has', () => {
   });
 
   it('ties the capture sign-in advice to the DISPLAY switch that governs it', () => {
-    // capture is headless unless DISPLAY is set, and no CLI flag overrides
-    // it — which is why the doc limits manual sign-in to a Linux desktop.
+    // Scope: the browser capture LAUNCHES is headless unless DISPLAY is set,
+    // with no CLI override — which is why the doc limits that route to a
+    // Linux desktop. The CDP-attach route bypasses this switch entirely and
+    // is guarded separately below.
     const monitor = src('capture/monitor.ts');
     assert.match(
       monitor,
@@ -364,6 +371,20 @@ describe('hermes skill states behaviour the code actually has', () => {
       readSkill(),
       /DISPLAY/,
       'SKILL.md no longer explains the DISPLAY condition that decides whether a human can sign in to capture',
+    );
+    // The other route: capture joins an already-running Chrome over CDP
+    // before it ever launches one, which is what makes a manual sign-in
+    // possible on macOS. Over-narrowing the advice to Linux was a real
+    // defect, so keep the attach route in the document.
+    assert.match(
+      monitor,
+      /if \(!options\.launch\) \{[\s\S]*?connectOverCDP/,
+      'capture no longer tries CDP attach before launching — SKILL.md tells agents that route works on any platform',
+    );
+    assert.match(
+      readSkill(),
+      /remote-debugging-port/,
+      'SKILL.md dropped the CDP-attach sign-in route, which is the only one that works on macOS',
     );
   });
 

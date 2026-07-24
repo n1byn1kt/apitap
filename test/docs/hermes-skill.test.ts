@@ -262,7 +262,15 @@ describe('hermes skill states behaviour the code actually has', () => {
     // passing an authManager into its existing replayEndpoint call, with no
     // new import to detect. If that changes, this guard will not tell you.
     const browserEntryPoints = /from ['"].*capture\/(browser|monitor|session)\.js['"]|from ['"].*auth\/(refresh|handoff)\.js['"]|launchBrowser|refreshTokens|requestAuth|from ['"]playwright['"]/;
-    for (const rel of ['read/index.ts', 'read/peek.ts', 'orchestration/browse.ts', 'discovery/index.ts']) {
+    // The list mirrors SKILL.md's "never launch one" claim: read/peek/browse/
+    // discovery are the data paths, and search/store/importer/stats back the
+    // search, list, show, import and stats commands (their cli.ts handlers
+    // only shuffle output). cli.ts itself cannot be scanned this way — it
+    // legitimately reaches capture for the browser-driving commands.
+    for (const rel of [
+      'read/index.ts', 'read/peek.ts', 'orchestration/browse.ts', 'discovery/index.ts',
+      'skill/search.ts', 'skill/store.ts', 'skill/importer.ts', 'stats/report.ts',
+    ]) {
       assert.ok(
         !browserEntryPoints.test(src(rel)),
         `src/${rel} now reaches a browser entry point — SKILL.md lists that path as never launching a browser`,
@@ -331,10 +339,17 @@ describe('hermes skill states behaviour the code actually has', () => {
       blocksOnSigint,
       'capture no longer waits indefinitely on SIGINT — SKILL.md still tells agents --duration is mandatory, so re-check that warning',
     );
+    // /--duration\b/ alone is satisfied by the Quick Reference command table,
+    // so pin the load-bearing warning sentences themselves.
     assert.match(
       readSkill(),
-      /--duration\b/,
-      'capture blocks until SIGINT without --duration, but SKILL.md never documents --duration',
+      /\*\*Always pass `--duration`\*\*/,
+      'capture blocks until SIGINT without --duration, but SKILL.md dropped the "Always pass --duration" warning',
+    );
+    assert.match(
+      readSkill(),
+      /`--duration` is not optional in practice/,
+      'capture blocks until SIGINT without --duration, but SKILL.md dropped the "not optional in practice" explanation',
     );
   });
 
@@ -395,14 +410,63 @@ describe('hermes skill states behaviour the code actually has', () => {
     const cliSource = readFileSync(cliPath, 'utf8');
     const parser = cliSource.match(/function parseArgs\([\s\S]*?\n\}/);
     assert.ok(parser, 'src/cli.ts no longer has parseArgs — re-derive the flag-form warning');
+    // The warning is true exactly while parseArgs takes the whole token after
+    // `--` as the key and never inspects '='. Pin both halves: the slice(2)
+    // key extraction, and the absence of '=' from every string or regex
+    // literal in the function (split('='), includes('='), /--([^=]+)=/ and
+    // friends would all show up there).
     assert.ok(
-      !/split\(['"]=['"]\)|indexOf\(['"]=['"]\)/.test(parser[0]),
-      'parseArgs now understands --flag=value — SKILL.md still warns that the equals form is silently dropped',
+      parser[0].includes('rest[i].slice(2)'),
+      'parseArgs no longer takes the whole token as the flag key — re-verify whether --flag=value is still dropped',
+    );
+    const literals = parser[0].match(/'[^'\n]*'|"[^"\n]*"|\/[^/\n ]+\//g) ?? [];
+    assert.ok(
+      !literals.some(l => l.includes('=')),
+      'parseArgs now mentions "=" in a literal — it may understand --flag=value, so re-verify the SKILL.md equals-form warning',
     );
     assert.match(
       readSkill(),
       /never\s+`--max-bytes=50000`/,
       'parseArgs still drops --flag=value, but SKILL.md no longer warns about it',
+    );
+  });
+
+  it('describes the unreadable-skill-file browse behaviour of the code as built', () => {
+    // Post-#75 browse skips an unreadable skill file instead of aborting:
+    // readSkillFile's throw is caught into skillFileError, escalation
+    // continues, and the guidance carries the field (with reason
+    // unreadable_skill_file on the final exit). SKILL.md documents both the
+    // 2.2.0 abort and this skip-and-escalate contract; if either side
+    // changes, the passage needs re-deriving.
+    const browse = src('orchestration/browse.ts');
+    assert.match(browse, /skillFileError/,
+      'browse.ts no longer carries skillFileError — SKILL.md still describes skip-and-escalate on unreadable files');
+    assert.match(browse, /'unreadable_skill_file'/,
+      "browse.ts no longer emits reason 'unreadable_skill_file' — SKILL.md still documents it");
+    assert.match(browse, /preserveSkillFile/,
+      'browse.ts no longer preserves the unreadable file before overwriting — SKILL.md still promises a .quarantine copy');
+    assert.match(readSkill(), /skillFileError/,
+      'browse reports skillFileError on skipped files, but SKILL.md never mentions it');
+    assert.match(readSkill(), /\.quarantine/,
+      'browse preserves skipped files under .quarantine, but SKILL.md never says where');
+  });
+
+  it('warns about the discover --json --save double document while it prints one', () => {
+    // handleDiscover prints the discovery result, then a second standalone
+    // {"saved": path} document when --save actually writes a file. One JSON
+    // parse of the whole output fails with "Extra data" — SKILL.md warns
+    // about it. If the CLI ever collapses this to a single envelope, the
+    // warning becomes false and should go.
+    const cliSource = readFileSync(cliPath, 'utf8');
+    assert.match(
+      cliSource,
+      /JSON\.stringify\(\{ saved: path \}\)/,
+      'discover --json --save no longer prints a separate {"saved"} document — drop the two-JSON warning from SKILL.md',
+    );
+    assert.match(
+      readSkill(),
+      /\*\*two\*\* JSON documents/,
+      'discover --json --save still prints two JSON documents, but SKILL.md no longer warns about it',
     );
   });
 

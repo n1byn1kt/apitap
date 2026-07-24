@@ -69,8 +69,10 @@ and — when you need structured records — `apitap discover` or `apitap import
    a browser.
 4. Still "command not found"? The npm global bin directory is not on PATH. Run
    `npm prefix -g` and invoke the binary as `<prefix>/bin/apitap`.
-5. Some commands drive a browser: `apitap capture` and `apitap inspect` launch
-   one through Playwright, `apitap refresh` launches one under the same
+5. Some commands drive a browser: `apitap capture` and `apitap inspect` drive
+   one through Playwright — they first try to attach to a Chrome already
+   listening on a CDP port (18792, 18800, 9222) and only launch a fresh one
+   when none is found (`--launch` forces a launch), `apitap refresh` launches one under the same
    condition as replay below (refreshable tokens, or a refresh URL that an
    OAuth exchange did not already satisfy) and otherwise does not, and
    `apitap attach` connects to a Chrome you already have running. Before using
@@ -119,7 +121,7 @@ always prints human-readable text.
 
 | Command | What it does |
 |---|---|
-| `apitap peek <url>` | Triage from HTTP headers: status, framework, bot protection, and a recommended next step. Sends a HEAD, falling back to a GET if the HEAD errors; either way it returns headers only, so it stays near-free. |
+| `apitap peek <url>` | Triage from HTTP headers: status, framework, bot protection, and a recommended next step. Sends a HEAD, falling back to a GET if the HEAD errors. The result is built from headers only either way, so it stays near-free in tokens — but the GET fallback does download up to 512KB before discarding the body, so it is not always free in bandwidth. |
 | `apitap read <url>` | Extract page content without a browser. Site-aware decoders for Reddit, Hacker News, YouTube, Wikipedia and more; generic HTML extraction otherwise. Unbounded unless you pass `--max-bytes <n>`. |
 | `apitap browse <url>` | One-shot escalation — replays a saved skill file if one matches, else tries discovery, else falls back to reading the page. Never launches a browser; tells you when a capture is the only way forward. |
 | `apitap search <query>` | Search saved skill files for a domain or an endpoint. |
@@ -235,10 +237,16 @@ values either, so a non-numeric one is discarded just as quietly.
   with an invalid-signature error. Either way `apitap replay` refuses until the
   file is refreshed: re-capture the domain, or re-import its spec with
   `apitap import <file-or-url>` — a plain re-import replaces the unreadable
-  file, no extra flag needed. An unreadable file can also stop `apitap browse`
-  for that domain: on 2.2.0 it aborts with an `Error:` on stderr and no JSON at
-  all, so if `browse --json` prints nothing, check `apitap show <domain>`
-  before assuming the site is at fault.
+  file, no extra flag needed. An unreadable file also affects `apitap browse`
+  for that domain, and the behaviour depends on the version. On 2.2.0 browse
+  aborts: an `Error:` on stderr and no JSON at all, so if `browse --json`
+  prints nothing, check `apitap show <domain>` before assuming the site is at
+  fault. Newer builds skip the bad file and keep escalating instead — the JSON
+  guidance then carries a `skillFileError` field saying why the saved file was
+  skipped (and the reason `unreadable_skill_file` when nothing else worked),
+  and the original file is preserved under `~/.apitap/skills/.quarantine/`
+  before anything overwrites it. If you see `skillFileError`, the recovery is
+  the same re-capture or re-import as above.
 
 ## Verification
 

@@ -156,9 +156,10 @@ Handy flags: `--max-bytes <n>` caps a response (`apitap read`, `apitap browse`,
 - Sandboxed backends lose `~/.apitap` between runs, so saved skill files can
   vanish. Re-check with `apitap list` instead of assuming.
 - A stale-index notice on stderr is harmless; `apitap index build` clears it.
-- Skill-file signatures go stale after 180 days. Loading one then fails with a
-  stale-signature error naming the domain — re-capture or re-import that domain
-  to refresh it.
+- Skill-file signatures go stale after 180 days, and an old file can also fail
+  with an invalid-signature error. Either way `apitap replay` refuses until the
+  file is refreshed: re-capture the domain, or re-import its spec with
+  `apitap import <file-or-url> --force` to overwrite the existing file.
 
 ## Verification
 

@@ -66,13 +66,13 @@ and — when you need structured records — `apitap discover` or `apitap import
    a browser.
 4. Still "command not found"? The npm global bin directory is not on PATH. Run
    `npm prefix -g` and invoke the binary as `<prefix>/bin/apitap`.
-5. Three commands drive a browser: `apitap capture` and `apitap refresh` launch
-   one through Playwright, and `apitap attach` connects to a Chrome you already
-   have running. Before using any of them, run
-   `npx playwright install chromium`. Everything else — `apitap peek`,
+5. Some commands drive a browser: `apitap capture`, `apitap inspect` and
+   `apitap refresh` launch one through Playwright, and `apitap attach` connects
+   to a Chrome you already have running. Before using any of them, run
+   `npx playwright install chromium`. These never launch one: `apitap peek`,
    `apitap read`, `apitap browse`, `apitap search`, `apitap list`,
    `apitap show`, `apitap replay`, `apitap discover`, `apitap import`,
-   `apitap stats` — never launches a browser.
+   `apitap stats`.
 
 Sandboxed terminal backends (Docker, Modal) are the weak spot. A global npm
 install may be refused, and an ephemeral filesystem loses both the install and
@@ -176,7 +176,8 @@ Handy flags: `--max-bytes <n>` caps a response (`apitap read`, `apitap browse`,
 - Sandboxed backends lose `~/.apitap` between runs, so saved skill files can
   vanish. Re-check with `apitap list` instead of assuming.
 - `apitap list` and `apitap search` may print a stale-index notice on stderr.
-  It is harmless; `apitap index build` clears it. Other commands never emit it.
+  It is harmless; `apitap index build` clears it. None of the other commands
+  in this file emit it — in particular `apitap read` never does.
 - Skill-file signatures go stale after 180 days, and an old file can also fail
   with an invalid-signature error. Either way `apitap replay` refuses until the
   file is refreshed: re-capture the domain, or re-import its spec with
@@ -188,10 +189,10 @@ Handy flags: `--max-bytes <n>` caps a response (`apitap read`, `apitap browse`,
 - **Do not judge success by the exit code alone, and do not expect one error
   shape.** The reliable check is to read stdout, stderr, and the exit code
   together, then look at the payload:
-  - A missing or malformed argument always prints `Error: <message>` on stderr
-    and exits 1, even with `--json` — that check runs before the flag is read.
-    The same is true when `replay` or `show` cannot find a skill file, and for
-    anything that throws mid-run.
+  - For every command in this file, a missing or malformed argument prints
+    `Error: <message>` on stderr and exits 1 even with `--json` — that check
+    runs before the flag is read. The same is true when `replay` or `show`
+    cannot find a skill file, and for anything that throws mid-run.
   - Handled failures under `--json` print JSON on stdout and exit 1, but the
     shape varies by command: `{"error": ...}` from `read` and `discover`,
     `{"success": false, "reason": ...}` from `import`.

@@ -230,12 +230,17 @@ describe('hermes skill states behaviour the code actually has', () => {
   });
 
   it('only claims browser-free for commands with no browser dependency', () => {
-    // SKILL.md tells agents capture/refresh/attach drive a browser and nothing
-    // else does. That holds only while Playwright stays out of these paths.
+    // SKILL.md names the browser-driving commands and lists the rest as
+    // never launching one. Checking for a `playwright` import is not enough:
+    // nothing in this repo launches a browser that way. auth/refresh.ts and
+    // auth/handoff.ts both do it via `launchBrowser` from capture/browser.js,
+    // which is the module that imports playwright (dynamically, at that). So
+    // guard the real entry points, not the library name.
+    const browserEntryPoints = /from ['"].*capture\/(browser|monitor|session)\.js['"]|launchBrowser|from ['"]playwright['"]/;
     for (const rel of ['read/index.ts', 'read/peek.ts', 'orchestration/browse.ts', 'replay/engine.ts', 'discovery/index.ts']) {
       assert.ok(
-        !/from ['"]playwright['"]/.test(src(rel)),
-        `src/${rel} now imports playwright — SKILL.md claims that path is browser-free`,
+        !browserEntryPoints.test(src(rel)),
+        `src/${rel} now reaches a browser entry point — SKILL.md lists that path as never launching a browser`,
       );
     }
   });
@@ -261,6 +266,11 @@ describe('hermes skill states behaviour the code actually has', () => {
       !/'auth_required'/.test(src('replay/engine.ts')),
       "replay/engine.ts now emits 'auth_required' — SKILL.md tells agents replay reports 'Authentication required' instead",
     );
+    assert.match(
+      src('replay/engine.ts'),
+      /'Authentication required'/,
+      "replay no longer returns 'Authentication required' — SKILL.md quotes that string verbatim",
+    );
   });
 
   it('keeps index build outside the --json contract', () => {
@@ -268,8 +278,8 @@ describe('hermes skill states behaviour the code actually has', () => {
     const fnMatch = cliSource.match(/async function handleIndex\([\s\S]*?\n\}/);
     assert.ok(fnMatch, 'src/cli.ts no longer has handleIndex');
     assert.ok(
-      !/flags\.json/.test(fnMatch[0]),
-      'handleIndex now reads flags.json — SKILL.md documents `apitap index build` as the one command with no --json mode',
+      !/flags(\.json\b|\[['"]json['"]\])/.test(fnMatch[0]),
+      'handleIndex now reads a json flag — SKILL.md documents `apitap index build` as the one command with no --json mode',
     );
   });
 });

@@ -218,7 +218,7 @@ values either, so a non-numeric one is discarded just as quietly.
   together, then look at the payload:
   - For every command in this file, a missing required argument prints a
     message on stderr — usually `Error: <message>`, a bare usage line for
-    `apitap index` — and exits 1 even with `--json`. The same is true when
+    `apitap index` and `apitap inspect` — and exits 1 even with `--json`. The same is true when
     `replay` or `show` cannot find a skill file, and for anything that throws
     mid-run. Do not assume `--json` redirects these to stdout. A *malformed*
     flag value produces no error at all: it is silently dropped (see Quick
@@ -230,8 +230,9 @@ values either, so a non-numeric one is discarded just as quietly.
     not get what you wanted**. Judge those on the payload: `browse` on
     `"success": false` plus its `reason`/`suggestion`, `peek` on
     `recommendation`, `search` on `found`. `browse` is the sharp edge here — a
-    login wall comes back as `"success": true` with the 401/403 body inside
-    `data`, so check `data` for `"error": "Authentication required"` as well.
+    login wall can come back as `"success": true` with the 401/403 body inside
+    `data` (an HTML login page instead reports `"success": false`), so check
+    `data` for `"error": "Authentication required"` as well.
   - `replay` exits 0 on an HTTP error from the target site; the status is in
     the response payload.
 - On success, `--json` makes every table command in Quick Reference print

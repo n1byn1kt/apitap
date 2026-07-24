@@ -339,6 +339,24 @@ describe('hermes skill states behaviour the code actually has', () => {
     );
   });
 
+  it('warns about equals-form flags for as long as the parser drops them', () => {
+    // Load-bearing: `--duration=30` being silently dropped puts capture back
+    // in the indefinite SIGINT wait while the agent believes it passed the
+    // flag. parseArgs is not exported, so pin its shape instead.
+    const cliSource = readFileSync(cliPath, 'utf8');
+    const parser = cliSource.match(/function parseArgs\([\s\S]*?\n\}/);
+    assert.ok(parser, 'src/cli.ts no longer has parseArgs — re-derive the flag-form warning');
+    assert.ok(
+      !/split\(['"]=['"]\)|indexOf\(['"]=['"]\)/.test(parser[0]),
+      'parseArgs now understands --flag=value — SKILL.md still warns that the equals form is silently dropped',
+    );
+    assert.match(
+      readSkill(),
+      /never\s+`--max-bytes=50000`/,
+      'parseArgs still drops --flag=value, but SKILL.md no longer warns about it',
+    );
+  });
+
   it('keeps index build outside the --json contract', () => {
     const cliSource = readFileSync(cliPath, 'utf8');
     const fnMatch = cliSource.match(/async function handleIndex\([\s\S]*?\n\}/);

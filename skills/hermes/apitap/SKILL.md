@@ -19,8 +19,8 @@ metadata:
 
 Sites render themselves from their own JSON APIs. ApiTap gets you that JSON
 instead of HTML: pull page content with no browser, or record a site's API
-traffic once, save it as a signed skill file, and replay those endpoints
-forever with a plain HTTP call — no browser anywhere in the replay path.
+traffic once, save it as a signed skill file, and replay those endpoints on
+demand with a plain HTTP call — no browser anywhere in the replay path.
 
 **Most tasks only need `apitap read <url>`.** Start there and work down only
 when it falls short.
@@ -156,6 +156,9 @@ Handy flags: `--max-bytes <n>` caps a response (`apitap read`, `apitap browse`,
 - Sandboxed backends lose `~/.apitap` between runs, so saved skill files can
   vanish. Re-check with `apitap list` instead of assuming.
 - A stale-index notice on stderr is harmless; `apitap index build` clears it.
+- Skill-file signatures go stale after 180 days. Loading one then fails with a
+  stale-signature error naming the domain — re-capture or re-import that domain
+  to refresh it.
 
 ## Verification
 

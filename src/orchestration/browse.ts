@@ -64,6 +64,7 @@ async function tryBridgeCapture(
   domain: string,
   fullUrl: string,
   options: BrowseOptions,
+  unreadableOnDisk = false,
 ): Promise<BrowseResult | null> {
   const socketPath = options._bridgeSocketPath ?? DEFAULT_SOCKET;
   if (!await bridgeAvailable(socketPath)) return null;
@@ -74,11 +75,21 @@ async function tryBridgeCapture(
     const skillFiles = result.skillFiles;
     // Sign and save each skill file to disk
     try {
-      const { writeSkillFile: writeSF } = await import('../skill/store.js');
+      const { writeSkillFile: writeSF, DEFAULT_SKILLS_DIR } = await import('../skill/store.js');
       const mid = await getMachineId();
       const sk = deriveSigningKey(mid);
       for (let i = 0; i < skillFiles.length; i++) {
         skillFiles[i] = signSkillFile(skillFiles[i], sk);
+        if (unreadableOnDisk && skillFiles[i].domain === domain) {
+          // This overwrite would destroy the unreadable-but-preservable file
+          // the disk read tripped on — copy it into .quarantine first.
+          try {
+            const { preserveSkillFile } = await import('../doctor/snapshot.js');
+            await preserveSkillFile(options.skillsDir ?? DEFAULT_SKILLS_DIR, domain);
+          } catch {
+            // Best-effort — the capture still lands.
+          }
+        }
         await writeSF(skillFiles[i], options.skillsDir);
       }
     } catch {
@@ -238,16 +249,17 @@ export async function browse(
         skill = signSkillFile(skill, sigKey);
         const { writeSkillFile: writeSF, DEFAULT_SKILLS_DIR } = await import('../skill/store.js');
         if (skillFileError) {
-          // The file on disk failed an integrity check. Overwriting it would
-          // destroy the evidence (and, for a stale-but-valid signature, a
-          // recoverable capture) — move it to .quarantine first, same place
-          // apitap doctor puts suspect files.
+          // The file on disk could not be read. Overwriting it would destroy
+          // the evidence (and, for a stale-but-valid signature, a recoverable
+          // capture) — copy it into .quarantine first, same place apitap
+          // doctor puts suspect files. Copy, not move: if the write below
+          // fails, the domain keeps its live file.
           try {
-            const { quarantineSkill } = await import('../doctor/snapshot.js');
-            await quarantineSkill(skillsDir ?? DEFAULT_SKILLS_DIR, domain);
+            const { preserveSkillFile } = await import('../doctor/snapshot.js');
+            await preserveSkillFile(skillsDir ?? DEFAULT_SKILLS_DIR, domain);
           } catch {
-            // Quarantine is best-effort — self-healing still wins if the
-            // file vanished or can't be moved.
+            // Best-effort — self-healing still wins if the file vanished or
+            // can't be copied.
           }
         }
         await writeSF(skill, skillsDir);
@@ -273,7 +285,7 @@ export async function browse(
           // Read failed — fall through to capture_needed
         }
         // Try extension bridge before giving up
-        const bridgeResult1 = await tryBridgeCapture(domain, fullUrl, options);
+        const bridgeResult1 = await tryBridgeCapture(domain, fullUrl, options, !!skillFileError);
         if (bridgeResult1) return withSkillFileError(bridgeResult1);
 
         return {
@@ -315,7 +327,7 @@ export async function browse(
       }
     }
     // Try extension bridge before giving up
-    const bridgeResult2 = await tryBridgeCapture(domain, fullUrl, options);
+    const bridgeResult2 = await tryBridgeCapture(domain, fullUrl, options, !!skillFileError);
     if (bridgeResult2) return withSkillFileError(bridgeResult2);
 
     return {

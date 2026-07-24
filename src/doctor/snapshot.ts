@@ -61,6 +61,23 @@ export async function quarantineSkill(skillsDir: string, domain: string): Promis
 }
 
 /**
+ * Copy (never move) a live skill file into quarantine, for callers that are
+ * about to overwrite it. Same no-clobber policy as quarantineSkill, but the
+ * live file stays in place — so if the overwrite that follows fails, the
+ * domain still has its (albeit unreadable) file and writeSkillFile's atomic
+ * tmp-then-rename semantics are preserved end to end.
+ */
+export async function preserveSkillFile(skillsDir: string, domain: string): Promise<void> {
+  assertValidDomain(domain);
+  await mkdir(join(skillsDir, QUARANTINE_DIR), { recursive: true, mode: 0o700 });
+  const dest = quarantinePath(skillsDir, domain);
+  const target = (await exists(dest))
+    ? join(skillsDir, QUARANTINE_DIR, `${domain}.${Date.now()}.json`)
+    : dest;
+  await copyFile(join(skillsDir, `${domain}.json`), target);
+}
+
+/**
  * Restore rules (spec): .orig wins (oldest pre-doctor original, overwrites a
  * doctor-edited live file by design); quarantine restore refuses when a live
  * file exists (re-captured after quarantine). Bytes verbatim, never re-signs.

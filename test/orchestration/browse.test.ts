@@ -516,6 +516,48 @@ describe('browse with bridge escalation', () => {
     }
   });
 
+  it('preserves the unreadable file when a bridge capture overwrites it', async () => {
+    // Discovery is not the only writer: a successful bridge capture also
+    // writeSkillFile()s over the live file. The unreadable original must be
+    // copied into .quarantine before that overwrite, same as the discovery
+    // self-heal path.
+    const machineId = await getMachineId();
+    const sigKey = deriveSigningKey(machineId);
+    const signed = signSkillFile(makeSkill('localhost', baseUrl, [
+      { id: 'get-api-old', method: 'GET', path: '/api/old' },
+    ]), sigKey);
+    signed.signature = 'deadbeef'.repeat(8);
+    await writeSkillFile(signed, testDir);
+
+    await startBridgeServer((msg) => ({
+      success: true,
+      skillFiles: [makeSkill(msg.domain, baseUrl, [
+        { id: 'get-api-data', method: 'GET', path: '/api/data' },
+      ])],
+    }));
+
+    const result = await browse('http://localhost/api/data', {
+      skillsDir: testDir,
+      skipDiscovery: true,
+      _skipSsrfCheck: true,
+      _bridgeSocketPath: socketPath,
+    });
+
+    assert.equal(result.success, true);
+
+    // The corrupt original survives in quarantine...
+    const quarantined = JSON.parse(
+      await readFile(join(testDir, '.quarantine', 'localhost.json'), 'utf-8'),
+    );
+    assert.equal(quarantined.signature, 'deadbeef'.repeat(8));
+    assert.equal(quarantined.endpoints[0].id, 'get-api-old');
+
+    // ...and the live file is the bridge-captured, verifiable one.
+    const live = await readSkillFile('localhost', testDir);
+    assert.ok(live, 'bridge-captured skill file must be readable and verified');
+    assert.equal(live!.endpoints[0]?.id, 'get-api-data');
+  });
+
   it('still explains a skipped skill file when discovery runs and finds nothing', async () => {
     // The reason rides more than one exit. Discovery running (rather than
     // being skipped) leaves through no_replayable_endpoints, which dropped

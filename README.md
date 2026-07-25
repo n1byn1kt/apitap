@@ -692,10 +692,14 @@ On failure, `--json` prints a parseable envelope on stdout and exits non-zero:
 }
 ```
 
+Longer guidance, where a command has any, arrives in an optional `hint` field
+rather than inside `error`, so an agent can surface the defect on its own.
+
 The human-readable line still goes to stderr, so interactive use is unchanged
 and `apitap … --json > out.json` captures only the envelope. `apitap serve` is
 the one channel exception: its stdout is the MCP stdio transport, so its failure
-envelope goes to stderr alongside its `--json` tool list.
+envelope goes to stderr alongside its `--json` tool list — and there the human
+line is suppressed, so `JSON.parse` of serve's stderr succeeds.
 
 | Command | Description |
 |---------|-------------|

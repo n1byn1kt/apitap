@@ -96,6 +96,12 @@ interface FailOptions {
    * the failure envelope. Drop once `reason` is formally deprecated.
    */
   legacyReason?: boolean;
+  /**
+   * Extra guidance shown to both audiences: its own `hint` field in the
+   * envelope, and appended to the human stderr line. Keeps help prose out of
+   * `error`, which agents surface on its own.
+   */
+  hint?: string;
   /** Extra fields merged into the envelope (e.g. `domain`). */
   fields?: Record<string, unknown>;
   /**
@@ -127,16 +133,26 @@ interface FailOptions {
 function failCli(json: boolean, error: string, opts: FailOptions = {}): never {
   if (json) {
     const envelope = JSON.stringify({
+      // Caller fields spread first so the contract keys below always win — a
+      // stray `fields: { error }` must not be able to redefine the envelope.
+      ...opts.fields,
       success: false,
       error,
       ...(opts.legacyReason ? { reason: error } : {}),
       ...(opts.usage ? { usage: opts.usage } : {}),
-      ...opts.fields,
+      ...(opts.hint ? { hint: opts.hint } : {}),
     }, null, 2);
-    if (opts.stream === 'stderr') console.error(envelope);
-    else console.log(envelope);
+    if (opts.stream === 'stderr') {
+      console.error(envelope);
+      // stderr is the only channel this command has, so adding the human line
+      // would leave it unparseable for the agent it was just written for.
+      process.exit(opts.exitCode ?? 1);
+    }
+    console.log(envelope);
   }
-  console.error(`Error: ${error}${opts.usage ? `. Usage: ${opts.usage}` : ''}`);
+  console.error(
+    `Error: ${error}${opts.usage ? `. Usage: ${opts.usage}` : ''}${opts.hint ? `\n  ${opts.hint}` : ''}`,
+  );
   process.exit(opts.exitCode ?? 1);
 }
 
@@ -2698,8 +2714,9 @@ async function handleIndex(positional: string[], flags: Record<string, string | 
   const json = flags.json === true;
   const subcommand = positional[0];
   if (subcommand !== 'build') {
-    failCli(json, 'Unknown index subcommand — force rebuild the search index from all skill files on disk, after manually editing them outside of apitap commands', {
+    failCli(json, 'Unknown index subcommand', {
       usage: 'apitap index build',
+      hint: 'Force rebuild the search index from all skill files on disk. Run this after manually editing skill files outside of apitap commands.',
       fields: { subcommand: subcommand ?? null },
     });
   }
@@ -2718,8 +2735,9 @@ async function handleExtension(positional: string[], flags: Record<string, strin
   if (subcommand === 'install') {
     const extensionId = flags['extension-id'];
     if (!extensionId || typeof extensionId !== 'string') {
-      failCli(json, 'Extension ID required — find yours at chrome://extensions (enable Developer mode)', {
+      failCli(json, 'Extension ID required', {
         usage: 'apitap extension install --extension-id <id>',
+        hint: 'Find your extension ID at chrome://extensions (enable Developer mode).',
       });
     }
 

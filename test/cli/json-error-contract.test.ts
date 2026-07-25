@@ -17,6 +17,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { writeSkillFile } from '../../src/skill/store.js';
+import type { SkillFile } from '../../src/types.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -118,16 +120,24 @@ describe('CLI --json failure contract (issue #79)', () => {
     // `apitap serve` reserves stdout for the MCP stdio transport; its `--json`
     // tool list already goes to stderr. The failure envelope follows that
     // channel rather than the repo-wide stdout default.
-    it('serve emits the JSON envelope on stderr', async () => {
+    it('serve emits the JSON envelope on stderr, and nothing else', async () => {
       const result = await runCli(['serve', '--json'], env);
       assert.notEqual(result.code, 0);
       assert.equal(result.stdout.trim(), '', 'serve must keep stdout free for the MCP transport');
 
-      const jsonLine = result.stderr.slice(result.stderr.indexOf('{'), result.stderr.lastIndexOf('}') + 1);
-      const parsed = JSON.parse(jsonLine);
+      // stderr is serve's only channel under --json, so it must parse whole —
+      // no human line appended for an audience that has nowhere else to read.
+      const parsed = JSON.parse(result.stderr);
       assert.equal(parsed.success, false);
       assert.equal(typeof parsed.error, 'string');
       assert.ok((parsed.usage as string).includes('apitap serve'));
+    });
+
+    it('serve without --json still prints the human line', async () => {
+      const result = await runCli(['serve'], env);
+      assert.notEqual(result.code, 0);
+      assert.match(result.stderr, /Error: Domain required\. Usage: apitap serve/);
+      assert.ok(!result.stderr.includes('{'), 'human mode must not leak an envelope');
     });
   });
 
@@ -157,6 +167,70 @@ describe('CLI --json failure contract (issue #79)', () => {
         parsed.reason,
         parsed.error,
         'import kept a `reason` field historically; it must mirror `error` until deprecated',
+      );
+    });
+  });
+
+  describe('help prose stays out of `error`', () => {
+    // An agent that surfaces `error` alone should get the defect, not a lecture.
+    // Long guidance goes in `hint`, which also reaches the human stderr line.
+    it('index build separates error, usage and hint', async () => {
+      const result = await runCli(['index', 'bogus-subcommand', '--json'], env);
+      const parsed = assertJsonFailure(result, 'index bogus');
+
+      assert.equal(parsed.error, 'Unknown index subcommand');
+      assert.equal(parsed.usage, 'apitap index build');
+      assert.match(parsed.hint as string, /Force rebuild the search index/);
+      assert.ok(
+        !(parsed.error as string).includes('rebuild'),
+        'help prose must not be jammed into `error`',
+      );
+      assert.match(result.stderr, /Force rebuild the search index/, 'humans keep the guidance too');
+    });
+  });
+
+  describe('exit code agrees with the envelope', () => {
+    // A failed `refresh --json` used to print success:false and exit 0, so a
+    // caller keying on the exit code read it as a success. Same failure-contract
+    // family as #79, and the exact shape of quiet regression that let the
+    // original `auth request` bug through.
+    //
+    // A skill with no oauthConfig, no refreshable tokens and no auth.refreshUrl
+    // takes refreshTokens' browser-free path and returns success:false without
+    // launching Chrome or touching the network.
+    function unrefreshableSkill(domain: string): SkillFile {
+      return {
+        version: '1.2',
+        domain,
+        capturedAt: '2026-02-04T12:00:00.000Z',
+        baseUrl: `https://${domain}`,
+        endpoints: [{
+          id: 'get-thing',
+          method: 'GET',
+          path: '/thing',
+          queryParams: {},
+          headers: {},
+          responseShape: { type: 'object', fields: ['id'] },
+          examples: { request: { url: `https://${domain}/thing`, headers: {} }, responsePreview: null },
+          replayability: { tier: 'green', verified: true, signals: [] },
+        }],
+        metadata: { captureCount: 1, filteredCount: 0, toolVersion: '0.4.0' },
+        provenance: 'self',
+      };
+    }
+
+    it('refresh --json exits non-zero when it reports success:false', async () => {
+      const domain = 'unrefreshable.invalid';
+      await writeSkillFile(unrefreshableSkill(domain), join(testDir, 'skills'));
+
+      const result = await runCli(['refresh', domain, '--json', '--trust-unsigned'], env);
+
+      const parsed = JSON.parse(result.stdout);
+      assert.equal(parsed.success, false, 'expected the browser-free refresh path to report failure');
+      assert.notEqual(
+        result.code,
+        0,
+        'refresh printed success:false but exited 0 — exit code must agree with the envelope',
       );
     });
   });

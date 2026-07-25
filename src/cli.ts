@@ -1883,7 +1883,16 @@ async function handleAuthRequest(positional: string[], flags: Record<string, str
     });
 
     if (json) {
-      console.log(JSON.stringify({ domain, ...result }, null, 2));
+      // Serialize an explicit allow-list rather than spreading HandoffResult, so
+      // a future field on that type cannot leak cookies/tokens to stdout.
+      // Same defensive pattern as handleRefresh.
+      console.log(JSON.stringify({
+        domain,
+        success: result.success,
+        cookieCount: result.cookieCount,
+        ...(result.authDetected ? { authDetected: result.authDetected } : {}),
+        ...(result.error ? { error: result.error } : {}),
+      }, null, 2));
     } else if (result.success) {
       console.log(`  ✓ Stored auth for ${domain} (${result.cookieCount} cookies${result.authDetected ? `, ${result.authDetected}` : ''})\n`);
     } else {

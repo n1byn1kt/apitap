@@ -10,15 +10,18 @@ import { AuthManager } from '../../src/auth/manager.js';
 
 const execFileAsync = promisify(execFile);
 
-async function runCli(args: string[], env?: Record<string, string>): Promise<{ stdout: string; stderr: string }> {
+async function runCli(args: string[], env?: Record<string, string>): Promise<{ stdout: string; stderr: string; code: number | null; killed: boolean }> {
   try {
-    return await execFileAsync(
+    const { stdout, stderr } = await execFileAsync(
       'node',
       ['--import', 'tsx', 'src/cli.ts', ...args],
       { env: { ...process.env, ...env }, timeout: 10000 },
     );
+    return { stdout, stderr, code: 0, killed: false };
   } catch (err: any) {
-    return { stdout: err.stdout ?? '', stderr: err.stderr ?? '' };
+    // err.killed is set when execFile's own timeout fired — that means the CLI
+    // hung rather than exiting, which no test here should tolerate.
+    return { stdout: err.stdout ?? '', stderr: err.stderr ?? '', code: err.code ?? null, killed: err.killed === true };
   }
 }
 
@@ -95,28 +98,47 @@ describe('CLI auth command', () => {
   // domain, print an empty-but-valid auth record and exit 0 — while `browse`
   // guidance told agents to run exactly that command.
   it('should not treat "request" as a domain name', async () => {
-    const { stdout } = await runCli(['auth', 'request', 'example.com', '--json'], {
-      APITAP_DIR: testDir,
-      APITAP_MACHINE_ID: 'test-machine-id',
-    });
+    // --timeout 1 drives the handoff to a deterministic, fast failure. Without
+    // it the default 300s timeout outlives runCli's 10s kill, leaving empty
+    // stdout — which would make every assertion below vacuously true.
+    const { stdout, stderr, code, killed } = await runCli(
+      ['auth', 'request', 'example.com', '--json', '--timeout', '1'],
+      { APITAP_DIR: testDir, APITAP_MACHINE_ID: 'test-machine-id' },
+    );
 
-    let parsed: any = null;
-    try { parsed = JSON.parse(stdout); } catch { /* non-JSON output is fine here */ }
-    assert.notEqual(parsed?.domain, 'request', 'must not report a domain literally named "request"');
+    assert.equal(killed, false, `CLI hung instead of exiting; stderr=${stderr}`);
+
+    const parsed = JSON.parse(stdout); // must be real JSON, not empty output
+    assert.equal(parsed.domain, 'example.com', 'the domain must come from positional[1], not "request"');
+    assert.equal(parsed.success, false, 'no browser session is available in tests');
+    assert.equal(code, 1, 'a failed handoff must exit non-zero');
+    assert.doesNotMatch(stdout, /"domain":\s*"request"/);
   });
 
   it('should require a domain for `auth request`', async () => {
-    const { stdout, stderr } = await runCli(['auth', 'request', '--json'], {
+    const { stdout, stderr, code, killed } = await runCli(['auth', 'request', '--json'], {
       APITAP_DIR: testDir,
       APITAP_MACHINE_ID: 'test-machine-id',
     });
 
-    assert.ok(
-      /domain required/i.test(stderr) || /usage/i.test(stderr),
-      `expected a usage error, got stderr=${stderr} stdout=${stdout}`,
-    );
+    assert.equal(killed, false, 'missing-domain path must exit immediately, not hang');
+    assert.match(stderr, /domain required/i);
+    assert.equal(code, 1);
     assert.doesNotMatch(stdout, /"domain":\s*"request"/);
   });
+
+  for (const bad of ['-1', '0', 'abc']) {
+    it(`should reject --timeout ${bad}`, async () => {
+      const { stderr, code, killed } = await runCli(
+        ['auth', 'request', 'example.com', '--json', '--timeout', bad],
+        { APITAP_DIR: testDir, APITAP_MACHINE_ID: 'test-machine-id' },
+      );
+
+      assert.equal(killed, false, 'invalid --timeout must be rejected before any browser launch');
+      assert.match(stderr, /--timeout must be a positive number of seconds/);
+      assert.equal(code, 1);
+    });
+  }
 
   it('should still treat a bare positional as the domain', async () => {
     const authManager = new AuthManager(testDir, 'test-machine-id');

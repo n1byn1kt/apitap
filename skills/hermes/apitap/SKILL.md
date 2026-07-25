@@ -202,9 +202,21 @@ values either, so a non-numeric one is discarded just as quietly.
   That capture route works only for header-based auth. Capture extracts and
   stores `Authorization`, `x-api-key`, and high-entropy custom headers it sees
   after the person signs in — it does **not** persist the browser session, so a
-  site that authenticates with cookies alone will not be fixed this way. The
-  handoff that does store a session exists only as the `apitap_auth_request`
-  MCP tool, with no CLI equivalent.
+  site that authenticates with cookies alone will not be fixed this way.
+
+  The handoff that *does* store a session is available both ways — as the
+  `apitap_auth_request` MCP tool and as its CLI twin:
+
+  ```
+  apitap auth request <domain> [--login-url <url>] [--timeout <seconds>] [--json]
+  ```
+
+  Both open a **visible** browser (so they need Playwright and a display) and
+  wait for a human to sign in. The person must **close the browser window** when
+  they are done — that is the signal that login finished. On success the session
+  is stored encrypted and injected automatically on later replay and capture
+  calls. On failure the CLI exits non-zero and `--json` returns
+  `{"domain": ..., "success": false, "error": ...}`.
 
   `apitap refresh <domain>` is not a sign-in flow either: it re-mints tokens
   for a domain that already has a skill file, and fails with "No skill file

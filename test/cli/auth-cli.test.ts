@@ -90,6 +90,46 @@ describe('CLI auth command', () => {
     const parsed = JSON.parse(stdout);
     assert.deepEqual(parsed.domains, []);
   });
+
+  // Regression: `apitap auth request <domain>` used to parse "request" as the
+  // domain, print an empty-but-valid auth record and exit 0 — while `browse`
+  // guidance told agents to run exactly that command.
+  it('should not treat "request" as a domain name', async () => {
+    const { stdout } = await runCli(['auth', 'request', 'example.com', '--json'], {
+      APITAP_DIR: testDir,
+      APITAP_MACHINE_ID: 'test-machine-id',
+    });
+
+    let parsed: any = null;
+    try { parsed = JSON.parse(stdout); } catch { /* non-JSON output is fine here */ }
+    assert.notEqual(parsed?.domain, 'request', 'must not report a domain literally named "request"');
+  });
+
+  it('should require a domain for `auth request`', async () => {
+    const { stdout, stderr } = await runCli(['auth', 'request', '--json'], {
+      APITAP_DIR: testDir,
+      APITAP_MACHINE_ID: 'test-machine-id',
+    });
+
+    assert.ok(
+      /domain required/i.test(stderr) || /usage/i.test(stderr),
+      `expected a usage error, got stderr=${stderr} stdout=${stdout}`,
+    );
+    assert.doesNotMatch(stdout, /"domain":\s*"request"/);
+  });
+
+  it('should still treat a bare positional as the domain', async () => {
+    const authManager = new AuthManager(testDir, 'test-machine-id');
+    await authManager.store('example.com', { type: 'bearer', header: 'authorization', value: 'Bearer xyz' });
+
+    const { stdout } = await runCli(['auth', 'example.com', '--json'], {
+      APITAP_DIR: testDir,
+      APITAP_MACHINE_ID: 'test-machine-id',
+    });
+
+    const parsed = JSON.parse(stdout);
+    assert.equal(parsed.domain, 'example.com');
+  });
 });
 
 describe('CLI refresh command', () => {

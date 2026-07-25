@@ -7,6 +7,14 @@ export interface HandoffOptions {
   domain: string;
   loginUrl?: string;        // URL to navigate to (defaults to https://<domain>)
   timeout?: number;          // ms, default 300000 (5 minutes)
+  /**
+   * @internal Run the handoff browser headless — for tests only, and refused
+   * outside a test run. A real handoff is a human logging in, so it is always
+   * headed; a headless one would sit invisibly waiting for input that can
+   * never come. Without this the flow cannot be exercised on a machine with
+   * no display.
+   */
+  _headless?: boolean;
 }
 
 export interface HandoffResult {
@@ -170,6 +178,21 @@ const handoffLocks = new Map<string, Promise<HandoffResult>>();
  * This avoids false positives from cookie-based heuristics that fire on
  * anonymous session cookies set during normal page load.
  */
+/**
+ * The handoff is a human logging in at a visible window, so headless is a
+ * test-only affordance. Mirrors assertSsrfBypassAllowed: an internal flag
+ * that would change security-relevant behaviour is refused outside a test
+ * run rather than trusted to stay internal by comment alone.
+ */
+function assertHeadlessHandoffAllowed(flag: unknown): void {
+  if (!flag) return;
+  if (process.env.NODE_TEST_CONTEXT || process.env.NODE_ENV === 'test') return;
+  throw new Error(
+    'Headless login handoff (_headless) is test-only and refused outside a test run — ' +
+    'a real handoff needs a visible window for the human to log in',
+  );
+}
+
 export async function requestAuth(
   authManager: AuthManager,
   options: HandoffOptions,
@@ -198,7 +221,8 @@ async function doHandoff(
   const loginUrl = options.loginUrl || `https://${domain}`;
   const timeout = options.timeout ?? 300_000; // 5 minutes
 
-  const { browser, context } = await launchBrowser({ headless: false });
+  assertHeadlessHandoffAllowed(options._headless);
+  const { browser, context } = await launchBrowser({ headless: options._headless === true });
 
   try {
 
@@ -323,15 +347,18 @@ async function doHandoff(
       };
     }
 
-    // Store session cookies
     const session: StoredSession = {
       cookies,
       savedAt: new Date().toISOString(),
       maxAgeMs: 24 * 60 * 60 * 1000, // 24 hours
     };
-    await authManager.storeSession(domain, session);
 
-    // Store OAuth credentials if detected during auth flow
+    // ORDER MATTERS: authManager.store() replaces the whole record, while
+    // storeSession/storeOAuthCredentials merge into it. The credential goes
+    // in first and the sidecars after — the other way round, store() wiped
+    // the session (and the OAuth refresh token) that had just been saved,
+    // so the next handoff's warm start found nothing and the human had to
+    // log in again.
     if (detectedOAuth) {
       detectedAuth = {
         type: 'bearer',
@@ -342,12 +369,6 @@ async function doHandoff(
         } : {}),
       };
       authDetected = 'bearer';
-
-      if (detectedOAuth.refreshToken) {
-        await authManager.storeOAuthCredentials(domain, {
-          refreshToken: detectedOAuth.refreshToken,
-        });
-      }
     }
 
     // Store detected auth header if found
@@ -370,6 +391,14 @@ async function doHandoff(
           value: cookieHeader,
         });
       }
+    }
+
+    // Sidecars last — see the ORDER MATTERS note above.
+    await authManager.storeSession(domain, session);
+    if (detectedOAuth?.refreshToken) {
+      await authManager.storeOAuthCredentials(domain, {
+        refreshToken: detectedOAuth.refreshToken,
+      });
     }
 
     return {

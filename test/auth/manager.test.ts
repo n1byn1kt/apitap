@@ -143,6 +143,46 @@ describe('AuthManager token storage', () => {
     assert.equal(tokens?.csrf_token.value, 'new-token', 'tokens should be updated');
   });
 
+  it('store() replaces the whole record, sidecars included', async () => {
+    // Deliberate: a new credential may belong to a different identity, so the
+    // previous one's session and OAuth secret must not survive beside it.
+    // The cost is an ordering rule for callers — credential first, sidecars
+    // after — which the login handoff had backwards (it saved the session,
+    // then wiped it with store()). Pinning the semantics here so the fix
+    // cannot be "corrected" back into implicit preservation.
+    await manager.storeSession('example.com', {
+      cookies: [{ name: 'session', value: 'xyz', domain: 'example.com', path: '/' }],
+      savedAt: '2026-02-04T00:00:00Z',
+    });
+    await manager.storeOAuthCredentials('example.com', { refreshToken: 'rt-old-identity' });
+
+    await manager.store('example.com', {
+      type: 'bearer', header: 'authorization', value: 'Bearer new-identity',
+    });
+
+    assert.equal(await manager.retrieveSession('example.com'), null,
+      "store() must not keep the previous identity's session");
+    const oauth = await manager.retrieveOAuthCredentials('example.com');
+    assert.ok(!oauth?.refreshToken, "store() must not keep the previous identity's refresh token");
+    assert.equal((await manager.retrieve('example.com'))?.value, 'Bearer new-identity');
+  });
+
+  it('keeps both when the credential is written before the sidecars', async () => {
+    // The supported order, and what the handoff now does.
+    await manager.store('example.com', {
+      type: 'cookie', header: 'cookie', value: 'session=xyz',
+    });
+    await manager.storeSession('example.com', {
+      cookies: [{ name: 'session', value: 'xyz', domain: 'example.com', path: '/' }],
+      savedAt: '2026-02-04T00:00:00Z',
+    });
+    await manager.storeOAuthCredentials('example.com', { refreshToken: 'rt-1' });
+
+    assert.equal((await manager.retrieveSession('example.com'))?.cookies[0].value, 'xyz');
+    assert.equal((await manager.retrieveOAuthCredentials('example.com'))?.refreshToken, 'rt-1');
+    assert.equal((await manager.retrieve('example.com'))?.value, 'session=xyz');
+  });
+
   it('should list domains with auth', async () => {
     await manager.store('example.com', { type: 'bearer', header: 'authorization', value: 'xyz' });
     await manager.storeTokens('other.com', { csrf: { value: 'abc', refreshedAt: '' } });

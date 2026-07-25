@@ -21,7 +21,17 @@ export class AuthManager {
     this.authPath = join(baseDir, AUTH_FILENAME);
   }
 
-  /** Store auth credentials for a domain (overwrites existing). */
+  /**
+   * Store auth credentials for a domain, replacing the ENTIRE record —
+   * including the sidecars other writers manage (`session`, `tokens`,
+   * `refreshToken`, `clientSecret`). That is deliberate: a new credential
+   * may belong to a different identity, so silently keeping the previous
+   * one's session or OAuth secret beside it would be worse than losing them.
+   *
+   * The consequence for callers: write the credential FIRST, then the
+   * sidecars (`storeSession`, `storeTokens`, `storeOAuthCredentials` all
+   * merge). Doing it the other way round drops what you just saved.
+   */
   async store(domain: string, auth: StoredAuth): Promise<void> {
     const allAuth = await this.loadAll();
     allAuth[domain] = auth;

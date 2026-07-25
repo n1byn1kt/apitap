@@ -518,13 +518,29 @@ describe('hermes skill states behaviour the code actually has', () => {
     );
   });
 
-  it('keeps index build outside the --json contract', () => {
+  it('keeps index build outside the --json SUCCESS contract', () => {
+    // Issue #79 brought every command's failure path into the --json contract,
+    // `index build` included. What stays true is that its success path prints
+    // human text only — so assert on the success path, not on the whole
+    // function reading a json flag.
     const cliSource = readFileSync(cliPath, 'utf8');
     const fnMatch = cliSource.match(/async function handleIndex\([\s\S]*?\n\}/);
     assert.ok(fnMatch, 'src/cli.ts no longer has handleIndex');
+
+    // Everything after the argument guard is the success path.
+    const successPath = fnMatch[0].slice(fnMatch[0].indexOf('const skillsDir'));
+    assert.ok(successPath, 'handleIndex no longer has a skillsDir success path');
     assert.ok(
-      !/flags(\.json\b|\[['"]json['"]\])/.test(fnMatch[0]),
-      'handleIndex now reads a json flag — SKILL.md documents `apitap index build` as the one command with no --json mode',
+      !/JSON\.stringify/.test(successPath),
+      'handleIndex now emits JSON on success — SKILL.md documents `apitap index build` as having no --json success mode',
+    );
+  });
+
+  it('documents the --json failure envelope', () => {
+    assert.match(
+      readSkill(),
+      /"success": false, "error"/,
+      'SKILL.md must document the --json failure envelope (issue #79)',
     );
   });
 });

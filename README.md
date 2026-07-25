@@ -682,6 +682,21 @@ The audit log **never contains matched secret bytes**. Egress findings record pa
 
 All commands support `--json` for machine-readable output.
 
+On failure, `--json` prints a parseable envelope on stdout and exits non-zero:
+
+```json
+{
+  "success": false,
+  "error": "Domain required",
+  "usage": "apitap show <domain>"
+}
+```
+
+The human-readable line still goes to stderr, so interactive use is unchanged
+and `apitap … --json > out.json` captures only the envelope. `apitap serve` is
+the one channel exception: its stdout is the MCP stdio transport, so its failure
+envelope goes to stderr alongside its `--json` tool list.
+
 | Command | Description |
 |---------|-------------|
 | `apitap browse <url>` | Discover + replay in one step |

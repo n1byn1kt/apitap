@@ -84,6 +84,62 @@ function parseArgs(argv: string[]): ParsedArgs {
   return { command, positional, flags };
 }
 
+interface FailOptions {
+  /**
+   * Usage text for the command. Emitted as its own `usage` field rather than
+   * baked into `error`, so an agent can show the error without the boilerplate.
+   */
+  usage?: string;
+  /**
+   * Also mirror `error` into a legacy `reason` field. Only for the `import`
+   * paths, which shipped `{success: false, reason}` before issue #79 unified
+   * the failure envelope. Drop once `reason` is formally deprecated.
+   */
+  legacyReason?: boolean;
+  /** Extra fields merged into the envelope (e.g. `domain`). */
+  fields?: Record<string, unknown>;
+  /**
+   * Where the JSON envelope goes. Defaults to stdout, the documented machine-
+   * output channel. `apitap serve` overrides it to stderr because there stdout
+   * is the MCP stdio transport — its `--json` tool list already goes to stderr
+   * for the same reason.
+   */
+  stream?: 'stdout' | 'stderr';
+  /**
+   * Process exit code. Defaults to 1. `apitap doctor` uses 2 for "the run
+   * itself broke", reserving 1 for "findings remain".
+   */
+  exitCode?: number;
+}
+
+/**
+ * The single error-exit path for the CLI (issue #79).
+ *
+ * `--json` is a stated design decision on every command ("CLI is the API"), but
+ * only the success half of that contract was honoured — failures printed human
+ * text to stderr and left stdout empty, so an agent parsing stdout saw nothing
+ * at all. Every error exit goes through here so the shape cannot drift per
+ * command.
+ *
+ * The human line still goes to stderr in both modes: agents parse stdout, while
+ * interactive use and `apitap … >out.json` piping keep working unchanged.
+ */
+function failCli(json: boolean, error: string, opts: FailOptions = {}): never {
+  if (json) {
+    const envelope = JSON.stringify({
+      success: false,
+      error,
+      ...(opts.legacyReason ? { reason: error } : {}),
+      ...(opts.usage ? { usage: opts.usage } : {}),
+      ...opts.fields,
+    }, null, 2);
+    if (opts.stream === 'stderr') console.error(envelope);
+    else console.log(envelope);
+  }
+  console.error(`Error: ${error}${opts.usage ? `. Usage: ${opts.usage}` : ''}`);
+  process.exit(opts.exitCode ?? 1);
+}
+
 function printUsage(): void {
   console.log(`
   apitap — API interception for AI agents
@@ -225,14 +281,14 @@ const TIER_BADGES: Record<string, string> = {
 };
 
 async function handleCapture(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  // Read `json` before the argument check: the failure path needs it too.
+  const json = flags.json === true;
   const url = positional[0];
   if (!url) {
-    console.error('Error: URL required. Usage: apitap capture <url>');
-    process.exit(1);
+    failCli(json, 'URL required', { usage: 'apitap capture <url>' });
   }
 
   const fullUrl = url.startsWith('http') ? url : `https://${url}`;
-  const json = flags.json === true;
   const duration = typeof flags.duration === 'string' ? parseInt(flags.duration, 10) : undefined;
   const port = typeof flags.port === 'string' ? parseInt(flags.port, 10) : undefined;
   const skipVerify = flags['no-verify'] === true;
@@ -242,8 +298,7 @@ async function handleCapture(positional: string[], flags: Record<string, string 
   if (flags['danger-disable-ssrf'] !== true) {
     const ssrfCheck = await resolveAndValidateUrl(fullUrl);
     if (!ssrfCheck.safe) {
-      console.error(`Error: URL blocked (SSRF): ${ssrfCheck.reason}`);
-      process.exit(1);
+      failCli(json, `URL blocked (SSRF): ${ssrfCheck.reason}`);
     }
   }
 
@@ -372,13 +427,12 @@ async function handleCapture(positional: string[], flags: Record<string, string 
 }
 
 async function handleSearch(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const json = flags.json === true;
   const query = positional.join(' ');
   if (!query) {
-    console.error('Error: Query required. Usage: apitap search <query>');
-    process.exit(1);
+    failCli(json, 'Query required', { usage: 'apitap search <query>' });
   }
 
-  const json = flags.json === true;
   const result = await searchSkills(query, SKILLS_DIR);
 
   if (json) {
@@ -424,20 +478,19 @@ async function handleList(flags: Record<string, string | boolean>): Promise<void
 }
 
 async function handleShow(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const json = flags.json === true;
   const domain = positional[0];
   if (!domain) {
-    console.error('Error: Domain required. Usage: apitap show <domain>');
-    process.exit(1);
+    failCli(json, 'Domain required', { usage: 'apitap show <domain>' });
   }
 
   // Intentionally skip HMAC for browse-only — verification happens at replay time
   const skill = await readSkillFile(domain, SKILLS_DIR, { verifySignature: false });
   if (!skill) {
-    console.error(`Error: No skill file found for "${domain}". Run \`apitap capture\` first.`);
-    process.exit(1);
+    failCli(json, `No skill file found for "${domain}". Run \`apitap capture\` first.`, {
+      fields: { domain },
+    });
   }
-
-  const json = flags.json === true;
 
   if (json) {
     console.log(JSON.stringify(skill, null, 2));
@@ -462,25 +515,25 @@ async function handleShow(positional: string[], flags: Record<string, string | b
 }
 
 async function handleReplay(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
-  const [domain, endpointId, ...paramArgs] = positional;
-  if (!domain || !endpointId) {
-    console.error('Error: Domain and endpoint required. Usage: apitap replay <domain> <endpoint-id> [key=value...]');
-    process.exit(1);
-  }
-
-  // Parsed up front (ordering trap): the auth warning below fires before the
-  // rest of the flags are read, so `json` and the `notices` sink must exist
-  // by then to keep --json stderr clean.
+  // Parsed up front (ordering trap): the argument check and the auth warning
+  // below both fire before the rest of the flags are read, so `json` and the
+  // `notices` sink must exist by then to keep --json output well-formed.
   const json = flags.json === true;
   const notices: string[] = [];
+
+  const [domain, endpointId, ...paramArgs] = positional;
+  if (!domain || !endpointId) {
+    failCli(json, 'Domain and endpoint required', {
+      usage: 'apitap replay <domain> <endpoint-id> [key=value...]',
+    });
+  }
 
   const machineId = await getMachineId();
   const signingKey = deriveSigningKey(machineId);
   const trustUnsigned = flags['trust-unsigned'] === true;
   const skill = await readSkillFile(domain, SKILLS_DIR, { verifySignature: true, signingKey, trustUnsigned });
   if (!skill) {
-    console.error(`Error: No skill file found for "${domain}".`);
-    process.exit(1);
+    failCli(json, `No skill file found for "${domain}".`, { fields: { domain } });
   }
 
   // Parse key=value params
@@ -638,13 +691,15 @@ async function handleImport(positional: string[], flags: Record<string, string |
     return;
   }
 
+  const json = flags.json === true;
+
   const source = positional[0];
   if (!source) {
-    console.error('Error: File path or URL required. Usage: apitap import <file|url>');
-    process.exit(1);
+    failCli(json, 'File path or URL required', {
+      usage: 'apitap import <file|url>',
+      legacyReason: true,
+    });
   }
-
-  const json = flags.json === true;
 
   // Load content — from URL or file
   let rawText: string;
@@ -664,12 +719,7 @@ async function handleImport(positional: string[], flags: Record<string, string |
       rawText = await response.text();
     } catch (err: any) {
       const msg = `Failed to fetch ${source}: ${err.message}`;
-      if (json) {
-        console.log(JSON.stringify({ success: false, reason: msg }));
-      } else {
-        console.error(`Error: ${msg}`);
-      }
-      process.exit(1);
+      failCli(json, msg, { legacyReason: true });
     }
   } else {
     try {
@@ -678,12 +728,7 @@ async function handleImport(positional: string[], flags: Record<string, string |
       sourceUrl = `file://${resolve(source)}`;
     } catch (err: any) {
       const msg = `Failed to read ${source}: ${err.message}`;
-      if (json) {
-        console.log(JSON.stringify({ success: false, reason: msg }));
-      } else {
-        console.error(`Error: ${msg}`);
-      }
-      process.exit(1);
+      failCli(json, msg, { legacyReason: true });
     }
   }
 
@@ -699,12 +744,7 @@ async function handleImport(positional: string[], flags: Record<string, string |
         throw new Error('YAML parsed to non-object');
       }
     } catch (yamlErr: any) {
-      if (json) {
-        console.log(JSON.stringify({ success: false, reason: `Invalid JSON/YAML: ${yamlErr.message}` }));
-      } else {
-        console.error(`Error: Could not parse as JSON or YAML: ${yamlErr.message}`);
-      }
-      process.exit(1);
+      failCli(json, `Could not parse as JSON or YAML: ${yamlErr.message}`, { legacyReason: true });
     }
   }
 
@@ -749,24 +789,14 @@ async function handleSkillFileImport(filePath: string, json: boolean): Promise<v
     const dnsCheck = await resolveAndValidateUrl(raw.baseUrl);
     if (!dnsCheck.safe) {
       const msg = `DNS rebinding risk: ${dnsCheck.reason}`;
-      if (json) {
-        console.log(JSON.stringify({ success: false, reason: msg }));
-      } else {
-        console.error(`Error: ${msg}`);
-      }
-      process.exit(1);
+      failCli(json, msg, { legacyReason: true });
     }
   }
 
   const result = await importSkillFile(filePath, undefined, key);
 
   if (!result.success) {
-    if (json) {
-      console.log(JSON.stringify({ success: false, reason: result.reason }));
-    } else {
-      console.error(`Error: ${result.reason}`);
-    }
-    process.exit(1);
+    failCli(json, result.reason ?? 'Import failed', { legacyReason: true });
   }
 
   if (json) {
@@ -793,12 +823,7 @@ async function handleOpenAPIImport(
     importResult = convertOpenAPISpec(spec, specUrl);
   } catch (err: any) {
     const msg = `Failed to convert OpenAPI spec: ${err.message}`;
-    if (json) {
-      console.log(JSON.stringify({ success: false, reason: msg }));
-    } else {
-      console.error(`Error: ${msg}`);
-    }
-    process.exit(1);
+    failCli(json, msg, { legacyReason: true });
   }
 
   const { domain, endpoints, meta } = importResult;
@@ -812,12 +837,7 @@ async function handleOpenAPIImport(
   const dnsCheck = await resolveAndValidateUrl(`https://${domain}`);
   if (!dnsCheck.safe) {
     const msg = `DNS rebinding risk for ${domain}: ${dnsCheck.reason}`;
-    if (json) {
-      console.log(JSON.stringify({ success: false, reason: msg }));
-    } else {
-      console.error(`Error: ${msg}`);
-    }
-    process.exit(1);
+    failCli(json, msg, { legacyReason: true });
   }
 
   // Read existing skill file (if any)
@@ -921,12 +941,7 @@ async function handleApisGuruImport(flags: Record<string, string | boolean>): Pr
     entries = filterEntries(allEntries, { search, limit, preferOpenapi3: true });
   } catch (err: any) {
     const msg = `Failed to fetch APIs.guru list: ${err.message}`;
-    if (json) {
-      console.log(JSON.stringify({ success: false, reason: msg }));
-    } else {
-      console.error(`Error: ${msg}`);
-    }
-    process.exit(1);
+    failCli(json, msg, { legacyReason: true });
   }
 
   if (entries.length === 0) {
@@ -1092,13 +1107,10 @@ async function handleSwaggerHubImport(flags: Record<string, string | boolean>): 
   const skillsDir = SKILLS_DIR || join(APITAP_DIR, 'skills');
 
   if (!query) {
-    const msg = 'Error: --query required for SwaggerHub import. Usage: apitap import --from swaggerhub --query <term>';
-    if (json) {
-      console.log(JSON.stringify({ success: false, reason: msg }));
-    } else {
-      console.error(msg);
-    }
-    process.exit(1);
+    failCli(json, '--query required for SwaggerHub import', {
+      usage: 'apitap import --from swaggerhub --query <term>',
+      legacyReason: true,
+    });
   }
 
   if (!json) {
@@ -1114,12 +1126,7 @@ async function handleSwaggerHubImport(flags: Record<string, string | boolean>): 
     totalCount = result.totalCount;
   } catch (err: any) {
     const msg = `Failed to search SwaggerHub: ${err.message}`;
-    if (json) {
-      console.log(JSON.stringify({ success: false, reason: msg }));
-    } else {
-      console.error(`Error: ${msg}`);
-    }
-    process.exit(1);
+    failCli(json, msg, { legacyReason: true });
   }
 
   if (!json) {
@@ -1256,21 +1263,13 @@ async function handleGitHubImport(flags: Record<string, string | boolean>): Prom
   // Mutual exclusion
   if (org && topicFlag) {
     const msg = '--org and --topic are mutually exclusive';
-    if (json) {
-      console.log(JSON.stringify({ success: false, reason: msg }));
-    } else {
-      console.error(`Error: ${msg}`);
-    }
-    process.exit(1);
+    failCli(json, msg, { legacyReason: true });
   }
   if (!org && !topicFlag) {
-    const msg = '--org or --topic required. Usage: apitap import --from github --org <name> OR --topic [name]';
-    if (json) {
-      console.log(JSON.stringify({ success: false, reason: msg }));
-    } else {
-      console.error(`Error: ${msg}`);
-    }
-    process.exit(1);
+    failCli(json, '--org or --topic required', {
+      usage: 'apitap import --from github --org <name> OR --topic [name]',
+      legacyReason: true,
+    });
   }
 
   // --min-stars: different defaults per mode
@@ -1287,12 +1286,7 @@ async function handleGitHubImport(flags: Record<string, string | boolean>): Prom
   const token = await resolveGitHubToken();
   if (org && token === null) {
     const msg = "--org requires a GitHub token. Run 'gh auth login' or set GITHUB_TOKEN.";
-    if (json) {
-      console.log(JSON.stringify({ success: false, reason: msg }));
-    } else {
-      console.error(`Error: ${msg}`);
-    }
-    process.exit(1);
+    failCli(json, msg, { legacyReason: true });
   }
 
   // Discovery phase
@@ -1320,12 +1314,7 @@ async function handleGitHubImport(flags: Record<string, string | boolean>): Prom
     }
   } catch (err: any) {
     const msg = `GitHub discovery failed: ${err.message}`;
-    if (json) {
-      console.log(JSON.stringify({ success: false, reason: msg }));
-    } else {
-      console.error(`Error: ${msg}`);
-    }
-    process.exit(1);
+    failCli(json, msg, { legacyReason: true });
   }
 
   // Filter: forks, archived, stale, min-stars
@@ -1599,12 +1588,7 @@ async function handleKnownSpecsImport(flags: Record<string, string | boolean>): 
     allSpecs = loadKnownSpecs();
   } catch (err: any) {
     const msg = `Failed to load known-specs.json: ${err.message}`;
-    if (json) {
-      console.log(JSON.stringify({ success: false, reason: msg }));
-    } else {
-      console.error(`Error: ${msg}`);
-    }
-    process.exit(1);
+    failCli(json, msg, { legacyReason: true });
   }
 
   // Filter by --query
@@ -1797,22 +1781,20 @@ async function handleKnownSpecsImport(flags: Record<string, string | boolean>): 
 }
 
 async function handleRefresh(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const json = flags.json === true;
   const domain = positional[0];
   if (!domain) {
-    console.error('Error: Domain required. Usage: apitap refresh <domain>');
-    process.exit(1);
+    failCli(json, 'Domain required', { usage: 'apitap refresh <domain>' });
   }
 
   const trustUnsigned = flags['trust-unsigned'] === true;
   const skill = await readSkillFile(domain, SKILLS_DIR, { trustUnsigned });
   if (!skill) {
-    console.error(`Error: No skill file found for "${domain}".`);
-    process.exit(1);
+    failCli(json, `No skill file found for "${domain}".`, { fields: { domain } });
   }
 
   const machineId = await getEffectiveMachineId();
   const authManager = new AuthManager(APITAP_DIR, machineId);
-  const json = flags.json === true;
 
   if (!json) {
     console.log(`\n  🔄 Refreshing tokens for ${domain}...`);
@@ -1830,6 +1812,13 @@ async function handleRefresh(positional: string[], flags: Record<string, string 
       tokens: Object.fromEntries(Object.keys(result.tokens).map(k => [k, '[redacted]'])),
     };
     console.log(JSON.stringify(safeResult, null, 2));
+    // Exit code must agree with the envelope. Previously a failed refresh under
+    // --json printed success:false but exited 0, so callers keying on the exit
+    // code saw a success (issue #79, same failure-contract family).
+    if (!result.success) {
+      console.error(`Error: Refresh failed: ${result.error || 'no tokens captured'}`);
+      process.exit(1);
+    }
   } else if (result.success) {
     if (result.oauthRefreshed) {
       console.log(`  ✓ OAuth token refreshed via token endpoint`);
@@ -1857,15 +1846,15 @@ async function handleAuthRequest(positional: string[], flags: Record<string, str
   const json = flags.json === true;
 
   if (!domain) {
-    console.error('Error: Domain required. Usage: apitap auth request <domain> [--login-url <url>] [--timeout <seconds>] [--json]');
-    process.exit(1);
+    failCli(json, 'Domain required', {
+      usage: 'apitap auth request <domain> [--login-url <url>] [--timeout <seconds>] [--json]',
+    });
   }
 
   const loginUrl = typeof flags['login-url'] === 'string' ? flags['login-url'] : undefined;
   const timeoutSec = typeof flags.timeout === 'string' ? parseInt(flags.timeout, 10) : undefined;
   if (timeoutSec !== undefined && (!Number.isFinite(timeoutSec) || timeoutSec <= 0)) {
-    console.error('Error: --timeout must be a positive number of seconds');
-    process.exit(1);
+    failCli(json, '--timeout must be a positive number of seconds', { fields: { domain } });
   }
 
   const machineId = await getEffectiveMachineId();
@@ -1895,17 +1884,20 @@ async function handleAuthRequest(positional: string[], flags: Record<string, str
       }, null, 2));
     } else if (result.success) {
       console.log(`  ✓ Stored auth for ${domain} (${result.cookieCount} cookies${result.authDetected ? `, ${result.authDetected}` : ''})\n`);
-    } else {
-      console.error(`  ✗ Auth request failed: ${result.error ?? 'unknown error'}\n`);
     }
 
-    if (!result.success) process.exit(1);
+    // The human line goes to stderr in both modes (issue #79). This path keeps
+    // its bespoke stdout envelope rather than calling failCli, so the allow-list
+    // above stays the single place that decides what may reach stdout.
+    if (!result.success) {
+      console.error(`  ✗ Auth request failed: ${result.error ?? 'unknown error'}\n`);
+      process.exit(1);
+    }
   } catch (err: any) {
     if (json) {
       console.log(JSON.stringify({ domain, success: false, error: err.message }, null, 2));
-    } else {
-      console.error(`  ✗ Auth request failed: ${err.message}\n`);
     }
+    console.error(`  ✗ Auth request failed: ${err.message}\n`);
     process.exit(1);
   }
 }
@@ -1945,10 +1937,9 @@ async function handleAuth(positional: string[], flags: Record<string, string | b
 
   // Require domain for other operations
   if (!domain) {
-    console.error('Error: Domain required. Usage: apitap auth <domain> [--clear] [--json]');
-    console.error('       apitap auth --list [--json]');
-    console.error('       apitap auth request <domain> [--login-url <url>] [--timeout <seconds>] [--json]');
-    process.exit(1);
+    failCli(json, 'Domain required', {
+      usage: 'apitap auth <domain> [--clear] [--json] | apitap auth --list [--json] | apitap auth request <domain> [--login-url <url>] [--timeout <seconds>] [--json]',
+    });
   }
 
   // Clear auth for domain
@@ -2027,14 +2018,13 @@ async function handleAuth(positional: string[], flags: Record<string, string | b
 }
 
 async function handleServe(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
-  const domain = positional[0];
-  if (!domain) {
-    console.error('Error: Domain required. Usage: apitap serve <domain>');
-    process.exit(1);
-  }
-
   const noAuth = flags['no-auth'] === true;
   const json = flags.json === true;
+
+  const domain = positional[0];
+  if (!domain) {
+    failCli(json, 'Domain required', { usage: 'apitap serve <domain>', stream: 'stderr' });
+  }
 
   try {
     const server = await createServeServer(domain, {
@@ -2060,8 +2050,7 @@ async function handleServe(positional: string[], flags: Record<string, string | 
     const transport = new StdioServerTransport();
     await server.connect(transport);
   } catch (err: any) {
-    console.error(`Error: ${err.message}`);
-    process.exit(1);
+    failCli(json, err.message, { stream: 'stderr' });
   }
 }
 
@@ -2091,10 +2080,10 @@ function timeAgo(isoDate: string): string {
 }
 
 async function handleInspect(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const json = flags.json === true;
   const url = positional[0];
   if (!url) {
-    console.error('Usage: apitap inspect <url>');
-    process.exit(1);
+    failCli(json, 'URL required', { usage: 'apitap inspect <url>' });
   }
 
   // SSRF validation for CLI (H6 fix)
@@ -2102,12 +2091,10 @@ async function handleInspect(positional: string[], flags: Record<string, string 
   if (flags['danger-disable-ssrf'] !== true) {
     const ssrfCheck = await resolveAndValidateUrl(fullInspectUrl);
     if (!ssrfCheck.safe) {
-      console.error(`Error: URL blocked (SSRF): ${ssrfCheck.reason}`);
-      process.exit(1);
+      failCli(json, `URL blocked (SSRF): ${ssrfCheck.reason}`);
     }
   }
 
-  const json = flags.json === true;
   const duration = typeof flags.duration === 'string' ? parseInt(flags.duration, 10) : 30;
 
   if (!json) {
@@ -2187,26 +2174,20 @@ async function handleStats(flags: Record<string, string | boolean>): Promise<voi
 }
 
 async function handleDiscover(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
-  const url = positional[0];
-  if (!url) {
-    console.error('Error: URL required. Usage: apitap discover <url>');
-    process.exit(1);
-  }
-
   const json = flags.json === true;
   const save = flags.save === true;
+
+  const url = positional[0];
+  if (!url) {
+    failCli(json, 'URL required', { usage: 'apitap discover <url>' });
+  }
 
   // SSRF validation for CLI (H6 fix)
   const fullDiscoverUrl = url.startsWith('http') ? url : `https://${url}`;
   if (flags['danger-disable-ssrf'] !== true) {
     const ssrfCheck = await resolveAndValidateUrl(fullDiscoverUrl);
     if (!ssrfCheck.safe) {
-      if (json) {
-        console.log(JSON.stringify({ error: `URL blocked (SSRF): ${ssrfCheck.reason}` }));
-      } else {
-        console.error(`Error: URL blocked (SSRF): ${ssrfCheck.reason}`);
-      }
-      process.exit(1);
+      failCli(json, `URL blocked (SSRF): ${ssrfCheck.reason}`);
     }
   }
 
@@ -2318,14 +2299,14 @@ async function handleDiscover(positional: string[], flags: Record<string, string
 }
 
 async function handleBrowse(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
-  const url = positional[0];
-  if (!url) {
-    console.error('Error: URL required. Usage: apitap browse <url>');
-    process.exit(1);
-  }
-
   const json = flags.json === true;
   const notices: string[] = [];
+
+  const url = positional[0];
+  if (!url) {
+    failCli(json, 'URL required', { usage: 'apitap browse <url>' });
+  }
+
   const fullUrl = url.startsWith('http') ? url : `https://${url}`;
 
   if (!json) {
@@ -2395,21 +2376,20 @@ async function handleBrowse(positional: string[], flags: Record<string, string |
 }
 
 async function handlePeek(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const json = flags.json === true;
+
   const url = positional[0];
   if (!url) {
-    console.error('Error: URL required. Usage: apitap peek <url>');
-    process.exit(1);
+    failCli(json, 'URL required', { usage: 'apitap peek <url>' });
   }
 
-  const json = flags.json === true;
   const fullUrl = url.startsWith('http') ? url : `https://${url}`;
 
   // SSRF validation for CLI (H6 fix)
   if (flags['danger-disable-ssrf'] !== true) {
     const ssrfCheck = await resolveAndValidateUrl(fullUrl);
     if (!ssrfCheck.safe) {
-      console.error(`Error: URL blocked (SSRF): ${ssrfCheck.reason}`);
-      process.exit(1);
+      failCli(json, `URL blocked (SSRF): ${ssrfCheck.reason}`);
     }
   }
 
@@ -2434,13 +2414,13 @@ async function handlePeek(positional: string[], flags: Record<string, string | b
 }
 
 async function handleRead(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const json = flags.json === true;
+
   const url = positional[0];
   if (!url) {
-    console.error('Error: URL required. Usage: apitap read <url>');
-    process.exit(1);
+    failCli(json, 'URL required', { usage: 'apitap read <url>' });
   }
 
-  const json = flags.json === true;
   const fullUrl = url.startsWith('http') ? url : `https://${url}`;
   const maxBytes = typeof flags['max-bytes'] === 'string' ? parseInt(flags['max-bytes'], 10) : undefined;
 
@@ -2448,8 +2428,7 @@ async function handleRead(positional: string[], flags: Record<string, string | b
   if (flags['danger-disable-ssrf'] !== true) {
     const ssrfCheck = await resolveAndValidateUrl(fullUrl);
     if (!ssrfCheck.safe) {
-      console.error(`Error: URL blocked (SSRF): ${ssrfCheck.reason}`);
-      process.exit(1);
+      failCli(json, `URL blocked (SSRF): ${ssrfCheck.reason}`);
     }
   }
 
@@ -2463,12 +2442,7 @@ async function handleRead(positional: string[], flags: Record<string, string | b
   const result = await read(fullUrl, { maxBytes, scan: scanFlag, includeImages });
 
   if (!result) {
-    if (json) {
-      console.log(JSON.stringify({ error: 'Failed to read content' }));
-    } else {
-      console.error('  Failed to read content\n');
-    }
-    process.exit(1);
+    failCli(json, 'Failed to read content', { fields: { url: fullUrl } });
   }
 
   if (json) {
@@ -2599,16 +2573,15 @@ async function handleAudit(flags: Record<string, string | boolean>): Promise<voi
   console.log();
 }
 
-async function handleForget(positional: string[]): Promise<void> {
+async function handleForget(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const json = flags.json === true;
   const domain = positional[0];
   if (!domain) {
-    console.error('Error: Domain required. Usage: apitap forget <domain>');
-    process.exit(1);
+    failCli(json, 'Domain required', { usage: 'apitap forget <domain>' });
   }
 
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(domain) || domain.includes('..')) {
-    console.error('Error: Invalid domain name');
-    process.exit(1);
+    failCli(json, 'Invalid domain name', { fields: { domain } });
   }
 
   const skillsDir = SKILLS_DIR || join(APITAP_DIR, 'skills');
@@ -2669,8 +2642,8 @@ async function handleDoctor(positional: string[], flags: Record<string, string |
     const signingKey = deriveSigningKey(machineId);
     const staleDays = typeof flags['stale-days'] === 'string' ? Number(flags['stale-days']) : undefined;
     if (staleDays !== undefined && (!Number.isFinite(staleDays) || staleDays < 0)) {
-      console.error('Error: --stale-days must be a non-negative number');
-      process.exit(2);
+      failCli(flags.json === true || typeof flags.json === 'string',
+        '--stale-days must be a non-negative number', { exitCode: 2 });
     }
     // The house arg parser greedily assigns the next bare token as a flag's
     // value, so `--fix polymarket.com` produces flags.fix === 'polymarket.com'
@@ -2717,18 +2690,18 @@ async function handleDoctor(positional: string[], flags: Record<string, string |
     }
     process.exit(report.remaining.length > 0 ? 1 : 0);
   } catch (err: any) {
-    console.error(`Error: ${err.message}`);
-    process.exit(2);
+    failCli(flags.json === true || typeof flags.json === 'string', err.message, { exitCode: 2 });
   }
 }
 
-async function handleIndex(positional: string[]): Promise<void> {
+async function handleIndex(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const json = flags.json === true;
   const subcommand = positional[0];
   if (subcommand !== 'build') {
-    console.error('Usage: apitap index build');
-    console.error('  Force rebuild the search index from all skill files on disk.');
-    console.error('  Run this after manually editing skill files outside of apitap commands.');
-    process.exit(1);
+    failCli(json, 'Unknown index subcommand — force rebuild the search index from all skill files on disk, after manually editing them outside of apitap commands', {
+      usage: 'apitap index build',
+      fields: { subcommand: subcommand ?? null },
+    });
   }
 
   const skillsDir = SKILLS_DIR || join(APITAP_DIR, 'skills');
@@ -2739,15 +2712,15 @@ async function handleIndex(positional: string[]): Promise<void> {
 }
 
 async function handleExtension(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const json = flags.json === true;
   const subcommand = positional[0];
 
   if (subcommand === 'install') {
     const extensionId = flags['extension-id'];
     if (!extensionId || typeof extensionId !== 'string') {
-      console.error('Usage: apitap extension install --extension-id <id>');
-      console.error('');
-      console.error('Find your extension ID at chrome://extensions (enable Developer mode)');
-      process.exit(1);
+      failCli(json, 'Extension ID required — find yours at chrome://extensions (enable Developer mode)', {
+        usage: 'apitap extension install --extension-id <id>',
+      });
     }
 
     // Resolve the native host script path (always use dist/ — compiled output)
@@ -2769,15 +2742,15 @@ async function handleExtension(positional: string[], flags: Record<string, strin
       }
     }
     if (installed.length === 0) {
-      console.error('No browsers found. Are you on Linux or macOS?');
-      process.exit(1);
+      failCli(json, 'No browsers found. Are you on Linux or macOS?', { fields: { errors } });
     }
     return;
   }
 
-  console.error(`Unknown extension subcommand: ${subcommand}`);
-  console.error('Usage: apitap extension install --extension-id <id>');
-  process.exit(1);
+  failCli(json, `Unknown extension subcommand: ${subcommand}`, {
+    usage: 'apitap extension install --extension-id <id>',
+    fields: { subcommand: subcommand ?? null },
+  });
 }
 
 async function handleAttach(_positional: string[], flags: Record<string, string | boolean>): Promise<void> {
@@ -2859,7 +2832,7 @@ async function main(): Promise<void> {
       await handleAudit(flags);
       break;
     case 'forget':
-      await handleForget(positional);
+      await handleForget(positional, flags);
       break;
     case 'extension':
       await handleExtension(positional, flags);
@@ -2868,7 +2841,7 @@ async function main(): Promise<void> {
       await handleAttach(positional, flags);
       break;
     case 'index':
-      await handleIndex(positional);
+      await handleIndex(positional, flags);
       break;
     default:
       printUsage();
@@ -2876,6 +2849,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error(`Error: ${err.message}`);
-  process.exit(1);
+  // Last resort: an unexpected throw is still a failure an agent must be able
+  // to parse, so re-read --json off argv rather than leaving stdout empty.
+  failCli(parseArgs(process.argv.slice(2)).flags.json === true, err.message);
 });

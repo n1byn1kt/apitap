@@ -117,8 +117,9 @@ some commands write notices to stderr.
 ## Quick Reference
 
 Every command in this table accepts `--json`. The one exception anywhere in
-this file is `apitap index build` (see Pitfalls) — it takes no flags and
-always prints human-readable text.
+this file is `apitap index build` (see Pitfalls) — on success it takes no
+flags and always prints human-readable text. Its *failure* path honours
+`--json` like every other command.
 
 | Command | What it does |
 |---|---|
@@ -290,7 +291,12 @@ values either, so a non-numeric one is discarded just as quietly.
     the response payload.
 - On success, `--json` makes every table command in Quick Reference print
   parseable JSON on stdout. `apitap index build` is the exception: it has no
-  `--json` mode and always prints human-readable text.
+  `--json` success mode and always prints human-readable text.
+- On failure, `--json` prints `{"success": false, "error": "...", "usage": "..."}`
+  on stdout and exits non-zero, for every command including `index build`. The
+  human-readable line still goes to stderr, so both audiences are served. The one
+  channel exception is `apitap serve`, whose stdout is the MCP transport — its
+  failure envelope goes to stderr, same as its `--json` tool list.
 - `apitap list --json` shows the new skill file after an `apitap capture`,
   `apitap discover --save`, or `apitap import`.
 - `apitap stats --json` reports endpoints and token savings per domain.

@@ -53,7 +53,7 @@ Skill file → replay/engine.ts → fetch() → JSON response
 
 ### Key Design Decisions
 
-- **CLI is the API**: agents use the same commands humans do. `--json` on every command for machine output.
+- **CLI is the API**: agents use the same commands humans do. `--json` on every command for machine output. That covers failures too — every error exit goes through `failCli()` in `src/cli.ts`, which prints `{success: false, error, usage?}` to stdout under `--json` while keeping the human line on stderr. Add new error exits via `failCli`, never a bare `console.error` + `process.exit`.
 - **Skill files are the central artifact**: JSON at `~/.apitap/skills/<domain>.json` with version, endpoints, auth config, provenance, and HMAC signature.
 - **Auth is never in skill files**: credentials live in separate encrypted storage. Skill files only contain `[stored]` placeholders.
 - **SSRF defense is multi-layered**: validated at import, at replay, after DNS resolution, and after redirects. Private IPs, cloud metadata, localhost all blocked.

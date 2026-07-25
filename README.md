@@ -476,6 +476,10 @@ apitap auth api.example.com
 # List all domains with stored auth
 apitap auth --list
 
+# Open a browser so a human can sign in, then store the session
+# (close the browser window when done — that is the "finished" signal)
+apitap auth request api.example.com
+
 # Refresh expired tokens via browser
 apitap refresh api.example.com
 
@@ -694,6 +698,7 @@ All commands support `--json` for machine-readable output.
 | `apitap replay <domain> <id> [key=val...]` | Replay an API endpoint |
 | `apitap refresh <domain>` | Refresh auth tokens via browser |
 | `apitap auth [domain]` | View or manage stored auth |
+| `apitap auth request <domain>` | Open a browser for human login, store the session |
 | `apitap mcp` | Run the full ApiTap MCP server over stdio |
 | `apitap serve <domain>` | Serve a skill file as an MCP server |
 | `apitap inspect <url>` | Discover APIs without saving |

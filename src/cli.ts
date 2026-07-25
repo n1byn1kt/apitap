@@ -12,6 +12,7 @@ import { resolveAndValidateUrl } from './skill/ssrf.js';
 import { verifyEndpoints } from './capture/verifier.js';
 import { searchSkills } from './skill/search.js';
 import { refreshTokens } from './auth/refresh.js';
+import { requestAuth } from './auth/handoff.js';
 import { parseJwtClaims } from './capture/entropy.js';
 import { createServeServer, buildServeTools } from './serve.js';
 import { buildInspectReport, formatInspectHuman } from './inspect/report.js';
@@ -109,6 +110,8 @@ function printUsage(): void {
                                Import from topic-tagged repos (--query to filter)
     apitap refresh <domain>    Refresh auth tokens via browser
     apitap auth [domain]       View or manage stored auth
+    apitap auth request <domain>
+                               Open a browser for human login, store the session
     apitap mcp                 Run the full ApiTap MCP server over stdio
     apitap serve <domain>      Serve a skill file as an MCP server
     apitap browse <url>        Browse a URL (discover + replay in one step)
@@ -1844,7 +1847,78 @@ async function handleRefresh(positional: string[], flags: Record<string, string 
   }
 }
 
+/**
+ * `apitap auth request <domain>` — open a visible browser so a human can log in
+ * (2FA, CAPTCHAs), then store the resulting session encrypted. CLI twin of the
+ * `apitap_auth_request` MCP tool.
+ */
+async function handleAuthRequest(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  const domain = positional[0];
+  const json = flags.json === true;
+
+  if (!domain) {
+    console.error('Error: Domain required. Usage: apitap auth request <domain> [--login-url <url>] [--timeout <seconds>] [--json]');
+    process.exit(1);
+  }
+
+  const loginUrl = typeof flags['login-url'] === 'string' ? flags['login-url'] : undefined;
+  const timeoutSec = typeof flags.timeout === 'string' ? parseInt(flags.timeout, 10) : undefined;
+  if (timeoutSec !== undefined && (!Number.isFinite(timeoutSec) || timeoutSec <= 0)) {
+    console.error('Error: --timeout must be a positive number of seconds');
+    process.exit(1);
+  }
+
+  const machineId = await getEffectiveMachineId();
+  const authManager = new AuthManager(APITAP_DIR, machineId);
+
+  if (!json) {
+    console.log(`\n  Opening a browser for ${domain} — log in, then CLOSE THE WINDOW when you are done.\n`);
+  }
+
+  try {
+    const result = await requestAuth(authManager, {
+      domain,
+      loginUrl,
+      timeout: timeoutSec !== undefined ? timeoutSec * 1000 : undefined,
+    });
+
+    if (json) {
+      // Serialize an explicit allow-list rather than spreading HandoffResult, so
+      // a future field on that type cannot leak cookies/tokens to stdout.
+      // Same defensive pattern as handleRefresh.
+      console.log(JSON.stringify({
+        domain,
+        success: result.success,
+        cookieCount: result.cookieCount,
+        ...(result.authDetected ? { authDetected: result.authDetected } : {}),
+        ...(result.error ? { error: result.error } : {}),
+      }, null, 2));
+    } else if (result.success) {
+      console.log(`  ✓ Stored auth for ${domain} (${result.cookieCount} cookies${result.authDetected ? `, ${result.authDetected}` : ''})\n`);
+    } else {
+      console.error(`  ✗ Auth request failed: ${result.error ?? 'unknown error'}\n`);
+    }
+
+    if (!result.success) process.exit(1);
+  } catch (err: any) {
+    if (json) {
+      console.log(JSON.stringify({ domain, success: false, error: err.message }, null, 2));
+    } else {
+      console.error(`  ✗ Auth request failed: ${err.message}\n`);
+    }
+    process.exit(1);
+  }
+}
+
 async function handleAuth(positional: string[], flags: Record<string, string | boolean>): Promise<void> {
+  // `auth` has one subcommand. Dispatch it before treating positional[0] as a
+  // domain, otherwise `apitap auth request github.com` silently inspects a
+  // domain literally named "request" and exits 0.
+  if (positional[0] === 'request') {
+    await handleAuthRequest(positional.slice(1), flags);
+    return;
+  }
+
   const domain = positional[0];
   const json = flags.json === true;
   const machineId = await getEffectiveMachineId();
@@ -1873,6 +1947,7 @@ async function handleAuth(positional: string[], flags: Record<string, string | b
   if (!domain) {
     console.error('Error: Domain required. Usage: apitap auth <domain> [--clear] [--json]');
     console.error('       apitap auth --list [--json]');
+    console.error('       apitap auth request <domain> [--login-url <url>] [--timeout <seconds>] [--json]');
     process.exit(1);
   }
 

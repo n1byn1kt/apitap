@@ -1,5 +1,7 @@
 # ApiTap
 
+[![MCP Toplist](https://mcptoplist.com/badge/glama%2Fn1byn1kt%2Fapitap.svg)](https://mcptoplist.com/server/glama%2Fn1byn1kt%2Fapitap)
+
 [![npm version](https://img.shields.io/npm/v/@apitap/core)](https://www.npmjs.com/package/@apitap/core)
 [![tests](https://img.shields.io/badge/tests-1815%20passing-brightgreen)](https://github.com/n1byn1kt/apitap)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)

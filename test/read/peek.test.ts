@@ -235,8 +235,8 @@ describe('peek', () => {
     await setupServer(); // restore for afterEach teardown
   });
 
-  it('oversized response headers surface UND_ERR_HEADERS_OVERFLOW, not "blocked"', async () => {
-    // Polymarket class: enormous CSP headers overflow undici's client-side
+  it('oversized response headers surface HPE_HEADER_OVERFLOW, not "blocked"', async () => {
+    // Polymarket class: enormous CSP headers overflow the HTTP client's
     // header limit. curl gets a 200 — this is not bot protection.
     responseHeaders['content-security-policy'] = 'x'.repeat(128 * 1024);
     const result = await peek(baseUrl, { skipSsrf: true });
@@ -244,7 +244,7 @@ describe('peek', () => {
     assert.equal(result.accessible, false);
     assert.equal(result.recommendation, 'error');
     assert.ok(
-      result.signals.some(s => s.includes('UND_ERR_HEADERS_OVERFLOW')),
+      result.signals.some(s => s.includes('HPE_HEADER_OVERFLOW')),
       `signals: ${result.signals}`,
     );
     assert.ok(

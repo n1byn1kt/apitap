@@ -1,7 +1,7 @@
 // test/skill/ssrf.test.ts
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateUrl, validateSkillFileUrls } from '../../src/skill/ssrf.js';
+import { validateUrl, validateSkillFileUrls, isPrivateIp } from '../../src/skill/ssrf.js';
 import type { SkillFile } from '../../src/types.js';
 
 describe('SSRF validation', () => {
@@ -131,5 +131,35 @@ describe('SSRF validation', () => {
       ]));
       assert.equal(result.safe, false);
     });
+  });
+});
+
+describe('reserved IPv4 ranges (multicast, documentation)', () => {
+  for (const ip of ['224.0.0.1', '239.255.255.250', '192.0.2.10', '198.51.100.7', '203.0.113.9']) {
+    it(`blocks ${ip} as a literal`, () => {
+      assert.equal(validateUrl(`http://${ip}/`).safe, false);
+    });
+    it(`flags ${ip} as a resolved address`, () => {
+      assert.ok(isPrivateIp(ip));
+    });
+  }
+  it('flags 192.0.0.0/24 as a resolved address', () => {
+    assert.ok(isPrivateIp('192.0.0.8'));
+  });
+  it('still allows ordinary public addresses', () => {
+    assert.equal(isPrivateIp('93.184.215.14'), null);
+    assert.equal(validateUrl('http://203.0.114.1/').safe, true);
+  });
+});
+
+describe('deprecated IPv6 forms that embed IPv4', () => {
+  for (const host of ['[::127.0.0.1]', '[::7f00:1]', '[0:0:0:0:0:0:a9fe:a9fe]', '[2002:7f00:1::]', '[2002:c0a8:101::1]']) {
+    it(`blocks ${host}`, () => {
+      assert.equal(validateUrl(`http://${host}/`).safe, false);
+    });
+  }
+  it('still allows ordinary public IPv6', () => {
+    assert.equal(isPrivateIp('2606:4700:4700::1111'), null);
+    assert.equal(isPrivateIp('2001:4860:4860::8888'), null);
   });
 });

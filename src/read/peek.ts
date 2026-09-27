@@ -35,13 +35,13 @@ export async function peek(url: string, options: PeekOptions = {}): Promise<Peek
 
   // Both HEAD and GET failed — say why, honestly. A client-side transport
   // failure is NOT the site blocking us (Polymarket's huge CSP headers
-  // overflow undici while curl gets a 200).
+  // overflow the HTTP client while curl gets a 200).
   if (!result) {
     if (fetchError?.kind === 'ssrf') {
       signals.push(`blocked by SSRF protection: ${fetchError.message}`);
     } else {
       signals.push(`transport error: ${fetchError?.code ?? 'UNKNOWN'} (${fetchError?.message ?? 'fetch failed'})`);
-      if (fetchError?.code === 'UND_ERR_HEADERS_OVERFLOW') {
+      if (fetchError?.code === 'HPE_HEADER_OVERFLOW' || fetchError?.code === 'UND_ERR_HEADERS_OVERFLOW') {
         signals.push('response headers exceeded the HTTP client limit — not bot protection; the site may still be reachable');
       }
     }

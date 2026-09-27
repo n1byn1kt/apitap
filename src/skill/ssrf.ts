@@ -156,6 +156,11 @@ export function validateUrl(urlString: string): ValidationResult {
     if (first >= 240) {
       return { safe: false, reason: `URL targets reserved address: ${hostname}` };
     }
+    // Multicast and documentation ranges share isPrivateIp's list
+    const extra = reservedIpv4Extra(first, second, Number(ipv4Match[3]));
+    if (extra) {
+      return { safe: false, reason: `URL targets ${extra} address: ${hostname}` };
+    }
   }
 
   return { safe: true };
@@ -207,7 +212,7 @@ function normalizeIpv4(hostname: string): string | null {
 /**
  * Check if a resolved IP address is in a private/reserved range.
  */
-function isPrivateIp(ip: string): string | null {
+export function isPrivateIp(ip: string): string | null {
   // IPv6 loopback
   if (ip === '::1') return 'IPv6 loopback';
 
@@ -243,6 +248,11 @@ function isPrivateIp(ip: string): string | null {
     // NAT64 translation prefix — embeds an IPv4 address in the low 32 bits,
     // so it can reach internal IPv4 hosts (e.g. 64:ff9b::7f00:1 → 127.0.0.1).
     if (/^64:ff9b:/i.test(ipv4)) return 'IPv6 NAT64 (64:ff9b::/96)';
+    // Deprecated forms that embed an IPv4 address: IPv4-compatible ::/96
+    // (e.g. ::127.0.0.1 → ::7f00:1) and 6to4 2002::/16. Neither is a
+    // legitimate fetch target today, so block them outright.
+    if (isIPv6(ipv4) && isIpv4Compatible(ipv4)) return 'IPv6 IPv4-compatible (::/96, deprecated)';
+    if (/^2002:/i.test(ipv4)) return 'IPv6 6to4 (2002::/16, deprecated)';
     // Deprecated site-local fec0::/10 (fec0–feff); link-local fe80::/10 is
     // handled above by the fe[89ab] check.
     if (/^fe[c-f][0-9a-f]:/i.test(ipv4)) return 'IPv6 site-local (deprecated fec0::/10)';
@@ -270,7 +280,29 @@ function isPrivateIp(ip: string): string | null {
   if (first === 100 && second >= 64 && second <= 127) return 'CGNAT (100.64/10)';
   if (first === 198 && (second === 18 || second === 19)) return 'benchmarking (198.18/15)';
   if (first >= 240) return 'reserved (240/4)';
+  if (first === 192 && second === 0 && Number(parts[3]) === 0) return 'IETF reserved (192.0.0/24)';
+  return reservedIpv4Extra(first, second, Number(parts[3]));
+}
 
+/** True for ::/96 — first 96 bits zero. Caller has handled :: and ::1. */
+function isIpv4Compatible(ip: string): boolean {
+  const [head, tail = ''] = ip.split('::');
+  if (ip.includes('::')) {
+    // Everything before '::' must be zero groups, and what follows must fit in 32 bits.
+    if (head && head.split(':').some((g) => parseInt(g, 16) !== 0)) return false;
+    const tailGroups = tail.includes('.') ? 2 : tail ? tail.split(':').length : 0;
+    return tailGroups <= 2;
+  }
+  const groups = ip.split(':');
+  return groups.slice(0, 6).every((g) => parseInt(g, 16) === 0);
+}
+
+/** Ranges beyond RFC 1918/loopback that must never be a fetch target. */
+function reservedIpv4Extra(first: number, second: number, third: number): string | null {
+  if (first >= 224 && first <= 239) return 'multicast (224/4)';
+  if (first === 192 && second === 0 && third === 2) return 'documentation (192.0.2/24)';
+  if (first === 198 && second === 51 && third === 100) return 'documentation (198.51.100/24)';
+  if (first === 203 && second === 0 && third === 113) return 'documentation (203.0.113/24)';
   return null;
 }
 

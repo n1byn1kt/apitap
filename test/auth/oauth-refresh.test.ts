@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { AuthManager } from '../../src/auth/manager.js';
 import { refreshOAuth, redactSecrets } from '../../src/auth/oauth-refresh.js';
 import type { OAuthConfig } from '../../src/types.js';
+import { transport } from '../../src/net/transport.js';
 
 describe('redactSecrets', () => {
   it('redacts secret values from an error message', () => {
@@ -25,16 +26,16 @@ describe('redactSecrets', () => {
 describe('refreshOAuth', () => {
   let testDir: string;
   let authManager: AuthManager;
-  let originalFetch: typeof globalThis.fetch;
+  let originalFetch: typeof transport.fetch;
 
   beforeEach(async () => {
     testDir = await mkdtemp(join(tmpdir(), 'apitap-oauth-'));
     authManager = new AuthManager(testDir, 'test-machine-id');
-    originalFetch = globalThis.fetch;
+    originalFetch = transport.fetch;
   });
 
   afterEach(async () => {
-    globalThis.fetch = originalFetch;
+    transport.fetch = originalFetch;
     await rm(testDir, { recursive: true, force: true });
   });
 
@@ -46,12 +47,12 @@ describe('refreshOAuth', () => {
   };
 
   function mockFetch(response: { status: number; body: unknown }) {
-    globalThis.fetch = mock.fn(async () => ({
+    transport.fetch = mock.fn(async () => ({
       ok: response.status >= 200 && response.status < 300,
       status: response.status,
       json: async () => response.body,
       text: async () => JSON.stringify(response.body),
-    })) as unknown as typeof globalThis.fetch;
+    })) as unknown as typeof transport.fetch;
   }
 
   it('refreshes access token successfully', async () => {
@@ -81,14 +82,14 @@ describe('refreshOAuth', () => {
     });
 
     let capturedBody = '';
-    globalThis.fetch = mock.fn(async (_url: string, init: RequestInit) => {
+    transport.fetch = mock.fn(async (_url: string, init: RequestInit) => {
       capturedBody = init.body as string;
       return {
         ok: true, status: 200,
         json: async () => ({ access_token: 'tok' }),
         text: async () => '{}',
       };
-    }) as unknown as typeof globalThis.fetch;
+    }) as unknown as typeof transport.fetch;
 
     await refreshOAuth('example.com', baseConfig, authManager, { _skipSsrfCheck: true });
     const params = new URLSearchParams(capturedBody);
@@ -149,14 +150,14 @@ describe('refreshOAuth', () => {
     });
 
     let capturedBody = '';
-    globalThis.fetch = mock.fn(async (_url: string, init: RequestInit) => {
+    transport.fetch = mock.fn(async (_url: string, init: RequestInit) => {
       capturedBody = init.body as string;
       return {
         ok: true, status: 200,
         json: async () => ({ access_token: 'cc-token' }),
         text: async () => '{}',
       };
-    }) as unknown as typeof globalThis.fetch;
+    }) as unknown as typeof transport.fetch;
 
     const result = await refreshOAuth('example.com', ccConfig, authManager, { _skipSsrfCheck: true });
     assert.equal(result.success, true);
@@ -209,9 +210,9 @@ describe('refreshOAuth', () => {
       refreshToken: 'rt_test',
     });
 
-    globalThis.fetch = mock.fn(async () => {
+    transport.fetch = mock.fn(async () => {
       throw new Error('ECONNREFUSED');
-    }) as unknown as typeof globalThis.fetch;
+    }) as unknown as typeof transport.fetch;
 
     const result = await refreshOAuth('example.com', baseConfig, authManager, { _skipSsrfCheck: true });
     assert.equal(result.success, false);
@@ -261,14 +262,14 @@ describe('refreshOAuth', () => {
     });
 
     let capturedBody = '';
-    globalThis.fetch = mock.fn(async (_url: string, init: RequestInit) => {
+    transport.fetch = mock.fn(async (_url: string, init: RequestInit) => {
       capturedBody = init.body as string;
       return {
         ok: true, status: 200,
         json: async () => ({ access_token: 'tok' }),
         text: async () => '{}',
       };
-    }) as unknown as typeof globalThis.fetch;
+    }) as unknown as typeof transport.fetch;
 
     await refreshOAuth('example.com', baseConfig, authManager, { _skipSsrfCheck: true });
     const params = new URLSearchParams(capturedBody);
@@ -287,14 +288,14 @@ describe('refreshOAuth', () => {
     });
 
     let capturedBody = '';
-    globalThis.fetch = mock.fn(async (_url: string, init: RequestInit) => {
+    transport.fetch = mock.fn(async (_url: string, init: RequestInit) => {
       capturedBody = init.body as string;
       return {
         ok: true, status: 200,
         json: async () => ({ access_token: 'tok' }),
         text: async () => '{}',
       };
-    }) as unknown as typeof globalThis.fetch;
+    }) as unknown as typeof transport.fetch;
 
     await refreshOAuth('example.com', noScopeConfig, authManager, { _skipSsrfCheck: true });
     const params = new URLSearchParams(capturedBody);

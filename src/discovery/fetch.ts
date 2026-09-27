@@ -1,10 +1,15 @@
 // src/discovery/fetch.ts
 import { request as httpRequest, type IncomingMessage } from 'node:http';
 import { request as httpsRequest } from 'node:https';
-import { lookup as dnsLookup, type LookupAddress, type LookupOptions } from 'node:dns';
-import type { Transform } from 'node:stream';
-import { createGunzip, createInflate, createInflateRaw, createBrotliDecompress } from 'node:zlib';
-import { validateUrl, isPrivateIp } from '../skill/ssrf.js';
+import {
+  SsrfBlockedError,
+  MAX_HEADER_SIZE,
+  assertFetchTarget,
+  decodeStream,
+  validatingLookup,
+} from '../net/transport.js';
+
+export { validatingLookup };
 
 export interface FetchResult {
   status: number;
@@ -55,45 +60,6 @@ export async function safeFetch(
 
 /** Redirect hops followed before giving up (the initial request is not a hop). */
 export const MAX_REDIRECTS = 5;
-
-/** Node's default is 16KB; CSP-heavy sites (Polymarket) exceed it while curl gets a 200. */
-const MAX_HEADER_SIZE = 64 * 1024;
-
-class SsrfBlockedError extends Error {
-  readonly code = 'SSRF_BLOCKED';
-}
-
-type LookupCallback = (
-  err: NodeJS.ErrnoException | null,
-  address: string | LookupAddress[],
-  family?: number,
-) => void;
-
-/**
- * dns.lookup drop-in for http.request's `lookup` option. It runs at connect
- * time — the same resolution the socket uses — so a TTL-0 rebind between a
- * pre-check and the connection can't slip a private address through. Every
- * address in the answer must be public; one private entry fails the lookup
- * rather than being filtered, since the client may pick any of them.
- */
-export function validatingLookup(hostname: string, options: LookupOptions, callback: LookupCallback): void {
-  dnsLookup(hostname, { ...options, all: true }, (err, addresses) => {
-    if (err) return callback(err, options.all ? [] : '');
-    for (const { address } of addresses) {
-      const reason = isPrivateIp(address);
-      if (reason) {
-        return callback(
-          new SsrfBlockedError(`${hostname} resolves to ${address} (${reason})`),
-          options.all ? [] : '',
-        );
-      }
-    }
-    if (options.all) return callback(null, addresses);
-    const first = addresses[0];
-    if (!first) return callback(Object.assign(new Error(`no addresses for ${hostname}`), { code: 'ENOTFOUND' }), '');
-    callback(null, first.address, first.family);
-  });
-}
 
 /**
  * Like safeFetch, but preserves WHY a fetch failed so callers (peek) can
@@ -149,18 +115,12 @@ export async function safeFetchDetailed(
 
 /** Per-hop target check. The scheme check holds even under skipSsrf. */
 function checkTarget(url: string, skipSsrf?: boolean): SafeFetchFailure | null {
-  let parsed: URL;
   try {
-    parsed = new URL(url);
-  } catch {
-    return { kind: 'ssrf', code: 'SSRF_BLOCKED', message: 'Invalid URL' };
+    assertFetchTarget(url, skipSsrf);
+    return null;
+  } catch (err) {
+    return { kind: 'ssrf', code: 'SSRF_BLOCKED', message: (err as Error).message };
   }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    return { kind: 'ssrf', code: 'SSRF_BLOCKED', message: `Non-HTTP scheme: ${parsed.protocol}` };
-  }
-  if (skipSsrf) return null;
-  const result = validateUrl(url);
-  return result.safe ? null : { kind: 'ssrf', code: 'SSRF_BLOCKED', message: result.reason ?? 'blocked by SSRF policy' };
 }
 
 interface RawResponse {
@@ -228,85 +188,28 @@ function readBody(res: IncomingMessage, encoding: string | undefined, maxBytes: 
     const chunks: Buffer[] = [];
     let size = 0;
     let done = false;
-    let decoders: Transform[] = [];
-    let head: Transform | null = null;
+    const stream = decodeStream(res, encoding);
 
-    const teardown = () => {
+    const settle = (err?: Error) => {
+      if (done) return;
+      done = true;
+      stream.destroy();
       res.destroy();
-      for (const d of decoders) d.destroy();
+      if (err) reject(err);
+      else resolve(Buffer.concat(chunks, size));
     };
-    const finish = () => {
+
+    stream.on('data', (chunk: Buffer) => {
       if (done) return;
-      done = true;
-      teardown();
-      resolve(Buffer.concat(chunks, size));
-    };
-    const fail = (err: Error) => {
-      if (done) return;
-      done = true;
-      teardown();
-      reject(err);
-    };
-    const collect = (chunk: Buffer) => {
       const room = maxBytes - size;
       const take = chunk.length > room ? chunk.subarray(0, room) : chunk;
       chunks.push(take);
       size += take.length;
-      if (size >= maxBytes) finish();
-    };
-
-    // Codings are listed in the order applied, so undo them last-first.
-    const codings = (encoding ?? '')
-      .split(',')
-      .map((c) => c.trim().toLowerCase())
-      .filter((c) => c && c !== 'identity')
-      .reverse();
-
-    res.on('error', fail);
-    res.on('data', (chunk: Buffer) => {
-      if (done) return;
-      if (codings.length === 0) return collect(chunk);
-      if (!head) {
-        const chain: Transform[] = [];
-        for (const [i, coding] of codings.entries()) {
-          // Raw-vs-zlib deflate sniffing only works on bytes we can see.
-          const d = createDecoder(coding, i === 0 ? chunk : null);
-          if (!d) {
-            return fail(Object.assign(new Error(`unsupported content-encoding: ${encoding}`), { code: 'UNSUPPORTED_ENCODING' }));
-          }
-          chain.push(d);
-        }
-        for (let i = 0; i < chain.length - 1; i++) chain[i].pipe(chain[i + 1]);
-        const tail = chain[chain.length - 1];
-        for (const d of chain) d.on('error', fail);
-        tail.on('data', (out: Buffer) => { if (!done) collect(out); });
-        tail.on('end', finish);
-        decoders = chain;
-        head = chain[0];
-      }
-      head.write(chunk);
+      if (size >= maxBytes) settle();
     });
-    res.on('end', () => {
-      if (head) head.end();
-      else finish();
-    });
+    stream.on('end', () => settle());
+    stream.on('error', settle);
   });
-}
-
-function createDecoder(coding: string, firstChunk: Buffer | null): Transform | null {
-  switch (coding) {
-    case 'gzip':
-    case 'x-gzip':
-      return createGunzip();
-    case 'br':
-      return createBrotliDecompress();
-    case 'deflate':
-      // "deflate" is meant to be zlib-wrapped, but some servers send raw
-      // deflate. A zlib header has CM=8 in the low nibble of byte 0.
-      return !firstChunk || (firstChunk[0] & 0x0f) === 8 ? createInflate() : createInflateRaw();
-    default:
-      return null;
-  }
 }
 
 function describeFetchError(err: unknown): SafeFetchFailure {

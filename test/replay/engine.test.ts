@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { replayEndpoint } from '../../src/replay/engine.js';
 import { AuthManager } from '../../src/auth/manager.js';
+import { transport } from '../../src/net/transport.js';
 import type { SkillFile } from '../../src/types.js';
 
 describe('replayEndpoint', () => {
@@ -559,7 +560,7 @@ describe('replayEndpoint with retry-on-401', () => {
   let lastAuthHeader: string | undefined;
   let testDir: string;
   let authManager: AuthManager;
-  let originalFetch: typeof globalThis.fetch;
+  let originalFetch: typeof transport.fetch;
 
   before(async () => {
     retryServer = createServer((req, res) => {
@@ -597,11 +598,11 @@ describe('replayEndpoint with retry-on-401', () => {
     lastAuthHeader = undefined;
     testDir = await mkdtemp(join(tmpdir(), 'apitap-retry-'));
     authManager = new AuthManager(testDir, 'test-machine-id');
-    originalFetch = globalThis.fetch;
+    originalFetch = transport.fetch;
   });
 
   afterEach(async () => {
-    globalThis.fetch = originalFetch;
+    transport.fetch = originalFetch;
     await rm(testDir, { recursive: true, force: true });
   });
 
@@ -645,10 +646,9 @@ describe('replayEndpoint with retry-on-401', () => {
     await authManager.storeOAuthCredentials('localhost', { refreshToken: 'rt_test' });
 
     // Mock the OAuth fetch to return a valid token
-    const realFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
-      const urlStr = typeof url === 'string' ? url : url.toString();
-      if (urlStr === 'https://localhost/token') {
+    const realFetch = transport.fetch;
+    transport.fetch = (async (url: string, init?: import('../../src/net/transport.js').PinnedFetchInit) => {
+      if (url === 'https://localhost/token') {
         return {
           ok: true, status: 200,
           json: async () => ({ access_token: 'valid-token' }),
@@ -656,7 +656,7 @@ describe('replayEndpoint with retry-on-401', () => {
         } as Response;
       }
       return realFetch(url, init);
-    }) as typeof globalThis.fetch;
+    }) as typeof transport.fetch;
 
     // Inject the expired header into endpoint
     const endpoint = skill.endpoints[0];
@@ -689,10 +689,9 @@ describe('replayEndpoint with retry-on-401', () => {
     await authManager.storeOAuthCredentials('localhost', { refreshToken: 'rt_expired' });
 
     // Mock OAuth fetch to fail
-    const realFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
-      const urlStr = typeof url === 'string' ? url : url.toString();
-      if (urlStr === 'https://localhost/token') {
+    const realFetch = transport.fetch;
+    transport.fetch = (async (url: string, init?: import('../../src/net/transport.js').PinnedFetchInit) => {
+      if (url === 'https://localhost/token') {
         return {
           ok: false, status: 400,
           json: async () => ({ error: 'invalid_grant' }),
@@ -700,7 +699,7 @@ describe('replayEndpoint with retry-on-401', () => {
         } as Response;
       }
       return realFetch(url, init);
-    }) as typeof globalThis.fetch;
+    }) as typeof transport.fetch;
 
     const endpoint = skill.endpoints[0];
     endpoint.headers.authorization = 'Bearer bad-token';
@@ -754,10 +753,9 @@ describe('replayEndpoint with retry-on-401', () => {
 
     await authManager.storeOAuthCredentials('localhost', { refreshToken: 'rt_test' });
 
-    const realFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
-      const urlStr = typeof url === 'string' ? url : url.toString();
-      if (urlStr === 'https://localhost/token') {
+    const realFetch = transport.fetch;
+    transport.fetch = (async (url: string, init?: import('../../src/net/transport.js').PinnedFetchInit) => {
+      if (url === 'https://localhost/token') {
         return {
           ok: true, status: 200,
           json: async () => ({ access_token: 'valid-token' }),
@@ -765,7 +763,7 @@ describe('replayEndpoint with retry-on-401', () => {
         } as Response;
       }
       return realFetch(url, init);
-    }) as typeof globalThis.fetch;
+    }) as typeof transport.fetch;
 
     const endpoint = skill.endpoints[0];
     endpoint.headers.authorization = `Bearer ${expiredJwt}`;
@@ -815,10 +813,9 @@ describe('replayEndpoint with retry-on-401', () => {
     await authManager.storeOAuthCredentials('localhost', { refreshToken: 'rt_expired' });
 
     // Mock OAuth fetch to fail
-    const realFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
-      const urlStr = typeof url === 'string' ? url : url.toString();
-      if (urlStr === 'https://localhost/token') {
+    const realFetch = transport.fetch;
+    transport.fetch = (async (url: string, init?: import('../../src/net/transport.js').PinnedFetchInit) => {
+      if (url === 'https://localhost/token') {
         return {
           ok: false, status: 400,
           json: async () => ({ error: 'invalid_grant' }),
@@ -826,7 +823,7 @@ describe('replayEndpoint with retry-on-401', () => {
         } as Response;
       }
       return realFetch(url, init);
-    }) as typeof globalThis.fetch;
+    }) as typeof transport.fetch;
 
     const endpoint = skill.endpoints[0];
     endpoint.headers.authorization = 'Bearer bad-token';

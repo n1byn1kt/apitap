@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { AuthManager } from '../../src/auth/manager.js';
 import { refreshTokens, type RefreshResult } from '../../src/auth/refresh.js';
 import type { SkillFile, OAuthConfig } from '../../src/types.js';
+import { transport } from '../../src/net/transport.js';
 
 function makeSkill(overrides: Partial<SkillFile> = {}): SkillFile {
   return {
@@ -24,16 +25,16 @@ function makeSkill(overrides: Partial<SkillFile> = {}): SkillFile {
 describe('refresh dispatcher', () => {
   let testDir: string;
   let authManager: AuthManager;
-  let originalFetch: typeof globalThis.fetch;
+  let originalFetch: typeof transport.fetch;
 
   beforeEach(async () => {
     testDir = await mkdtemp(join(tmpdir(), 'apitap-dispatcher-'));
     authManager = new AuthManager(testDir, 'test-machine-id');
-    originalFetch = globalThis.fetch;
+    originalFetch = transport.fetch;
   });
 
   afterEach(async () => {
-    globalThis.fetch = originalFetch;
+    transport.fetch = originalFetch;
     await rm(testDir, { recursive: true, force: true });
   });
 
@@ -54,17 +55,17 @@ describe('refresh dispatcher', () => {
       refreshToken: 'rt_123',
     });
 
-    globalThis.fetch = mock.fn(async () => ({
+    transport.fetch = mock.fn(async () => ({
       ok: true, status: 200,
       json: async () => ({ access_token: 'new-token' }),
       text: async () => '{}',
-    })) as unknown as typeof globalThis.fetch;
+    })) as unknown as typeof transport.fetch;
 
     const result = await refreshTokens(skill, authManager, { domain: 'example.com', _skipSsrfCheck: true });
     assert.equal(result.success, true);
     assert.equal(result.oauthRefreshed, true);
     // Verify fetch was called (OAuth path, not browser)
-    assert.equal((globalThis.fetch as ReturnType<typeof mock.fn>).mock.callCount(), 1);
+    assert.equal((transport.fetch as ReturnType<typeof mock.fn>).mock.callCount(), 1);
   });
 
   it('routes to OAuth path for client_credentials without refreshToken', async () => {
@@ -84,11 +85,11 @@ describe('refresh dispatcher', () => {
       clientSecret: 'cc-secret',
     });
 
-    globalThis.fetch = mock.fn(async () => ({
+    transport.fetch = mock.fn(async () => ({
       ok: true, status: 200,
       json: async () => ({ access_token: 'cc-token' }),
       text: async () => '{}',
-    })) as unknown as typeof globalThis.fetch;
+    })) as unknown as typeof transport.fetch;
 
     const result = await refreshTokens(skill, authManager, { domain: 'example.com', _skipSsrfCheck: true });
     assert.equal(result.success, true);
@@ -118,7 +119,7 @@ describe('refresh dispatcher', () => {
     // No refreshToken stored — should not attempt OAuth
 
     const fetchMock = mock.fn();
-    globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+    transport.fetch = fetchMock as unknown as typeof transport.fetch;
 
     const result = await refreshTokens(skill, authManager, { domain: 'example.com', _skipSsrfCheck: true });
     assert.equal(result.oauthRefreshed, undefined);
@@ -143,7 +144,7 @@ describe('refresh dispatcher', () => {
     });
 
     let callCount = 0;
-    globalThis.fetch = mock.fn(async () => {
+    transport.fetch = mock.fn(async () => {
       callCount++;
       // Simulate network delay
       await new Promise(r => setTimeout(r, 50));
@@ -152,7 +153,7 @@ describe('refresh dispatcher', () => {
         json: async () => ({ access_token: `token-${callCount}` }),
         text: async () => '{}',
       };
-    }) as unknown as typeof globalThis.fetch;
+    }) as unknown as typeof transport.fetch;
 
     // Fire 3 concurrent refreshes
     const [r1, r2, r3] = await Promise.all([
@@ -190,14 +191,14 @@ describe('refresh dispatcher', () => {
     await authManager.storeOAuthCredentials('b.com', { refreshToken: 'rt_b' });
 
     let callCount = 0;
-    globalThis.fetch = mock.fn(async () => {
+    transport.fetch = mock.fn(async () => {
       callCount++;
       return {
         ok: true, status: 200,
         json: async () => ({ access_token: `token-${callCount}` }),
         text: async () => '{}',
       };
-    }) as unknown as typeof globalThis.fetch;
+    }) as unknown as typeof transport.fetch;
 
     await Promise.all([
       refreshTokens(skill1, authManager, { domain: 'a.com', _skipSsrfCheck: true }),

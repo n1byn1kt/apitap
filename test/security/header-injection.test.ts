@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { replayEndpoint } from '../../src/replay/engine.js';
+import { transport } from '../../src/net/transport.js';
 import type { SkillFile } from '../../src/types.js';
 
 function makeSkillWithHeaders(headers: Record<string, string>): SkillFile {
@@ -31,8 +32,8 @@ describe('F8: Header injection prevention', () => {
     const skill = makeSkillWithHeaders({ 'Host': 'evil.com' });
     let capturedHeaders: HeadersInit | undefined;
 
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    const originalFetch = transport.fetch;
+    transport.fetch = (async (_url: string, init?: import('../../src/net/transport.js').PinnedFetchInit) => {
       capturedHeaders = init?.headers;
       return new Response(JSON.stringify({ ok: true }), {
         status: 200,
@@ -47,7 +48,7 @@ describe('F8: Header injection prevention', () => {
       assert.equal(headers['Host'], undefined, 'Host header should be blocked');
       assert.equal(headers['host'], undefined, 'host header should be blocked');
     } finally {
-      globalThis.fetch = originalFetch;
+      transport.fetch = originalFetch;
     }
   });
 
@@ -55,8 +56,8 @@ describe('F8: Header injection prevention', () => {
     const skill = makeSkillWithHeaders({ 'X-Forwarded-For': '127.0.0.1' });
     let capturedHeaders: HeadersInit | undefined;
 
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    const originalFetch = transport.fetch;
+    transport.fetch = (async (_url: string, init?: import('../../src/net/transport.js').PinnedFetchInit) => {
       capturedHeaders = init?.headers;
       return new Response(JSON.stringify({ ok: true }), {
         status: 200,
@@ -71,7 +72,7 @@ describe('F8: Header injection prevention', () => {
       assert.equal(headers['X-Forwarded-For'], undefined, 'X-Forwarded-For should be blocked');
       assert.equal(headers['x-forwarded-for'], undefined, 'x-forwarded-for should be blocked');
     } finally {
-      globalThis.fetch = originalFetch;
+      transport.fetch = originalFetch;
     }
   });
 
@@ -79,8 +80,8 @@ describe('F8: Header injection prevention', () => {
     const skill = makeSkillWithHeaders({ 'Cookie': 'session=abc123' });
     let capturedHeaders: HeadersInit | undefined;
 
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    const originalFetch = transport.fetch;
+    transport.fetch = (async (_url: string, init?: import('../../src/net/transport.js').PinnedFetchInit) => {
       capturedHeaders = init?.headers;
       return new Response(JSON.stringify({ ok: true }), {
         status: 200,
@@ -95,7 +96,7 @@ describe('F8: Header injection prevention', () => {
       assert.equal(headers['Cookie'], undefined, 'Cookie should be blocked');
       assert.equal(headers['cookie'], undefined, 'cookie should be blocked');
     } finally {
-      globalThis.fetch = originalFetch;
+      transport.fetch = originalFetch;
     }
   });
 
@@ -103,8 +104,8 @@ describe('F8: Header injection prevention', () => {
     const skill = makeSkillWithHeaders({ 'Authorization': 'Bearer fake-token' });
     let capturedHeaders: HeadersInit | undefined;
 
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    const originalFetch = transport.fetch;
+    transport.fetch = (async (_url: string, init?: import('../../src/net/transport.js').PinnedFetchInit) => {
       capturedHeaders = init?.headers;
       return new Response(JSON.stringify({ ok: true }), {
         status: 200,
@@ -119,7 +120,7 @@ describe('F8: Header injection prevention', () => {
       assert.equal(headers['Authorization'], undefined, 'Authorization should be blocked');
       assert.equal(headers['authorization'], undefined, 'authorization should be blocked');
     } finally {
-      globalThis.fetch = originalFetch;
+      transport.fetch = originalFetch;
     }
   });
 
@@ -131,8 +132,8 @@ describe('F8: Header injection prevention', () => {
     });
     let capturedHeaders: HeadersInit | undefined;
 
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    const originalFetch = transport.fetch;
+    transport.fetch = (async (_url: string, init?: import('../../src/net/transport.js').PinnedFetchInit) => {
       capturedHeaders = init?.headers;
       return new Response(JSON.stringify({ ok: true }), {
         status: 200,
@@ -148,7 +149,7 @@ describe('F8: Header injection prevention', () => {
       assert.equal(headers['Content-Type'], 'application/json', 'Content-Type should be allowed');
       assert.equal(headers['User-Agent'], 'ApiTap/1.0', 'User-Agent should be allowed');
     } finally {
-      globalThis.fetch = originalFetch;
+      transport.fetch = originalFetch;
     }
   });
 
@@ -159,8 +160,8 @@ describe('F8: Header injection prevention', () => {
     });
     let capturedHeaders: HeadersInit | undefined;
 
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    const originalFetch = transport.fetch;
+    transport.fetch = (async (_url: string, init?: import('../../src/net/transport.js').PinnedFetchInit) => {
       capturedHeaders = init?.headers;
       return new Response(JSON.stringify({ ok: true }), {
         status: 200,
@@ -175,7 +176,7 @@ describe('F8: Header injection prevention', () => {
       assert.equal(headers['X-Custom-Header'], 'custom-value', 'X-Custom-Header should be allowed');
       assert.equal(headers['X-Api-Key'], 'abc123', 'X-Api-Key should be allowed');
     } finally {
-      globalThis.fetch = originalFetch;
+      transport.fetch = originalFetch;
     }
   });
 });

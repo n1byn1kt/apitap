@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { isIP } from 'node:net';
 import { resolveAndValidateUrl } from '../../src/skill/ssrf.js';
 import { replayEndpoint } from '../../src/replay/engine.js';
+import { transport } from '../../src/net/transport.js';
 import type { SkillFile } from '../../src/types.js';
 
 function makeSkill(baseUrl: string): SkillFile {
@@ -55,9 +56,9 @@ describe('F3: DNS rebinding prevention', () => {
     let capturedUrl: string | undefined;
     let capturedHeaders: HeadersInit | undefined;
 
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
-      capturedUrl = typeof url === 'string' ? url : url.toString();
+    const originalFetch = transport.fetch;
+    transport.fetch = (async (url: string, init?: import('../../src/net/transport.js').PinnedFetchInit) => {
+      capturedUrl = url;
       capturedHeaders = init?.headers;
       return new Response(JSON.stringify({ ok: true }), {
         status: 200,
@@ -70,10 +71,12 @@ describe('F3: DNS rebinding prevention', () => {
 
       assert.ok(capturedUrl, 'URL should be captured');
 
-      // Fetch uses original hostname (not resolved IP) to preserve TLS/SNI
-      assert.match(capturedUrl, /http:\/\/example\.com\/data/, 'Fetch URL should use original hostname');
+      // transport.fetch receives the original hostname (not the resolved IP)
+      // to preserve TLS/SNI; the connect-time lookup inside transport does
+      // the SSRF check against the resolved address.
+      assert.match(capturedUrl, /http:\/\/example\.com\/data/, 'transport.fetch URL should use original hostname');
     } finally {
-      globalThis.fetch = originalFetch;
+      transport.fetch = originalFetch;
     }
   });
 
@@ -99,10 +102,10 @@ describe('F3: DNS rebinding prevention', () => {
     // This tests the actual security guarantee: resolveAndValidateUrl catches
     // hostnames that resolve to private IPs before the fetch happens.
     const skill = makeSkill('http://localhost');
-    const originalFetch = globalThis.fetch;
+    const originalFetch = transport.fetch;
     let fetchCalled = false;
 
-    globalThis.fetch = (async () => {
+    transport.fetch = (async () => {
       fetchCalled = true;
       return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } });
     }) as any;
@@ -112,9 +115,9 @@ describe('F3: DNS rebinding prevention', () => {
         () => replayEndpoint(skill, 'get-data'),
         (err: Error) => err.message.includes('SSRF blocked'),
       );
-      assert.ok(!fetchCalled, 'Fetch should never be called for SSRF-blocked URLs');
+      assert.ok(!fetchCalled, 'transport.fetch should never be called for SSRF-blocked URLs');
     } finally {
-      globalThis.fetch = originalFetch;
+      transport.fetch = originalFetch;
     }
   });
 });

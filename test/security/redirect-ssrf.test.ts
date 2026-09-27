@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { replayEndpoint } from '../../src/replay/engine.js';
+import { transport } from '../../src/net/transport.js';
 import type { SkillFile } from '../../src/types.js';
 
 function makeSkill(baseUrl: string): SkillFile {
@@ -27,8 +28,8 @@ describe('F12: Redirect SSRF validation', () => {
   it('blocks redirect to private IP', async () => {
     const skill = makeSkill('http://93.184.216.34');  // Public IP
 
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request) => {
+    const originalFetch = transport.fetch;
+    transport.fetch = (async (url: string | URL | Request) => {
       // First request returns redirect
       return new Response(null, {
         status: 302,
@@ -43,15 +44,15 @@ describe('F12: Redirect SSRF validation', () => {
         'Should block redirect to private IP'
       );
     } finally {
-      globalThis.fetch = originalFetch;
+      transport.fetch = originalFetch;
     }
   });
 
   it('blocks redirect to AWS metadata endpoint', async () => {
     const skill = makeSkill('http://93.184.216.34');
 
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request) => {
+    const originalFetch = transport.fetch;
+    transport.fetch = (async (url: string | URL | Request) => {
       return new Response(null, {
         status: 301,
         headers: { 'location': 'http://169.254.169.254/latest/meta-data' },
@@ -65,7 +66,7 @@ describe('F12: Redirect SSRF validation', () => {
         'Should block redirect to cloud metadata'
       );
     } finally {
-      globalThis.fetch = originalFetch;
+      transport.fetch = originalFetch;
     }
   });
 
@@ -73,8 +74,8 @@ describe('F12: Redirect SSRF validation', () => {
     const skill = makeSkill('http://93.184.216.34');
     let fetchCount = 0;
 
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request) => {
+    const originalFetch = transport.fetch;
+    transport.fetch = (async (url: string | URL | Request) => {
       fetchCount++;
       if (fetchCount === 1) {
         // First request returns redirect
@@ -97,7 +98,7 @@ describe('F12: Redirect SSRF validation', () => {
       assert.deepEqual(result.data, { redirected: true }, 'Should return redirected data');
       assert.equal(fetchCount, 2, 'Should make exactly 2 fetch calls');
     } finally {
-      globalThis.fetch = originalFetch;
+      transport.fetch = originalFetch;
     }
   });
 
@@ -105,8 +106,8 @@ describe('F12: Redirect SSRF validation', () => {
     const skill = makeSkill('http://93.184.216.34');
     let fetchCount = 0;
 
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async (url: string | URL | Request) => {
+    const originalFetch = transport.fetch;
+    transport.fetch = (async (url: string | URL | Request) => {
       fetchCount++;
       if (fetchCount === 1) {
         // First request returns redirect
@@ -134,7 +135,7 @@ describe('F12: Redirect SSRF validation', () => {
       assert.equal(fetchCount, 2, 'Should stop after 1 redirect hop');
       assert.equal(result.status, 302, 'Should return redirect status when chain stopped');
     } finally {
-      globalThis.fetch = originalFetch;
+      transport.fetch = originalFetch;
     }
   });
 });

@@ -2,6 +2,7 @@
 import type { OAuthConfig } from '../types.js';
 import type { AuthManager } from './manager.js';
 import { resolveAndValidateUrl } from '../skill/ssrf.js';
+import { transport, SsrfBlockedError } from '../net/transport.js';
 
 export interface OAuthRefreshResult {
   success: boolean;
@@ -80,7 +81,11 @@ export async function refreshOAuth(
   }
 
   try {
-    const response = await fetch(oauthConfig.tokenEndpoint, {
+    // Pinned transport: the range check runs on the connecting address (the
+    // pre-check above can't stop a rebind), and redirects are not followed —
+    // a refresh token and client secret never chase a Location header.
+    const response = await transport.fetch(oauthConfig.tokenEndpoint, {
+      skipSsrf: options?._skipSsrfCheck,
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body: body.toString(),
@@ -141,6 +146,9 @@ export async function refreshOAuth(
 
     return { success: true, tokenRotated };
   } catch (error) {
+    if (error instanceof SsrfBlockedError) {
+      return { success: false, error: `Token endpoint blocked: ${error.message}` };
+    }
     const raw = error instanceof Error ? error.message : String(error);
     return {
       success: false,

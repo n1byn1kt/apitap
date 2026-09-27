@@ -6,6 +6,7 @@ import { parseJwtClaims } from '../capture/entropy.js';
 import { refreshTokens } from '../auth/refresh.js';
 import { truncateResponse, type TruncationInfo } from './truncate.js';
 import { resolveAndValidateUrl, assertSsrfBypassAllowed } from '../skill/ssrf.js';
+import { transport, SsrfBlockedError, type PinnedFetchInit } from '../net/transport.js';
 import { snapshotSchema } from '../contract/schema.js';
 import { diffSchema, type ContractWarning } from '../contract/diff.js';
 import { scanOutboundRequest } from './egress.js';
@@ -157,6 +158,21 @@ function normalizeOptions(
 
   // Legacy: treat entire object as params
   return { params: optionsOrParams as Record<string, string> };
+}
+
+/**
+ * All replay traffic goes through the pinned transport: redirects are never
+ * auto-followed, and the SSRF range check runs on the connecting address.
+ * A connect-time block surfaces with the same "SSRF blocked" prefix as the
+ * pre-check.
+ */
+async function replayFetch(url: string, init: PinnedFetchInit): Promise<Response> {
+  try {
+    return await transport.fetch(url, init);
+  } catch (err) {
+    if (err instanceof SsrfBlockedError) throw new Error(`SSRF blocked: ${err.message}`);
+    throw err;
+  }
 }
 
 /**
@@ -359,10 +375,11 @@ export async function replayEndpoint(
     }
   }
 
-  // SSRF validation — resolve DNS and check the IP isn't private/internal.
-  // We do NOT substitute the IP into the URL because that breaks TLS/SNI
-  // for sites behind CDNs (Cloudflare, etc.) where the cert is for the hostname.
-  // M15: We re-validate DNS after fetch to narrow the TOCTOU window.
+  // SSRF pre-check — fails fast with a clear error before auth injection and
+  // egress scanning. It is not the enforcement point: DNS can change before
+  // the connection, so replayFetch re-checks the address the socket actually
+  // connects to (src/net/transport.ts). The hostname stays in the URL, so
+  // TLS/SNI still works for CDN-fronted sites.
   const fetchUrl = url.toString();
   if (!options._skipSsrfCheck) {
     const ssrfCheck = await resolveAndValidateUrl(url.toString());
@@ -562,23 +579,14 @@ export async function replayEndpoint(
   }
   // ─── End trap-aware egress check ─────────────────────────────
 
-  let response = await fetch(fetchUrl, {
+  let response = await replayFetch(fetchUrl, {
+    skipSsrf: options._skipSsrfCheck,
     method: endpoint.method,
     headers,
     body,
     signal: AbortSignal.timeout(30_000),
-    redirect: 'manual',  // Don't auto-follow redirects
-  });
+      });
 
-  // M15: Post-fetch DNS re-validation to narrow TOCTOU window.
-  // Re-resolves DNS and checks if the hostname now points to a private IP
-  // (indicates DNS rebinding attack between our pre-check and the actual connection).
-  if (!options._skipSsrfCheck && url.hostname && !url.hostname.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)) {
-    const postCheck = await resolveAndValidateUrl(fetchUrl);
-    if (!postCheck.safe) {
-      throw new Error(`DNS rebinding detected (post-fetch): ${postCheck.reason}`);
-    }
-  }
 
   // Handle redirects with SSRF validation (single hop only)
   if (response.status >= 300 && response.status < 400) {
@@ -586,6 +594,8 @@ export async function replayEndpoint(
     if (location) {
       const redirectUrl = new URL(location, url);
       const redirectFetchUrl = redirectUrl.toString();
+      // Release the unpooled socket before anything below can throw.
+      await response.body?.cancel().catch(() => {});
       if (!options._skipSsrfCheck) {
         const redirectCheck = await resolveAndValidateUrl(redirectUrl.toString());
         if (!redirectCheck.safe) {
@@ -595,20 +605,12 @@ export async function replayEndpoint(
       // Strip auth headers before cross-domain redirect (uses shared function)
       const redirectHeaders = stripAuthForRedirect(headers, url.hostname, redirectUrl.hostname);
       // Follow the redirect manually (single hop to prevent chains)
-      response = await fetch(redirectFetchUrl, {
+      response = await replayFetch(redirectFetchUrl, {
+        skipSsrf: options._skipSsrfCheck,
         method: 'GET',  // Redirects typically become GET
         headers: redirectHeaders,
         signal: AbortSignal.timeout(30_000),
-        redirect: 'manual',  // Prevent chaining
-      });
-      // Post-fetch DNS re-validation on the redirect hop (symmetric with the
-      // initial request above) to narrow the TOCTOU rebinding window.
-      if (!options._skipSsrfCheck && redirectUrl.hostname && !redirectUrl.hostname.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)) {
-        const postCheck = await resolveAndValidateUrl(redirectFetchUrl);
-        if (!postCheck.safe) {
-          throw new Error(`DNS rebinding detected (post-redirect): ${postCheck.reason}`);
-        }
-      }
+              });
     }
   }
 
@@ -622,6 +624,8 @@ export async function replayEndpoint(
     const refreshResult = await refreshTokens(skill, authManager, { domain, _skipSsrfCheck: options._skipSsrfCheck });
     if (refreshResult.success) {
       refreshed = true;
+      // The 401/403 body is discarded; free its socket before retrying.
+      await response.body?.cancel().catch(() => {});
       // Re-inject fresh auth
       const freshAuth = endpoint.isolatedAuth
         ? await authManager.retrieve(domain)
@@ -631,12 +635,12 @@ export async function replayEndpoint(
       }
 
       // Retry the request
-      let retryResponse = await fetch(fetchUrl, {
+      let retryResponse = await replayFetch(fetchUrl, {
+        skipSsrf: options._skipSsrfCheck,
         method: endpoint.method,
         headers,
         body,
         signal: AbortSignal.timeout(30_000),
-        redirect: 'manual',
       });
 
       // Handle redirects on retry (single hop) — with auth stripping (H4 fix)
@@ -645,6 +649,7 @@ export async function replayEndpoint(
         if (location) {
           const redirectUrl = new URL(location, url);
           const retryRedirectFetchUrl = redirectUrl.toString();
+          await retryResponse.body?.cancel().catch(() => {});
           if (!options._skipSsrfCheck) {
             const redirectCheck = await resolveAndValidateUrl(redirectUrl.toString());
             if (!redirectCheck.safe) {
@@ -653,19 +658,12 @@ export async function replayEndpoint(
           }
           // Strip auth headers on cross-domain redirect (same logic as initial path)
           const retryRedirectHeaders = stripAuthForRedirect(headers, url.hostname, redirectUrl.hostname);
-          retryResponse = await fetch(retryRedirectFetchUrl, {
+          retryResponse = await replayFetch(retryRedirectFetchUrl, {
+            skipSsrf: options._skipSsrfCheck,
             method: 'GET',
             headers: retryRedirectHeaders,
             signal: AbortSignal.timeout(30_000),
-            redirect: 'manual',
           });
-          // Post-fetch DNS re-validation on the retry redirect hop.
-          if (!options._skipSsrfCheck && redirectUrl.hostname && !redirectUrl.hostname.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)) {
-            const postCheck = await resolveAndValidateUrl(retryRedirectFetchUrl);
-            if (!postCheck.safe) {
-              throw new Error(`DNS rebinding detected (post-redirect): ${postCheck.reason}`);
-            }
-          }
         }
       }
 

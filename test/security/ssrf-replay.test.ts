@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { replayEndpoint } from '../../src/replay/engine.js';
+import { transport } from '../../src/net/transport.js';
 import type { SkillFile } from '../../src/types.js';
 
 function makeSkill(baseUrl: string): SkillFile {
@@ -68,8 +69,8 @@ describe('F1: SSRF validation in replay path', () => {
 
   it('allows public IP with mocked fetch', async () => {
     // Use a raw public IP — skips DNS resolution in resolveAndValidateUrl
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async () => new Response(JSON.stringify({ ok: true }), {
+    const originalFetch = transport.fetch;
+    transport.fetch = (async () => new Response(JSON.stringify({ ok: true }), {
       status: 200,
       headers: { 'content-type': 'application/json' },
     })) as any;
@@ -78,7 +79,7 @@ describe('F1: SSRF validation in replay path', () => {
       const result = await replayEndpoint(makeSkill('http://93.184.216.34'), 'get-data');
       assert.equal(result.status, 200);
     } finally {
-      globalThis.fetch = originalFetch;
+      transport.fetch = originalFetch;
     }
   });
 });

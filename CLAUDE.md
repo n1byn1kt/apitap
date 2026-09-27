@@ -11,7 +11,7 @@ When asked to fetch data from a website, **always check for existing skill files
 3. If no skill file → try `apitap read <url>` first (text extraction, no browser)
 4. Only use `apitap capture` or `apitap browse` as a last resort (requires browser)
 
-**The replay path is the fast path.** It calls APIs directly with `fetch()` — no browser, no Playwright, no Chrome. Don't open a browser if a skill file already exists.
+**The replay path is the fast path.** It calls APIs directly over HTTP — no browser, no Playwright, no Chrome. Don't open a browser if a skill file already exists.
 
 ## Commands
 
@@ -32,16 +32,17 @@ ApiTap intercepts web API traffic via browser, generates portable "skill files,"
 Browser → CDP listener (monitor.ts) → filter.ts → SkillGenerator → skill.json on disk
 ```
 
-**Replay path** (zero dependencies, stdlib fetch):
+**Replay path** (zero dependencies, stdlib node:http):
 ```
-Skill file → replay/engine.ts → fetch() → JSON response
+Skill file → replay/engine.ts → net/transport.ts pinnedFetch() → JSON response
 ```
 
 ### Module Map
 
 - **`src/capture/`** — Browser-side interception. `monitor.ts` is the Playwright CDP listener. `session.ts` wraps monitor into a stateful interactive session (used by MCP `capture_start`/`capture_interact`/`capture_finish`). `filter.ts` scores requests to separate API calls from noise. `parameterize.ts` converts `/users/123` → `/users/:id`.
 - **`src/skill/`** — Skill file lifecycle. `generator.ts` groups captured exchanges, deduplicates by `method + parameterizedPath`, extracts auth/pagination/body templates. `store.ts` reads/writes `~/.apitap/skills/<domain>.json`. `signing.ts` provides HMAC-SHA256 integrity. `ssrf.ts` validates URLs against private IP ranges.
-- **`src/replay/`** — `engine.ts` substitutes params, injects auth from encrypted storage, validates URLs via SSRF checks, and calls `fetch()`. Auth comes from `AuthManager`, never from the skill file itself.
+- **`src/replay/`** — `engine.ts` substitutes params, injects auth from encrypted storage, validates URLs via SSRF checks, and calls `transport.fetch()` (`src/net/transport.ts`). Auth comes from `AuthManager`, never from the skill file itself.
+- **`src/net/`** — `transport.ts`: `pinnedFetch()`, a fetch-compatible client over node:http(s) whose DNS lookup rejects private addresses at connect time (closes DNS rebinding), never follows redirects, never pools sockets. Used by replay, OAuth refresh, and (via `safeFetch`) read/peek/discovery.
 - **`src/discovery/`** — Browser-free API detection. `frameworks.ts` detects WordPress/Next.js/Shopify from HTML/headers. `openapi.ts` probes for specs. `probes.ts` checks common API paths. `index.ts` orchestrates all three in parallel.
 - **`src/read/`** — Text-mode content extraction. Site-specific decoders (Reddit, YouTube, Wikipedia, HN, Twitter, Grokipedia, DeepWiki) in `decoders/`. Falls back to generic HTML extraction in `extract.ts`. `peek.ts` does HEAD-only triage.
 - **`src/auth/`** — `manager.ts` stores/retrieves encrypted credentials (AES-256-GCM). `refresh.ts` handles browser-based token refresh. `handoff.ts` opens a visible browser for human login. `oauth-refresh.ts` handles OAuth refresh_token flows.
@@ -56,7 +57,7 @@ Skill file → replay/engine.ts → fetch() → JSON response
 - **CLI is the API**: agents use the same commands humans do. `--json` on every command for machine output. That covers failures too — every error exit goes through `failCli()` in `src/cli.ts`, which prints `{success: false, error, usage?, hint?}` to stdout under `--json` while keeping the human line on stderr. Keep `error` short enough to surface alone — long guidance goes in `hint`, which reaches both channels. Add new error exits via `failCli`, never a bare `console.error` + `process.exit`. `apitap serve` is the one exception: its stdout is the MCP transport, so it passes `stream: 'stderr'` and the human line is suppressed to keep that stream parseable.
 - **Skill files are the central artifact**: JSON at `~/.apitap/skills/<domain>.json` with version, endpoints, auth config, provenance, and HMAC signature.
 - **Auth is never in skill files**: credentials live in separate encrypted storage. Skill files only contain `[stored]` placeholders.
-- **SSRF defense is multi-layered**: validated at import, at replay, after DNS resolution, and after redirects. Private IPs, cloud metadata, localhost all blocked.
+- **SSRF defense is multi-layered**: validated at import, at replay, per redirect hop, and — the enforcement point — inside the connection's own DNS lookup (`validatingLookup`), so the checked address is the connected address. Private IPs, cloud metadata, localhost all blocked. Never add a new outbound call that pre-checks DNS and then calls global `fetch(hostname)`: that re-resolves and reopens rebinding. Use `transport.fetch` / `safeFetch`.
 - **Generator deduplication**: keyed on `method + parameterizedPath`. For POST bodies, duplicate bodies stored in `exchangeBodies` map for cross-request diffing during `toSkillFile()`.
 - **ESM-only**: `"type": "module"` with `.js` extensions in imports (even for .ts source files, required by NodeNext resolution).
 
@@ -72,6 +73,7 @@ Skill file → replay/engine.ts → fetch() → JSON response
 - Uses Node's built-in `node:test` with `describe`/`it`/`assert`. No Jest, no Mocha.
 - E2E tests in `test/e2e/` spin up local HTTP servers for capture→replay round-trips.
 - Security tests in `test/security/` cover SSRF, path traversal, header injection, DNS rebinding, redirect attacks.
+- Replay and OAuth-refresh traffic goes through `transport.fetch` — stub **that** (`transport.fetch = stub`), not `globalThis.fetch`, which no longer reaches those paths.
 - MCP tests in `test/mcp/` test the MCP server tools end-to-end.
 
 ## TypeScript

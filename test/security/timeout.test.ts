@@ -1,13 +1,15 @@
 import { describe, it, mock } from 'node:test';
 import assert from 'node:assert/strict';
 
+import { transport } from '../../src/net/transport.js';
+
 describe('F5: Replay fetch timeout', () => {
   it('passes AbortSignal.timeout to fetch', async () => {
     // Track fetch calls
     const fetchCalls: any[] = [];
-    const originalFetch = globalThis.fetch;
+    const originalFetch = transport.fetch;
 
-    globalThis.fetch = (async (url: any, init: any) => {
+    transport.fetch = (async (url: any, init: any) => {
       fetchCalls.push({ url: url.toString(), init });
       return new Response(JSON.stringify({ ok: true }), {
         status: 200,
@@ -45,7 +47,7 @@ describe('F5: Replay fetch timeout', () => {
       assert.ok(lastCall.init.signal, 'fetch should have signal option');
       assert.ok(lastCall.init.signal instanceof AbortSignal, 'signal should be an AbortSignal');
     } finally {
-      globalThis.fetch = originalFetch;
+      transport.fetch = originalFetch;
     }
   });
 });

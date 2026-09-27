@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { refreshOAuth } from '../../src/auth/oauth-refresh.js';
+import { transport } from '../../src/net/transport.js';
 import type { OAuthConfig } from '../../src/types.js';
 
 // Minimal mock AuthManager
@@ -45,8 +46,8 @@ describe('F2: OAuth token endpoint SSRF validation', () => {
   });
 
   it('allows token endpoint on same domain', async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async () => new Response(
+    const originalFetch = transport.fetch;
+    transport.fetch = (async () => new Response(
       JSON.stringify({ access_token: 'new_token_123' }),
       { status: 200, headers: { 'content-type': 'application/json' } },
     )) as any;
@@ -61,13 +62,13 @@ describe('F2: OAuth token endpoint SSRF validation', () => {
       assert.equal(result.success, true);
       // accessToken no longer in result (security hardening)
     } finally {
-      globalThis.fetch = originalFetch;
+      transport.fetch = originalFetch;
     }
   });
 
   it('allows token endpoint on known OAuth provider', async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async () => new Response(
+    const originalFetch = transport.fetch;
+    transport.fetch = (async () => new Response(
       JSON.stringify({ access_token: 'google_token' }),
       { status: 200, headers: { 'content-type': 'application/json' } },
     )) as any;
@@ -81,13 +82,13 @@ describe('F2: OAuth token endpoint SSRF validation', () => {
       );
       assert.equal(result.success, true);
     } finally {
-      globalThis.fetch = originalFetch;
+      transport.fetch = originalFetch;
     }
   });
 
   it('allows Auth0 tenant subdomain', async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async () => new Response(
+    const originalFetch = transport.fetch;
+    transport.fetch = (async () => new Response(
       JSON.stringify({ access_token: 'auth0_token' }),
       { status: 200, headers: { 'content-type': 'application/json' } },
     )) as any;
@@ -101,13 +102,13 @@ describe('F2: OAuth token endpoint SSRF validation', () => {
       );
       assert.equal(result.success, true);
     } finally {
-      globalThis.fetch = originalFetch;
+      transport.fetch = originalFetch;
     }
   });
 
   it('allows Okta org subdomain', async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async () => new Response(
+    const originalFetch = transport.fetch;
+    transport.fetch = (async () => new Response(
       JSON.stringify({ access_token: 'okta_token' }),
       { status: 200, headers: { 'content-type': 'application/json' } },
     )) as any;
@@ -121,13 +122,13 @@ describe('F2: OAuth token endpoint SSRF validation', () => {
       );
       assert.equal(result.success, true);
     } finally {
-      globalThis.fetch = originalFetch;
+      transport.fetch = originalFetch;
     }
   });
 
   it('allows securetoken.googleapis.com (Firebase)', async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async () => new Response(
+    const originalFetch = transport.fetch;
+    transport.fetch = (async () => new Response(
       JSON.stringify({ access_token: 'firebase_token' }),
       { status: 200, headers: { 'content-type': 'application/json' } },
     )) as any;
@@ -141,7 +142,7 @@ describe('F2: OAuth token endpoint SSRF validation', () => {
       );
       assert.equal(result.success, true);
     } finally {
-      globalThis.fetch = originalFetch;
+      transport.fetch = originalFetch;
     }
   });
 
@@ -157,8 +158,8 @@ describe('F2: OAuth token endpoint SSRF validation', () => {
   });
 
   it('allows token endpoint on subdomain of skill domain', async () => {
-    const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async () => new Response(
+    const originalFetch = transport.fetch;
+    transport.fetch = (async () => new Response(
       JSON.stringify({ access_token: 'sub_token' }),
       { status: 200, headers: { 'content-type': 'application/json' } },
     )) as any;
@@ -172,7 +173,7 @@ describe('F2: OAuth token endpoint SSRF validation', () => {
       );
       assert.equal(result.success, true);
     } finally {
-      globalThis.fetch = originalFetch;
+      transport.fetch = originalFetch;
     }
   });
 });

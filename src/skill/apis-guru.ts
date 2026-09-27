@@ -1,15 +1,17 @@
 // src/skill/apis-guru.ts
 import { resolveAndValidateUrl } from '../skill/ssrf.js';
+import { transport, fetchFollowing } from '../net/transport.js';
 
 const MAX_SPEC_SIZE = 10 * 1024 * 1024;   // 10 MB per spec
 const MAX_LIST_SIZE = 100 * 1024 * 1024;  // 100 MB for APIs.guru list
 
-async function fetchWithSizeLimit(url: string, maxBytes: number, options?: RequestInit): Promise<string> {
-  const response = await fetch(url, {
+async function fetchWithSizeLimit(url: string, maxBytes: number, followRedirects = true): Promise<string> {
+  // Either way every request is range-checked at connect time; followed hops too.
+  const init = {
     signal: AbortSignal.timeout(30_000),
-    ...options,
-    headers: { 'User-Agent': 'apitap-import/1.0', ...(options?.headers as Record<string, string> || {}) },
-  });
+    headers: { 'User-Agent': 'apitap-import/1.0' },
+  };
+  const response = followRedirects ? await fetchFollowing(url, init) : await transport.fetch(url, init);
   if (!response.ok) {
     throw new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);
   }
@@ -159,7 +161,7 @@ export async function fetchSpec(specUrl: string): Promise<Record<string, any>> {
   if (!ssrf.safe) {
     throw new Error(`SSRF check failed for spec URL ${specUrl}: ${ssrf.reason}`);
   }
-  const text = await fetchWithSizeLimit(specUrl, MAX_SPEC_SIZE, { redirect: 'error' });
+  const text = await fetchWithSizeLimit(specUrl, MAX_SPEC_SIZE, false);
   try {
     return JSON.parse(text) as Record<string, any>;
   } catch {

@@ -1,6 +1,7 @@
 // src/skill/github.ts
 import { execFileSync as _execFileSync } from 'node:child_process';
 import { resolveAndValidateUrl as _resolveAndValidateUrl } from './ssrf.js';
+import { fetchFollowing } from '../net/transport.js';
 
 // ─── Token resolution ─────────────────────────────────────────────────────────
 
@@ -81,7 +82,7 @@ export async function githubFetch(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(url, {
+  const response = await fetchFollowing(url, {
     headers,
     signal: AbortSignal.timeout(30_000),
   });
@@ -531,9 +532,11 @@ const MAX_SPEC_SIZE = 10 * 1024 * 1024; // 10 MB
 
 /**
  * Fetch an OpenAPI spec from raw.githubusercontent.com.
- * Uses direct fetch() — does NOT use githubFetch() since this is a different host.
+ * Uses fetchFollowing() directly — not githubFetch(), since this is a different host.
  * raw.githubusercontent.com requests do not count against the GitHub API rate limit.
  * Auth token is sent to raw.githubusercontent.com (GitHub-controlled domain) for private repo support.
+ * The token is dropped if a redirect leaves the spec URL's origin, and every
+ * hop is range-checked at connect time.
  */
 export async function fetchGitHubSpec(
   specUrl: string,
@@ -549,7 +552,7 @@ export async function fetchGitHubSpec(
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(specUrl, {
+  const response = await fetchFollowing(specUrl, {
     headers,
     signal: AbortSignal.timeout(30_000),
   });

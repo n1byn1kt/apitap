@@ -1,6 +1,7 @@
 // src/read/decoders/reddit.ts
 import type { Decoder, ReadResult } from '../types.js';
 import { safeFetch } from '../../discovery/fetch.js';
+import { transport } from '../../net/transport.js';
 
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
@@ -65,7 +66,7 @@ async function recoverDeletedComments(
   try {
     const ids = commentIds.join(',');
     const ppUrl = `https://api.pullpush.io/reddit/search/comment/?ids=${ids}`;
-    const response = await fetch(ppUrl, {
+    const response = await transport.fetch(ppUrl, {
       headers: { 'user-agent': 'apitap/1.0 (deleted comment recovery)' },
       signal: AbortSignal.timeout(5_000),
     });

@@ -42,7 +42,7 @@ Skill file → replay/engine.ts → net/transport.ts pinnedFetch() → JSON resp
 - **`src/capture/`** — Browser-side interception. `monitor.ts` is the Playwright CDP listener. `session.ts` wraps monitor into a stateful interactive session (used by MCP `capture_start`/`capture_interact`/`capture_finish`). `filter.ts` scores requests to separate API calls from noise. `parameterize.ts` converts `/users/123` → `/users/:id`.
 - **`src/skill/`** — Skill file lifecycle. `generator.ts` groups captured exchanges, deduplicates by `method + parameterizedPath`, extracts auth/pagination/body templates. `store.ts` reads/writes `~/.apitap/skills/<domain>.json`. `signing.ts` provides HMAC-SHA256 integrity. `ssrf.ts` validates URLs against private IP ranges.
 - **`src/replay/`** — `engine.ts` substitutes params, injects auth from encrypted storage, validates URLs via SSRF checks, and calls `transport.fetch()` (`src/net/transport.ts`). Auth comes from `AuthManager`, never from the skill file itself.
-- **`src/net/`** — `transport.ts`: `pinnedFetch()`, a fetch-compatible client over node:http(s) whose DNS lookup rejects private addresses at connect time (closes DNS rebinding), never follows redirects, never pools sockets. Used by replay, OAuth refresh, and (via `safeFetch`) read/peek/discovery.
+- **`src/net/`** — `transport.ts`: `pinnedFetch()`, a fetch-compatible client over node:http(s) whose DNS lookup rejects private addresses at connect time (closes DNS rebinding), never follows redirects, never pools sockets. `fetchFollowing()` adds fetch-style redirect following where every hop is re-checked and Authorization/Cookie are dropped on cross-origin hops. Every outbound HTTP call goes through here: replay, OAuth refresh, verifier, spec importers (GitHub/APIs.guru/SwaggerHub), and (via `safeFetch`) read/peek/discovery.
 - **`src/discovery/`** — Browser-free API detection. `frameworks.ts` detects WordPress/Next.js/Shopify from HTML/headers. `openapi.ts` probes for specs. `probes.ts` checks common API paths. `index.ts` orchestrates all three in parallel.
 - **`src/read/`** — Text-mode content extraction. Site-specific decoders (Reddit, YouTube, Wikipedia, HN, Twitter, Grokipedia, DeepWiki) in `decoders/`. Falls back to generic HTML extraction in `extract.ts`. `peek.ts` does HEAD-only triage.
 - **`src/auth/`** — `manager.ts` stores/retrieves encrypted credentials (AES-256-GCM). `refresh.ts` handles browser-based token refresh. `handoff.ts` opens a visible browser for human login. `oauth-refresh.ts` handles OAuth refresh_token flows.
@@ -73,7 +73,7 @@ Skill file → replay/engine.ts → net/transport.ts pinnedFetch() → JSON resp
 - Uses Node's built-in `node:test` with `describe`/`it`/`assert`. No Jest, no Mocha.
 - E2E tests in `test/e2e/` spin up local HTTP servers for capture→replay round-trips.
 - Security tests in `test/security/` cover SSRF, path traversal, header injection, DNS rebinding, redirect attacks.
-- Replay and OAuth-refresh traffic goes through `transport.fetch` — stub **that** (`transport.fetch = stub`), not `globalThis.fetch`, which no longer reaches those paths.
+- Outbound HTTP goes through `transport.fetch` — stub **that** (`transport.fetch = stub`), not `globalThis.fetch`, which reaches none of the replay, OAuth, verifier or importer paths.
 - MCP tests in `test/mcp/` test the MCP server tools end-to-end.
 
 ## TypeScript

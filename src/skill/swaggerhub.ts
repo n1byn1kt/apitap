@@ -1,15 +1,15 @@
 // src/skill/swaggerhub.ts
 import { resolveAndValidateUrl } from './ssrf.js';
+import { fetchFollowing } from '../net/transport.js';
 
 const MAX_SPEC_SIZE = 10 * 1024 * 1024; // 10 MB per spec
 const SWAGGERHUB_API = 'https://api.swaggerhub.com';
 
-async function fetchWithSizeLimit(url: string, maxBytes: number, options?: RequestInit): Promise<string> {
-  const response = await fetch(url, {
+async function fetchWithSizeLimit(url: string, maxBytes: number): Promise<string> {
+  // Follows redirects, but every hop is range-checked at connect time.
+  const response = await fetchFollowing(url, {
     signal: AbortSignal.timeout(30_000),
-    redirect: 'follow',
-    ...options,
-    headers: { 'User-Agent': 'apitap-import/1.0', Accept: 'application/json', ...(options?.headers as Record<string, string> || {}) },
+    headers: { 'User-Agent': 'apitap-import/1.0', Accept: 'application/json' },
   });
   if (!response.ok) {
     throw new Error(`HTTP ${response.status} ${response.statusText} for ${url}`);

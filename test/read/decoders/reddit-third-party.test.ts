@@ -2,6 +2,7 @@
 import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { redditDecoder } from '../../../src/read/decoders/reddit.js';
+import { transport } from '../../../src/net/transport.js';
 
 describe('Reddit decoder third-party disclosure', () => {
   const originalThirdParty = process.env.APITAP_THIRD_PARTY;
@@ -17,12 +18,12 @@ describe('Reddit decoder third-party disclosure', () => {
   it('does not call pullpush.io by default (opt-in, not opt-out)', async () => {
     delete process.env.APITAP_THIRD_PARTY;
 
-    const originalFetch = globalThis.fetch;
+    // The PullPush call goes through transport.fetch; record without sending.
+    const originalFetch = transport.fetch;
     const fetchedUrls: string[] = [];
-    globalThis.fetch = async (input: any, init?: any) => {
-      const url = typeof input === 'string' ? input : input.url;
+    transport.fetch = async (url: string) => {
       fetchedUrls.push(url);
-      return originalFetch(input, init);
+      return new Response('{"data":[]}', { status: 200, headers: { 'content-type': 'application/json' } });
     };
 
     try {
@@ -32,7 +33,7 @@ describe('Reddit decoder third-party disclosure', () => {
     } catch {
       // Expected — no real Reddit API in tests
     } finally {
-      globalThis.fetch = originalFetch;
+      transport.fetch = originalFetch;
     }
 
     const pullpushCalls = fetchedUrls.filter(u => u.includes('pullpush.io'));

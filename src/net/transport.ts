@@ -233,8 +233,64 @@ function createDecoder(coding: string, firstChunk: Buffer | null): Transform | n
   }
 }
 
+/** Redirect hops fetchFollowing follows before giving up (the initial request is not a hop). */
+export const MAX_FOLLOW_REDIRECTS = 5;
+
+/** Request headers that must not cross to another origin on a redirect. */
+const CROSS_ORIGIN_STRIP = new Set(['authorization', 'cookie', 'proxy-authorization']);
+
+/** Statuses fetch() follows; any other 3xx (300, 304, 305, …) is returned as-is. */
+const FOLLOWED_REDIRECTS = new Set([301, 302, 303, 307, 308]);
+
+/** Body-describing headers fetch() drops when a redirect turns the request into a bodyless GET. */
+const REQUEST_BODY_HEADERS = new Set(['content-type', 'content-encoding', 'content-language', 'content-location']);
+
 /**
- * The fetch used by credential-carrying callers (replay, OAuth refresh).
+ * pinnedFetch with fetch()-style redirect following, where every hop goes
+ * back through transport.fetch — so each target gets the scheme/literal check
+ * and the connect-time lookup. Follows only 301/302/303/307/308; refuses a
+ * Location carrying userinfo (as fetch() does); drops Authorization, Cookie
+ * and Proxy-Authorization once a redirect leaves the original origin. 303
+ * (non-HEAD) and 301/302 after POST switch to a bodyless GET.
+ */
+export async function fetchFollowing(
+  url: string,
+  init: PinnedFetchInit & { maxRedirects?: number } = {},
+): Promise<Response> {
+  const maxRedirects = init.maxRedirects ?? MAX_FOLLOW_REDIRECTS;
+  const origin = new URL(url).origin;
+  let current = url;
+  let method = (init.method ?? 'GET').toUpperCase();
+  let body = init.body;
+  let headers = { ...(init.headers ?? {}) };
+  const without = (drop: Set<string>) =>
+    Object.fromEntries(Object.entries(headers).filter(([k]) => !drop.has(k.toLowerCase())));
+
+  for (let hop = 0; ; hop++) {
+    const res = await transport.fetch(current, { ...init, method, body, headers });
+    const location = res.headers.get('location');
+    if (!FOLLOWED_REDIRECTS.has(res.status) || location === null) return res;
+    await res.body?.cancel().catch(() => {});
+    if (hop >= maxRedirects) {
+      throw Object.assign(new Error(`more than ${maxRedirects} redirects from ${url}`), { code: 'TOO_MANY_REDIRECTS' });
+    }
+    const next = new URL(location, current);
+    if (next.username || next.password) {
+      throw Object.assign(new Error(`redirect to a URL with credentials refused: ${next.host}`), { code: 'BAD_REDIRECT' });
+    }
+    if (next.origin !== origin) headers = without(CROSS_ORIGIN_STRIP);
+    if ((res.status === 303 && method !== 'HEAD') || ((res.status === 301 || res.status === 302) && method === 'POST')) {
+      method = 'GET';
+      body = undefined;
+      headers = without(REQUEST_BODY_HEADERS);
+    }
+    current = next.toString();
+  }
+}
+
+/**
+ * The fetch used by every outbound caller except safeFetch (replay, OAuth
+ * refresh, verifier, spec importers).
  * A mutable slot so tests can substitute a stub — replacing globalThis.fetch
  * no longer reaches these paths.
  */

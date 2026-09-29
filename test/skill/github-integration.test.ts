@@ -8,6 +8,7 @@
 
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { transport } from '../../src/net/transport.js';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -124,7 +125,7 @@ function textResponse(body: string, status = 200): Response {
 // ─── Test state ───────────────────────────────────────────────────────────────
 
 let tempDir: string;
-let origFetch: typeof globalThis.fetch;
+let origFetch: typeof transport.fetch;
 let prevResolveAndValidateUrl: ReturnType<typeof _setResolveAndValidateUrl>;
 
 // Bypass SSRF DNS resolution — mocked URLs won't resolve in unit tests.
@@ -135,7 +136,7 @@ const noopSafeValidator: Parameters<typeof _setResolveAndValidateUrl>[0] = async
 
 beforeEach(() => {
   // Snapshot original globals
-  origFetch = globalThis.fetch;
+  origFetch = transport.fetch;
   // Bypass SSRF checks for all integration tests
   prevResolveAndValidateUrl = _setResolveAndValidateUrl(noopSafeValidator);
   // Use a fresh temp dir for each test
@@ -146,7 +147,7 @@ beforeEach(() => {
 
 afterEach(() => {
   // Restore globals
-  globalThis.fetch = origFetch;
+  transport.fetch = origFetch;
   _setResolveAndValidateUrl(prevResolveAndValidateUrl);
   resetTokenCache();
   // Clean up temp dir
@@ -251,7 +252,7 @@ describe('GitHub import integration', () => {
       },
     };
 
-    globalThis.fetch = async (input: RequestInfo | URL, _init?: RequestInit) => {
+    transport.fetch = async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = input.toString();
       if (url.includes('api.github.com/search/code')) {
         return jsonResponse({ items: [validRepo, forkRepo] });
@@ -309,7 +310,7 @@ describe('GitHub import integration', () => {
       { name: 'openapi.json', path: 'openapi.json', html_url: 'https://github.com/widgets/widget-api/blob/main/openapi.json' },
     ];
 
-    globalThis.fetch = async (input: RequestInfo | URL, _init?: RequestInit) => {
+    transport.fetch = async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = input.toString();
       if (url.includes('api.github.com/search/repositories')) {
         return jsonResponse({ items: [repoItem] });
@@ -342,7 +343,7 @@ describe('GitHub import integration', () => {
   // ── 3. --dry-run does not write to disk ──────────────────────────────────────
 
   it('--dry-run does not write to disk', async () => {
-    globalThis.fetch = async () => textResponse(JSON.stringify(EXAMPLE_SPEC));
+    transport.fetch = async () => textResponse(JSON.stringify(EXAMPLE_SPEC));
 
     const result = makeSpecResult();
     const outcome = await runPipeline(result, { dryRun: true, skillsDir: tempDir });
@@ -360,7 +361,7 @@ describe('GitHub import integration', () => {
   // ── 4. --update skips already-imported specs ──────────────────────────────────
 
   it('--update skips already-imported specs', async () => {
-    globalThis.fetch = async () => textResponse(JSON.stringify(EXAMPLE_SPEC));
+    transport.fetch = async () => textResponse(JSON.stringify(EXAMPLE_SPEC));
 
     const result = makeSpecResult();
 
@@ -393,7 +394,7 @@ describe('GitHub import integration', () => {
       htmlUrl: 'https://github.com/acme/ok-spec/blob/main/openapi.json',
     });
 
-    globalThis.fetch = async (input: RequestInfo | URL, _init?: RequestInit) => {
+    transport.fetch = async (input: RequestInfo | URL, _init?: RequestInit) => {
       const url = input.toString();
       if (url.includes('fail-spec')) {
         return new Response('Not Found', { status: 404 });
@@ -474,7 +475,7 @@ describe('GitHub import integration', () => {
       },
     };
 
-    globalThis.fetch = async () => textResponse(JSON.stringify(sentrySpec));
+    transport.fetch = async () => textResponse(JSON.stringify(sentrySpec));
 
     const result = makeSpecResult({
       specUrl: 'https://raw.githubusercontent.com/getsentry/sentry-api-schema/main/openapi.json',
@@ -525,7 +526,7 @@ describe('GitHub import integration', () => {
       },
     };
 
-    globalThis.fetch = async () => textResponse(JSON.stringify(noServerSpec));
+    transport.fetch = async () => textResponse(JSON.stringify(noServerSpec));
 
     const result = makeSpecResult();
     const spec = await fetchGitHubSpec(result.specUrl, null);
@@ -555,7 +556,7 @@ describe('GitHub import integration', () => {
       },
     };
 
-    globalThis.fetch = async () => textResponse(JSON.stringify(localhostSpec));
+    transport.fetch = async () => textResponse(JSON.stringify(localhostSpec));
 
     const result = makeSpecResult();
     const spec = await fetchGitHubSpec(result.specUrl, null);

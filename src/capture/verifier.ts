@@ -1,6 +1,7 @@
 // src/capture/verifier.ts
 import type { SkillFile, SkillEndpoint, Replayability } from '../types.js';
 import { resolveAndValidateUrl, assertSsrfBypassAllowed } from '../skill/ssrf.js';
+import { transport, SsrfBlockedError } from '../net/transport.js';
 
 /**
  * Heuristic tier classification for non-GET endpoints (or when verification is skipped).
@@ -31,7 +32,7 @@ export function classifyHeuristic(endpoint: SkillEndpoint): Replayability {
 }
 
 /**
- * Verify a single GET endpoint by replaying it with raw fetch().
+ * Verify a single GET endpoint by replaying it (no auth, no redirects).
  * Compares status and response shape.
  */
 async function verifySingle(
@@ -57,11 +58,11 @@ async function verifySingle(
   }
 
   try {
-    const response = await fetch(url, {
+    // transport.fetch never follows redirects (an unvalidated Location could
+    // target an internal host) and re-checks the address at connect time.
+    const response = await transport.fetch(url, {
       headers,
-      // Do not follow redirects: a redirect Location is unvalidated and could
-      // target an internal host / cloud metadata endpoint.
-      redirect: 'manual',
+      skipSsrf,
       signal: AbortSignal.timeout(5000),
     });
 
@@ -90,7 +91,9 @@ async function verifySingle(
     }
 
     return { tier: 'orange', verified: true, signals: [`status-${response.status}`] };
-  } catch {
+  } catch (err) {
+    // A connect-time SSRF block is the pre-check's verdict arriving late.
+    if (err instanceof SsrfBlockedError) return classifyHeuristic(endpoint);
     return { tier: 'red', verified: true, signals: ['connection-failed'] };
   }
 }
@@ -124,13 +127,11 @@ async function verifySinglePost(
     : endpoint.requestBody.template;
 
   try {
-    const response = await fetch(url, {
+    const response = await transport.fetch(url, {
       method: endpoint.method,
       headers,
       body,
-      // Do not follow redirects (see verifySingle): an unvalidated Location
-      // could target an internal host.
-      redirect: 'manual',
+      skipSsrf,
       signal: AbortSignal.timeout(5000),
     });
 
@@ -158,7 +159,9 @@ async function verifySinglePost(
     }
 
     return { tier: 'orange', verified: true, signals: [`status-${response.status}`] };
-  } catch {
+  } catch (err) {
+    // A connect-time SSRF block is the pre-check's verdict arriving late.
+    if (err instanceof SsrfBlockedError) return classifyHeuristic(endpoint);
     return { tier: 'red', verified: true, signals: ['connection-failed'] };
   }
 }

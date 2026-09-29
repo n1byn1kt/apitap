@@ -1,6 +1,7 @@
 // test/skill/github.test.ts
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { transport } from '../../src/net/transport.js';
 import * as github from '../../src/skill/github.js';
 
 // ─── resolveGitHubToken ──────────────────────────────────────────────────────
@@ -151,20 +152,20 @@ describe('githubFetch', () => {
     return new Response(JSON.stringify(body), { status, headers });
   }
 
-  let origFetch: typeof globalThis.fetch;
+  let origFetch: typeof transport.fetch;
 
   beforeEach(() => {
-    origFetch = globalThis.fetch;
+    origFetch = transport.fetch;
   });
 
   afterEach(() => {
-    globalThis.fetch = origFetch;
+    transport.fetch = origFetch;
   });
 
   it('sets correct headers with token', async () => {
     let capturedHeaders: Record<string, string> = {};
 
-    globalThis.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+    transport.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
       capturedHeaders = { ...(init?.headers as Record<string, string>) };
       return makeResponse(200, { ok: true });
     };
@@ -179,7 +180,7 @@ describe('githubFetch', () => {
   it('omits Authorization header when token is null', async () => {
     let capturedHeaders: Record<string, string> = {};
 
-    globalThis.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+    transport.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
       capturedHeaders = { ...(init?.headers as Record<string, string>) };
       return makeResponse(200, { ok: true });
     };
@@ -196,7 +197,7 @@ describe('githubFetch', () => {
   it('parses rate limit headers from response', async () => {
     const resetEpoch = Math.floor(Date.now() / 1000) + 3600;
 
-    globalThis.fetch = async () =>
+    transport.fetch = async () =>
       makeResponse(200, { data: 'hello' }, {
         'x-ratelimit-remaining': '42',
         'x-ratelimit-limit': '5000',
@@ -213,7 +214,7 @@ describe('githubFetch', () => {
   it('throws on 403 rate limit with reset time', async () => {
     const resetEpoch = Math.floor(Date.now() / 1000) + 600;
 
-    globalThis.fetch = async () =>
+    transport.fetch = async () =>
       new Response(JSON.stringify({ message: 'rate limit exceeded' }), {
         status: 403,
         headers: {
@@ -234,7 +235,7 @@ describe('githubFetch', () => {
   });
 
   it('throws on 429 secondary rate limit with retry-after', async () => {
-    globalThis.fetch = async () =>
+    transport.fetch = async () =>
       new Response(JSON.stringify({ message: 'secondary rate limit exceeded' }), {
         status: 429,
         headers: {
@@ -260,7 +261,7 @@ describe('githubFetch', () => {
   });
 
   it('throws on non-403 error responses with descriptive message', async () => {
-    globalThis.fetch = async () =>
+    transport.fetch = async () =>
       new Response('{}', {
         status: 422,
         statusText: 'Unprocessable Entity',
@@ -284,7 +285,7 @@ describe('githubFetch', () => {
   it('throws when content-length exceeds 10 MB', async () => {
     const elevenMB = (11 * 1024 * 1024).toString();
 
-    globalThis.fetch = async () =>
+    transport.fetch = async () =>
       new Response(JSON.stringify({}), {
         status: 200,
         headers: {
@@ -304,7 +305,7 @@ describe('githubFetch', () => {
   it('returns parsed JSON data on success', async () => {
     const payload = { id: 1, name: 'hello-world', stargazers_count: 99 };
 
-    globalThis.fetch = async () => makeResponse(200, payload);
+    transport.fetch = async () => makeResponse(200, payload);
 
     const { data } = await github.githubFetch('/repos/octocat/hello-world', 'tok');
 
@@ -314,7 +315,7 @@ describe('githubFetch', () => {
   it('constructs full GitHub API URL from path', async () => {
     let capturedUrl = '';
 
-    globalThis.fetch = async (input: RequestInfo | URL) => {
+    transport.fetch = async (input: RequestInfo | URL) => {
       capturedUrl = input.toString();
       return makeResponse(200, {});
     };
@@ -716,14 +717,14 @@ function makeCodeSearchResponse(items: unknown[]): Response {
 }
 
 describe('searchOrgSpecs', () => {
-  let origFetch: typeof globalThis.fetch;
+  let origFetch: typeof transport.fetch;
 
   beforeEach(() => {
-    origFetch = globalThis.fetch;
+    origFetch = transport.fetch;
   });
 
   afterEach(() => {
-    globalThis.fetch = origFetch;
+    transport.fetch = origFetch;
   });
 
   // Helper: URL-aware fetch mock that returns empty org repos for the heuristic phase
@@ -776,7 +777,7 @@ describe('searchOrgSpecs', () => {
     ];
     let codeSearchIndex = 0;
 
-    globalThis.fetch = async (input: RequestInfo | URL) => {
+    transport.fetch = async (input: RequestInfo | URL) => {
       const url = input.toString();
       capturedUrls.push(url);
       if (url.includes('/search/code')) {
@@ -835,7 +836,7 @@ describe('searchOrgSpecs', () => {
         stars: 10,
       }),
     ];
-    globalThis.fetch = makeOrgAwareFetch([makeCodeSearchResponse(items)]);
+    transport.fetch = makeOrgAwareFetch([makeCodeSearchResponse(items)]);
 
     const results = await github.searchOrgSpecs('acme', 'tok');
 
@@ -868,7 +869,7 @@ describe('searchOrgSpecs', () => {
       ownerLogin: 'cloudflare',
     });
 
-    globalThis.fetch = makeOrgAwareFetch([makeCodeSearchResponse([item])]);
+    transport.fetch = makeOrgAwareFetch([makeCodeSearchResponse([item])]);
 
     const results = await github.searchOrgSpecs('cloudflare', 'tok');
 
@@ -888,7 +889,7 @@ describe('searchOrgSpecs', () => {
   });
 
   it('throws descriptive error for nonexistent org (422)', async () => {
-    globalThis.fetch = async () =>
+    transport.fetch = async () =>
       new Response('{}', {
         status: 422,
         statusText: 'Unprocessable Entity',
@@ -916,7 +917,7 @@ describe('searchOrgSpecs', () => {
   });
 
   it('returns empty array when no specs found', async () => {
-    globalThis.fetch = makeOrgAwareFetch([]);
+    transport.fetch = makeOrgAwareFetch([]);
 
     const results = await github.searchOrgSpecs('empty-org', 'tok');
 
@@ -927,7 +928,7 @@ describe('searchOrgSpecs', () => {
   it('finds specs via name-heuristic when code search returns nothing', async () => {
     // Code search returns nothing, but org has a repo named "api-schemas"
     // with openapi.json at root — name heuristic should find it.
-    globalThis.fetch = async (input: RequestInfo | URL) => {
+    transport.fetch = async (input: RequestInfo | URL) => {
       const url = input.toString();
 
       // Code search — return empty for all 4 patterns
@@ -981,7 +982,7 @@ describe('searchOrgSpecs', () => {
     // Code search finds a spec, name heuristic finds the same repo — should dedup
     const htmlUrl = 'https://github.com/acme/openapi/blob/main/openapi.json';
 
-    globalThis.fetch = async (input: RequestInfo | URL) => {
+    transport.fetch = async (input: RequestInfo | URL) => {
       const url = input.toString();
 
       if (url.includes('/search/code')) {
@@ -1016,7 +1017,7 @@ describe('searchOrgSpecs', () => {
   });
 
   it('skips repos whose names do not match heuristic patterns', async () => {
-    globalThis.fetch = async (input: RequestInfo | URL) => {
+    transport.fetch = async (input: RequestInfo | URL) => {
       const url = input.toString();
       if (url.includes('/search/code')) return makeCodeSearchResponse([]);
       if (url.includes('/orgs/acme/repos')) {
@@ -1112,20 +1113,20 @@ function make404Response(): Response {
 }
 
 describe('searchTopicSpecs', () => {
-  let origFetch: typeof globalThis.fetch;
+  let origFetch: typeof transport.fetch;
 
   beforeEach(() => {
-    origFetch = globalThis.fetch;
+    origFetch = transport.fetch;
   });
 
   afterEach(() => {
-    globalThis.fetch = origFetch;
+    transport.fetch = origFetch;
   });
 
   it('searches all 4 canonical topics when given all', async () => {
     const capturedUrls: string[] = [];
 
-    globalThis.fetch = async (input: RequestInfo | URL) => {
+    transport.fetch = async (input: RequestInfo | URL) => {
       const url = input.toString();
       capturedUrls.push(url);
       if (url.includes('/search/repositories')) {
@@ -1147,7 +1148,7 @@ describe('searchTopicSpecs', () => {
   it('searches single topic when given one', async () => {
     const capturedUrls: string[] = [];
 
-    globalThis.fetch = async (input: RequestInfo | URL) => {
+    transport.fetch = async (input: RequestInfo | URL) => {
       const url = input.toString();
       capturedUrls.push(url);
       if (url.includes('/search/repositories')) {
@@ -1168,7 +1169,7 @@ describe('searchTopicSpecs', () => {
     let searchCallCount = 0;
     let contentsCallCount = 0;
 
-    globalThis.fetch = async (input: RequestInfo | URL) => {
+    transport.fetch = async (input: RequestInfo | URL) => {
       const url = input.toString();
       if (url.includes('/search/repositories')) {
         searchCallCount++;
@@ -1198,7 +1199,7 @@ describe('searchTopicSpecs', () => {
     const lowStarRepo = makeRepoSearchItem({ fullName: 'acme/low-stars', stars: 3 });
     const highStarRepo = makeRepoSearchItem({ fullName: 'acme/high-stars', stars: 500 });
 
-    globalThis.fetch = async (input: RequestInfo | URL) => {
+    transport.fetch = async (input: RequestInfo | URL) => {
       const url = input.toString();
       if (url.includes('/search/repositories')) {
         return makeRepoSearchResponse([lowStarRepo, highStarRepo]);
@@ -1223,7 +1224,7 @@ describe('searchTopicSpecs', () => {
     const matchByDesc = makeRepoSearchItem({ fullName: 'acme/payments', description: 'stripe integration' });
     const noMatch = makeRepoSearchItem({ fullName: 'acme/unrelated', description: 'Something else entirely' });
 
-    globalThis.fetch = async (input: RequestInfo | URL) => {
+    transport.fetch = async (input: RequestInfo | URL) => {
       const url = input.toString();
       if (url.includes('/search/repositories')) {
         return makeRepoSearchResponse([matchByName, matchByDesc, noMatch]);
@@ -1251,7 +1252,7 @@ describe('searchTopicSpecs', () => {
     const repo = makeRepoSearchItem({ fullName: 'acme/spec-in-docs', stars: 100 });
     const probedPaths: string[] = [];
 
-    globalThis.fetch = async (input: RequestInfo | URL) => {
+    transport.fetch = async (input: RequestInfo | URL) => {
       const url = input.toString();
       if (url.includes('/search/repositories')) {
         return makeRepoSearchResponse([repo]);
@@ -1291,7 +1292,7 @@ describe('searchTopicSpecs', () => {
   it('skips repos where no spec file is found', async () => {
     const repo = makeRepoSearchItem({ fullName: 'acme/no-specs', stars: 100 });
 
-    globalThis.fetch = async (input: RequestInfo | URL) => {
+    transport.fetch = async (input: RequestInfo | URL) => {
       const url = input.toString();
       if (url.includes('/search/repositories')) {
         return makeRepoSearchResponse([repo]);
@@ -1313,24 +1314,24 @@ describe('searchTopicSpecs', () => {
 describe('fetchGitHubSpec', () => {
   const TEST_URL = 'https://raw.githubusercontent.com/acme/api-spec/main/openapi.json';
 
-  let origFetch: typeof globalThis.fetch;
+  let origFetch: typeof transport.fetch;
   let restoreSsrf: ReturnType<typeof github._setResolveAndValidateUrl>;
 
   beforeEach(() => {
-    origFetch = globalThis.fetch;
+    origFetch = transport.fetch;
     // Inject a fake SSRF validator that always returns safe — avoids real DNS in tests.
     restoreSsrf = github._setResolveAndValidateUrl(async (_url: string) => ({ safe: true }));
   });
 
   afterEach(() => {
-    globalThis.fetch = origFetch;
+    transport.fetch = origFetch;
     github._setResolveAndValidateUrl(restoreSsrf);
   });
 
   it('fetches and parses JSON spec from specUrl', async () => {
     const spec = { openapi: '3.0.0', info: { title: 'Test API' }, paths: {} };
 
-    globalThis.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+    transport.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
       return new Response(JSON.stringify(spec), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -1350,7 +1351,7 @@ describe('fetchGitHubSpec', () => {
       'paths: {}',
     ].join('\n');
 
-    globalThis.fetch = async () =>
+    transport.fetch = async () =>
       new Response(yamlBody, {
         status: 200,
         headers: { 'content-type': 'application/yaml' },
@@ -1365,7 +1366,7 @@ describe('fetchGitHubSpec', () => {
   it('throws on response > 10MB (content-length header)', async () => {
     const elevenMB = (11 * 1024 * 1024).toString();
 
-    globalThis.fetch = async () =>
+    transport.fetch = async () =>
       new Response('{}', {
         status: 200,
         headers: { 'content-length': elevenMB },
@@ -1380,7 +1381,7 @@ describe('fetchGitHubSpec', () => {
   it('throws on response body > 10MB (body size check)', async () => {
     const bigBody = 'x'.repeat(11 * 1024 * 1024);
 
-    globalThis.fetch = async () =>
+    transport.fetch = async () =>
       new Response(bigBody, { status: 200 });
 
     await assert.rejects(
@@ -1393,7 +1394,7 @@ describe('fetchGitHubSpec', () => {
     const spec = { openapi: '3.0.0', paths: {} };
     const capturedUrls: string[] = [];
 
-    globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    transport.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       capturedUrls.push(input.toString());
       return new Response(JSON.stringify(spec), { status: 200 });
     };
@@ -1416,7 +1417,7 @@ describe('fetchGitHubSpec', () => {
     const spec = { openapi: '3.0.0', paths: {} };
     let capturedHeaders: Record<string, string> = {};
 
-    globalThis.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+    transport.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
       capturedHeaders = { ...(init?.headers as Record<string, string>) };
       return new Response(JSON.stringify(spec), { status: 200 });
     };
@@ -1431,7 +1432,7 @@ describe('fetchGitHubSpec', () => {
     const spec = { openapi: '3.0.0', paths: {} };
     let capturedHeaders: Record<string, string> = {};
 
-    globalThis.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+    transport.fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
       capturedHeaders = { ...(init?.headers as Record<string, string>) };
       return new Response(JSON.stringify(spec), { status: 200 });
     };
@@ -1445,7 +1446,7 @@ describe('fetchGitHubSpec', () => {
   });
 
   it('throws on non-OK HTTP response', async () => {
-    globalThis.fetch = async () =>
+    transport.fetch = async () =>
       new Response('Not Found', { status: 404, statusText: 'Not Found' });
 
     await assert.rejects(
@@ -1470,7 +1471,7 @@ describe('fetchGitHubSpec', () => {
   it('throws when content is neither valid JSON nor a YAML object (bare scalar)', async () => {
     // "just a string" fails JSON.parse, then YAML parses it as a string (not an object)
     // → triggers the "Invalid JSON/YAML" guard
-    globalThis.fetch = async () =>
+    transport.fetch = async () =>
       new Response('just a string', { status: 200 });
 
     await assert.rejects(

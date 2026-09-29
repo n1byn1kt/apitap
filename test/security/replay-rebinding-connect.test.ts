@@ -1,6 +1,7 @@
 // test/security/replay-rebinding-connect.test.ts
-// Replay and OAuth refresh carry credentials, so a DNS rebind there sends
-// auth headers / refresh tokens to an internal host. Each case gives the
+// Replay, OAuth refresh and the GitHub importer carry credentials, so a DNS
+// rebind there sends tokens to an internal host; the verifier and the other
+// importers would still probe internal services. Each case gives the
 // pre-check (dns.promises) a public IP and the socket lookup (dns.lookup)
 // loopback — the shape a TTL-0 rebind produces. Pre-check-then-fetch code
 // reaches the internal server; the pinned transport must not.
@@ -11,6 +12,10 @@ import { createServer, type Server } from 'node:http';
 import { replayEndpoint } from '../../src/replay/engine.js';
 import { refreshOAuth } from '../../src/auth/oauth-refresh.js';
 import { pinnedFetch, SsrfBlockedError } from '../../src/net/transport.js';
+import { verifyEndpoints } from '../../src/capture/verifier.js';
+import { fetchGitHubSpec } from '../../src/skill/github.js';
+import { fetchSpec } from '../../src/skill/apis-guru.js';
+import { fetchSwaggerHubSpec } from '../../src/skill/swaggerhub.js';
 import type { SkillFile } from '../../src/types.js';
 
 const require = createRequire(import.meta.url);
@@ -114,5 +119,47 @@ describe('pinned transport blocks DNS rebinding on credential-carrying paths', (
     assert.equal(result.success, false);
     assert.match(result.error ?? '', /Token endpoint blocked: rebind\.example\.com resolves to 127\.0\.0\.1/);
     assert.equal(hits.length, 0, `internal server was hit: ${JSON.stringify(hits)}`);
+  });
+});
+
+describe('pinned transport blocks DNS rebinding on verifier and spec importers', () => {
+  before(() => new Promise<void>((resolve) => {
+    server = createServer((req, res) => {
+      hits.push({ url: req.url, auth: req.headers.authorization, body: '' });
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end('[{"id":1,"name":"internal"}]');
+    });
+    server.listen(0, '127.0.0.1', () => { port = (server.address() as { port: number }).port; resolve(); });
+  }));
+  after(() => new Promise<void>((r) => server.close(() => r())));
+  afterEach(() => {
+    (dns as any).lookup = realLookup;
+    (dns.promises as any).lookup = realPromisesLookup;
+    syncBuiltinESMExports();
+    hits = [];
+  });
+
+  it('verifier falls back to the heuristic instead of probing the internal host', async () => {
+    rebind();
+    const skill = skillFor('rebind.example.com');
+    const verified = await verifyEndpoints(skill);
+    assert.equal(verified.endpoints[0].replayability?.verified, false);
+    assert.equal(hits.length, 0);
+  });
+
+  it('GitHub spec fetch never sends the token to the internal host', async () => {
+    rebind();
+    await assert.rejects(
+      fetchGitHubSpec(`http://rebind.example.com:${port}/openapi.json`, 'ghp_SECRET'),
+      /resolves to 127\.0\.0\.1/,
+    );
+    assert.equal(hits.length, 0, `internal server was hit: ${JSON.stringify(hits)}`);
+  });
+
+  it('APIs.guru and SwaggerHub spec fetches refuse the internal host', async () => {
+    rebind();
+    await assert.rejects(fetchSpec(`http://rebind.example.com:${port}/spec.json`), /resolves to 127\.0\.0\.1/);
+    await assert.rejects(fetchSwaggerHubSpec(`http://rebind.example.com:${port}/spec.json`), /resolves to 127\.0\.0\.1/);
+    assert.equal(hits.length, 0);
   });
 });

@@ -9,6 +9,7 @@ import { deriveSigningKey } from './auth/crypto.js';
 import { signSkillFile, signSkillFileAs, provenanceForSigning } from './skill/signing.js';
 import { importSkillFile } from './skill/importer.js';
 import { resolveAndValidateUrl } from './skill/ssrf.js';
+import { fetchFollowing } from './net/transport.js';
 import { verifyEndpoints } from './capture/verifier.js';
 import { searchSkills } from './skill/search.js';
 import { refreshTokens } from './auth/refresh.js';
@@ -728,7 +729,8 @@ async function handleImport(positional: string[], flags: Record<string, string |
       if (!ssrfCheck.safe) {
         throw new Error(`SSRF check failed: ${ssrfCheck.reason}`);
       }
-      const response = await fetch(source, { signal: AbortSignal.timeout(30_000) });
+      // Redirects followed with a connect-time SSRF check on every hop.
+      const response = await fetchFollowing(source, { signal: AbortSignal.timeout(30_000) });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status} ${response.statusText}`);
       }

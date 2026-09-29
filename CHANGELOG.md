@@ -1,5 +1,50 @@
 # Changelog
 
+## v2.3.0 — 2026-09-29
+
+Security release: closes a DNS-rebinding SSRF class across every outbound
+HTTP call, plus unchecked redirect following in the importers
+(PRs #83, #84, #85). Upgrade recommended.
+
+### Security
+- **DNS rebinding.** Every caller checked the resolved IP and then called
+  `fetch(hostname)`, which resolved again, so a TTL-0 domain could answer
+  public for the check and `127.0.0.1` (or cloud metadata) for the
+  connection. On the credential paths this delivered the stored bearer
+  token (`replay`), the refresh token and client secret (OAuth refresh),
+  and the GitHub token (GitHub spec import) to the internal host. All
+  outbound HTTP now goes through `src/net/transport.ts`, which runs the
+  private-range check inside the connection's own DNS lookup, so the
+  address checked is the address connected to. Every address in a DNS
+  answer must be public.
+- **Unchecked redirects.** The GitHub, SwaggerHub and APIs.guru list
+  importers and `apitap import <url>` followed redirects with no per-hop
+  check, so any spec URL could redirect to `169.254.169.254`. Redirects
+  are now followed hop by hop through the same check, at most 5, only for
+  301/302/303/307/308; a `Location` with userinfo is refused; and
+  `Authorization`, `Cookie` and `Proxy-Authorization` are dropped when a
+  redirect changes origin.
+- `read`/`peek` redirect following had no hop limit (a redirect loop never
+  ended); it is now capped at 5 (`TOO_MANY_REDIRECTS`).
+- More reserved ranges blocked: multicast `224/4`, the documentation
+  ranges, `192.0.0/24`, IPv4-compatible `::/96`, and 6to4 `2002::/16`.
+
+### Changed
+- `peek` reports a DNS failure as a transport error (`ENOTFOUND`,
+  recommendation `error`) instead of "blocked by SSRF protection".
+- OAuth token refresh no longer follows redirects; a redirecting token
+  endpoint now fails with `Token endpoint returned 30x`.
+- Replay drops captured `content-length`, `transfer-encoding`,
+  `connection`, `keep-alive` and `host` headers and lets the connection
+  compute them (a captured length went stale once a body template
+  expanded).
+- `read`/`peek` bodies: the size cap counts decompressed bytes and stops
+  reading at the cap; a cut never splits a UTF-8 character; stacked
+  `Content-Encoding` is decoded; HEAD and redirects return as soon as
+  headers arrive; the response header limit is 64 KB.
+- For contributors: tests that intercept outbound HTTP stub
+  `transport.fetch`, not `globalThis.fetch`.
+
 ## v2.2.1 — 2026-07-24
 
 Both changes came out of driving the Hermes skill with a live agent

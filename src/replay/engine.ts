@@ -331,8 +331,10 @@ function containsInjected(text: string, secrets: string[]): boolean {
   let current = text;
   for (let i = 0; i < 4; i++) {
     if (secrets.some(s => current.includes(s) || current.includes(encodeURIComponent(s)))) return true;
-    let decoded: string;
-    try { decoded = decodeURIComponent(current); } catch { return false; }
+    // Decode valid %XX runs only, so one malformed escape can't hide a deeper layer
+    const decoded = current.replace(/(?:%[0-9A-Fa-f]{2})+/g, run => {
+      try { return decodeURIComponent(run); } catch { return run; }
+    });
     if (decoded === current) return false;
     current = decoded;
   }
@@ -723,10 +725,10 @@ export async function replayEndpoint(
     const location = response.headers.get('location');
     if (location) {
       const redirectUrl = new URL(location, url);
-      stripQueryAuthForRedirect(redirectUrl, url.hostname, queryAuth.resolved, injectedQueryValues(url, queryAuth.resolved));
-      const redirectFetchUrl = redirectUrl.toString();
       // Release the unpooled socket before anything below can throw.
       await response.body?.cancel().catch(() => {});
+      stripQueryAuthForRedirect(redirectUrl, url.hostname, queryAuth.resolved, injectedQueryValues(url, queryAuth.resolved));
+      const redirectFetchUrl = redirectUrl.toString();
       if (!options._skipSsrfCheck) {
         const redirectCheck = await resolveAndValidateUrl(redirectUrl.toString());
         if (!redirectCheck.safe) {
@@ -781,9 +783,9 @@ export async function replayEndpoint(
         const location = retryResponse.headers.get('location');
         if (location) {
           const redirectUrl = new URL(location, url);
+          await retryResponse.body?.cancel().catch(() => {});
           stripQueryAuthForRedirect(redirectUrl, url.hostname, queryAuth.resolved, injectedQueryValues(url, queryAuth.resolved));
           const retryRedirectFetchUrl = redirectUrl.toString();
-          await retryResponse.body?.cancel().catch(() => {});
           if (!options._skipSsrfCheck) {
             const redirectCheck = await resolveAndValidateUrl(redirectUrl.toString());
             if (!redirectCheck.safe) {

@@ -39,6 +39,13 @@ describe('replayEndpoint query-param credentials (#87)', () => {
         res.end();
         return;
       }
+      if (u.pathname === '/redirect-malformed') {
+        // A stray malformed escape plus a double-encoded copy of the key
+        const twice = encodeURIComponent(encodeURIComponent(`x-algolia-api-key=${query['x-algolia-api-key'] ?? ''}`));
+        res.writeHead(302, { Location: `http://127.0.0.1:${otherPort}/landing/%zz?next=${twice}` });
+        res.end();
+        return;
+      }
       if (u.pathname === '/redirect') {
         res.writeHead(302, { Location: `http://127.0.0.1:${otherPort}/landing?page=2&x-algolia-api-key=${query['x-algolia-api-key'] ?? ''}` });
         res.end();
@@ -232,6 +239,19 @@ describe('replayEndpoint query-param credentials (#87)', () => {
       /cross-host redirect target carries a stored query credential/,
     );
     assert.equal(otherQuery, null, 'redirect target must not be reached');
+  });
+
+  it('still catches a double-encoded key next to a malformed escape', async () => {
+    // Characters that change under encoding, so only real decoding finds it
+    await authManager.store('localhost', {
+      type: 'api-key', header: '', value: '',
+      queryParams: [{ name: 'x-algolia-api-key', value: 'k+y/Ab12=Cd34&Ef' }],
+    });
+    await assert.rejects(
+      () => replayEndpoint(makeSkill('[stored]', '/redirect-malformed'), 'get-search', { authManager, domain: 'localhost', _skipSsrfCheck: true }),
+      /cross-host redirect target carries a stored query credential/,
+    );
+    assert.equal(otherQuery, null);
   });
 
   it('round-trips stored auth without queryParams (pre-v2.3.1 auth.enc)', async () => {

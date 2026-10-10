@@ -24,6 +24,20 @@ describe('isGraphQLEndpoint', () => {
     assert.equal(isGraphQLEndpoint('/api', 'application/json', body), true);
   });
 
+  it('does not treat a plain search-string query field as GraphQL (#86)', () => {
+    const ct = 'application/x-www-form-urlencoded';
+    assert.equal(isGraphQLEndpoint('/1/indexes/Item_dev/query', ct, '{"query":"rust","hitsPerPage":30}'), false);
+    assert.equal(isGraphQLEndpoint('/search', 'application/json', '{"query":"python query"}'), false);
+    assert.equal(isGraphQLEndpoint('/search', 'application/json', '{"query":""}'), false);
+  });
+
+  it('detects shorthand, fragment, and comment-prefixed documents', () => {
+    const ct = 'application/json';
+    assert.equal(isGraphQLEndpoint('/api', ct, JSON.stringify({ query: '{ posts { id } }' })), true);
+    assert.equal(isGraphQLEndpoint('/api', ct, JSON.stringify({ query: 'fragment F on Post { id }\nquery { posts { ...F } }' })), true);
+    assert.equal(isGraphQLEndpoint('/api', ct, JSON.stringify({ query: '# fetch posts\nquery Posts { posts }' })), true);
+  });
+
   it('returns false for non-GraphQL endpoints', () => {
     assert.equal(isGraphQLEndpoint('/api/posts', 'application/json', '{"id": 1}'), false);
     assert.equal(isGraphQLEndpoint('/api/data', 'text/html', null), false);
@@ -59,6 +73,10 @@ describe('parseGraphQLBody', () => {
   it('returns null for non-GraphQL JSON', () => {
     const result = parseGraphQLBody('{"id": 1}');
     assert.equal(result, null);
+  });
+
+  it('returns null for a search-string query field (#86)', () => {
+    assert.equal(parseGraphQLBody('{"query":"rust"}'), null);
   });
 });
 

@@ -754,6 +754,24 @@ describe('GraphQL endpoint handling', () => {
     assert.equal(skill.endpoints.length, 1);
     assert.equal(skill.metadata.captureCount, 2);
   });
+
+  it('keeps distinct search endpoints whose body has a plain query string (#86)', () => {
+    const gen = new SkillGenerator();
+    for (const index of ['Item_dev', 'User']) {
+      const ex = mockExchange({
+        url: `https://search.example.com/indexes/${index}/query`,
+        method: 'POST',
+        body: JSON.stringify({ hits: [], nbHits: 0 }),
+        requestHeaders: { 'content-type': 'application/x-www-form-urlencoded' },
+      });
+      ex.request.postData = JSON.stringify({ query: 'rust', hitsPerPage: 30 });
+      gen.addExchange(ex);
+    }
+
+    const skill = gen.toSkillFile('search.example.com');
+    assert.equal(skill.endpoints.length, 2);
+    assert.ok(skill.endpoints.every(ep => !ep.id.includes('graphql')));
+  });
 });
 
 describe('SkillGenerator responseSchema', () => {

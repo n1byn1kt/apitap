@@ -7,6 +7,17 @@ export interface GraphQLParsed {
 }
 
 /**
+ * Check whether a string looks like a GraphQL document rather than a plain
+ * search term. Search APIs (e.g. Algolia) also send `{"query": "<text>"}`.
+ * Accepts shorthand `{ ... }` and `query|mutation|subscription|fragment`,
+ * optionally preceded by `#` comment lines.
+ */
+export function looksLikeGraphQLDocument(query: string): boolean {
+  const body = query.replace(/^(?:\s*#[^\n]*(?:\n|$))*/, '').trimStart();
+  return /^(?:\{|(?:query|mutation|subscription|fragment)\b)/.test(body);
+}
+
+/**
  * Detect if a request is to a GraphQL endpoint.
  */
 export function isGraphQLEndpoint(
@@ -24,11 +35,11 @@ export function isGraphQLEndpoint(
     return true;
   }
 
-  // Body contains a "query" field (GraphQL-style)
+  // Body contains a "query" field holding a GraphQL document
   if (body) {
     try {
       const parsed = JSON.parse(body);
-      if (typeof parsed.query === 'string') {
+      if (typeof parsed?.query === 'string' && looksLikeGraphQLDocument(parsed.query)) {
         return true;
       }
     } catch {
@@ -45,7 +56,7 @@ export function isGraphQLEndpoint(
 export function parseGraphQLBody(body: string): GraphQLParsed | null {
   try {
     const parsed = JSON.parse(body);
-    if (typeof parsed.query !== 'string') {
+    if (typeof parsed?.query !== 'string' || !looksLikeGraphQLDocument(parsed.query)) {
       return null;
     }
     return {

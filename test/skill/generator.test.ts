@@ -297,6 +297,15 @@ describe('SkillGenerator', () => {
     assert.equal(skill.endpoints[0].id, 'get-api-markets');
   });
 
+  it('keeps bare API versions as separate endpoints (#88)', () => {
+    const gen = new SkillGenerator();
+    gen.addExchange(mockExchange({ url: 'https://example.com/1/items/list' }));
+    gen.addExchange(mockExchange({ url: 'https://example.com/2/items/list' }));
+
+    const skill = gen.toSkillFile('example.com');
+    assert.deepEqual(skill.endpoints.map(ep => ep.path).sort(), ['/1/items/list', '/2/items/list']);
+  });
+
   it('deduplicates parameterized path variants', () => {
     const gen = new SkillGenerator();
     gen.addExchange(mockExchange({

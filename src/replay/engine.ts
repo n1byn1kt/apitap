@@ -319,6 +319,16 @@ function reapplyQueryAuth(url: URL, auth: StoredAuth, resolved: string[]): void 
   }
 }
 
+/**
+ * Encodings a query value can appear in: raw, encodeURIComponent, and
+ * application/x-www-form-urlencoded (URLSearchParams: space → '+', and
+ * !'()~ handled differently).
+ */
+function encodedForms(secret: string): string[] {
+  const form = new URLSearchParams({ v: secret }).toString().slice(2);
+  return [...new Set([secret, encodeURIComponent(secret), form])];
+}
+
 /** Values of query credentials injected into this request. */
 function injectedQueryValues(url: URL, resolved: string[]): string[] {
   return resolved
@@ -330,9 +340,9 @@ function injectedQueryValues(url: URL, resolved: string[]): string[] {
 function containsInjected(text: string, secrets: string[]): boolean {
   let current = text;
   for (let i = 0; i < 4; i++) {
-    if (secrets.some(s => current.includes(s) || current.includes(encodeURIComponent(s)))) return true;
+    if (secrets.some(s => encodedForms(s).some(f => current.includes(f)))) return true;
     // Decode valid %XX runs only, so one malformed escape can't hide a deeper layer
-    const decoded = current.replace(/(?:%[0-9A-Fa-f]{2})+/g, run => {
+    const decoded = current.replace(/\+/g, ' ').replace(/(?:%[0-9A-Fa-f]{2})+/g, run => {
       try { return decodeURIComponent(run); } catch { return run; }
     });
     if (decoded === current) return false;
@@ -348,7 +358,7 @@ function containsInjected(text: string, secrets: string[]): boolean {
  */
 function redactInjected<T>(data: T, secrets: string[]): T {
   if (secrets.length === 0) return data;
-  const forms = secrets.flatMap(s => [s, encodeURIComponent(s)]);
+  const forms = secrets.flatMap(encodedForms);
   const walk = (v: unknown): unknown => {
     if (typeof v === 'string') {
       let out = v;

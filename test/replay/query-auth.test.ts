@@ -39,6 +39,12 @@ describe('replayEndpoint query-param credentials (#87)', () => {
         res.end();
         return;
       }
+      if (u.pathname === '/echo-raw') {
+        // Echo the raw query string, form-encoded as the client sent it
+        res.writeHead(200, { 'Content-Type': 'application/json', 'X-Echo': u.search });
+        res.end(JSON.stringify({ raw: u.search }));
+        return;
+      }
       if (u.pathname === '/redirect-malformed') {
         // A stray malformed escape plus a double-encoded copy of the key
         const twice = encodeURIComponent(encodeURIComponent(`x-algolia-api-key=${query['x-algolia-api-key'] ?? ''}`));
@@ -131,6 +137,20 @@ describe('replayEndpoint query-param credentials (#87)', () => {
     assert.equal(result.status, 200);
     assert.equal((result.data as any).query['x-algolia-api-key'], '[stored]');
     assert.ok(!JSON.stringify(result).includes(KEY));
+  });
+
+  it('redacts a form-encoded echo of a key with special characters', async () => {
+    const secret = "k y(Ab12)!~'Cd34";
+    await authManager.store('localhost', {
+      type: 'api-key', header: '', value: '',
+      queryParams: [{ name: 'x-algolia-api-key', value: secret }],
+    });
+    const result = await replayEndpoint(makeSkill('[stored]', '/echo-raw'), 'get-search', { authManager, domain: 'localhost', _skipSsrfCheck: true });
+    assert.equal(lastQuery!['x-algolia-api-key'], secret);
+    const out = JSON.stringify(result);
+    assert.ok(!out.includes(new URLSearchParams({ v: secret }).toString().slice(2)), 'form-encoded key must be redacted');
+    assert.match((result.data as any).raw, /x-algolia-api-key=\[stored\]/);
+    assert.match(result.headers['x-echo'], /\[stored\]/);
   });
 
   it('does not fill a generic `key=[scrubbed]` from storage (may have been a sort key)', async () => {

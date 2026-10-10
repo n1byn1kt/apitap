@@ -838,7 +838,7 @@ describe('query-param credentials (#87)', () => {
     assert.ok(!JSON.stringify(skill).includes(KEY), 'key must not appear anywhere in the skill file');
 
     const auth = deduplicateAuth(gen.getExtractedAuth());
-    assert.deepEqual(auth?.queryParams, [{ name: 'x-algolia-api-key', value: KEY }]);
+    assert.deepEqual(auth?.queryParams, [{ name: 'x-algolia-api-key', value: KEY, host: 'search.example.com' }]);
     assert.equal(auth?.header, '');
   });
 

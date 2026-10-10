@@ -9,12 +9,14 @@ export interface GraphQLParsed {
 /**
  * Check whether a string looks like a GraphQL document rather than a plain
  * search term. Search APIs (e.g. Algolia) also send `{"query": "<text>"}`.
- * Accepts shorthand `{ ... }` and `query|mutation|subscription|fragment`,
- * optionally preceded by `#` comment lines.
+ * Accepts shorthand `{ ... }`, `query|mutation|subscription ... {`, and
+ * `fragment X on Y {`, optionally preceded by `#` comment lines.
  */
 export function looksLikeGraphQLDocument(query: string): boolean {
   const body = query.replace(/^(?:\s*#[^\n]*(?:\n|$))*/, '').trimStart();
-  return /^(?:\{|(?:query|mutation|subscription|fragment)\b)/.test(body);
+  // An operation keyword must lead into a selection set, so search strings
+  // like "query builder" or "fragment shader" don't qualify
+  return /^(?:\{|(?:query|mutation|subscription)\b[^{}]*\{|fragment\s+[_A-Za-z]\w*\s+on\s+[_A-Za-z]\w*[^{}]*\{)/.test(body);
 }
 
 /**

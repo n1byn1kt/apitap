@@ -29,6 +29,9 @@ describe('isGraphQLEndpoint', () => {
     assert.equal(isGraphQLEndpoint('/1/indexes/Item_dev/query', ct, '{"query":"rust","hitsPerPage":30}'), false);
     assert.equal(isGraphQLEndpoint('/search', 'application/json', '{"query":"python query"}'), false);
     assert.equal(isGraphQLEndpoint('/search', 'application/json', '{"query":""}'), false);
+    for (const q of ['query builder', 'fragment shader', 'mutation testing', 'subscription boxes']) {
+      assert.equal(isGraphQLEndpoint('/search', 'application/json', JSON.stringify({ query: q })), false, q);
+    }
   });
 
   it('detects shorthand, fragment, and comment-prefixed documents', () => {

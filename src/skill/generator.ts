@@ -143,7 +143,7 @@ export function deduplicateAuth(extractedAuth: StoredAuth[]): StoredAuth | null 
   const seen = new Set<string>();
   const headers: Array<{ header: string; value: string }> = [];
   const seenQuery = new Set<string>();
-  const queryParams: Array<{ name: string; value: string }> = [];
+  const queryParams: NonNullable<StoredAuth['queryParams']> = [];
   for (const a of extractedAuth) {
     if (a.header && !seen.has(a.header)) {
       seen.add(a.header);
@@ -188,15 +188,15 @@ export function markStoredQueryAuth(exampleUrl: string, rawUrl: string, names: s
 }
 
 /** Extract reusable credentials carried in query params. */
-export function extractQueryAuth(url: URL): Array<{ name: string; value: string }> {
-  const found: Array<{ name: string; value: string }> = [];
+export function extractQueryAuth(url: URL): Array<{ name: string; value: string; host: string }> {
+  const found: Array<{ name: string; value: string; host: string }> = [];
   for (const [name, value] of url.searchParams) {
     if (!value || value === '[stored]' || value === '[scrubbed]') continue;
     if (found.some(q => q.name === name)) continue;
     const kind = queryCredentialKind(name);
     const reusable = kind === 'reusable' && value.length >= MIN_QUERY_AUTH_LENGTH;
     const generic = kind === 'generic' && isLikelyToken(name, value).isToken;
-    if (reusable || generic) found.push({ name, value });
+    if (reusable || generic) found.push({ name, value, host: url.hostname });
   }
   return found;
 }

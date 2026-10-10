@@ -284,12 +284,18 @@ const QUERY_AUTH_PLACEHOLDERS = new Set(['[stored]', '[scrubbed]']);
  * already replaced their placeholder, so they win.
  */
 function resolveQueryAuth(url: URL, auth: StoredAuth | null): { resolved: string[]; unresolved: string[] } {
-  const stored = new Map((auth?.queryParams ?? []).map(q => [q.name, q.value]));
+  const stored = new Map((auth?.queryParams ?? []).map(q => [q.name, q]));
   const resolved: string[] = [];
   const unresolved: string[] = [];
   for (const [name, value] of [...url.searchParams]) {
     if (!QUERY_AUTH_PLACEHOLDERS.has(value)) continue;
-    const storedValue = stored.get(name);
+    const entry = stored.get(name);
+    // A pre-v2.3.1 [scrubbed] value is only filled for unambiguous credential
+    // names: a generic `key` may have been a scrubbed sort key on this endpoint
+    const fillable = value === '[stored]' || queryCredentialKind(name) === 'reusable';
+    // Pinned to the host the key was captured on (not just the skill domain)
+    const hostOk = !entry?.host || entry.host === url.hostname;
+    const storedValue = fillable && hostOk ? entry?.value : undefined;
     if (storedValue) {
       url.searchParams.set(name, storedValue);
       if (!resolved.includes(name)) resolved.push(name);
@@ -307,14 +313,68 @@ function resolveQueryAuth(url: URL, auth: StoredAuth | null): { resolved: string
 /** Re-apply query credentials from refreshed auth to params previously resolved from storage. */
 function reapplyQueryAuth(url: URL, auth: StoredAuth, resolved: string[]): void {
   for (const q of auth.queryParams ?? []) {
-    if (resolved.includes(q.name)) url.searchParams.set(q.name, q.value);
+    if (resolved.includes(q.name) && (!q.host || q.host === url.hostname)) {
+      url.searchParams.set(q.name, q.value);
+    }
   }
 }
 
-/** Drop stored query credentials from a redirect target on another host. */
-function stripQueryAuthForRedirect(redirectUrl: URL, originalHost: string, resolved: string[]): void {
+/** Values of query credentials injected into this request. */
+function injectedQueryValues(url: URL, resolved: string[]): string[] {
+  return resolved
+    .map(name => url.searchParams.get(name))
+    .filter((v): v is string => !!v && v.length >= 4);
+}
+
+/** Whether text carries any injected value, raw or percent-encoded (up to 3 layers). */
+function containsInjected(text: string, secrets: string[]): boolean {
+  let current = text;
+  for (let i = 0; i < 4; i++) {
+    if (secrets.some(s => current.includes(s) || current.includes(encodeURIComponent(s)))) return true;
+    let decoded: string;
+    try { decoded = decodeURIComponent(current); } catch { return false; }
+    if (decoded === current) return false;
+    current = decoded;
+  }
+  return false;
+}
+
+/**
+ * Replace injected query-credential values in response data/headers with
+ * [stored], so an API that echoes the request URL doesn't hand the key to
+ * the caller (or into a skill file's responsePreview on confidence upgrade).
+ */
+function redactInjected<T>(data: T, secrets: string[]): T {
+  if (secrets.length === 0) return data;
+  const forms = secrets.flatMap(s => [s, encodeURIComponent(s)]);
+  const walk = (v: unknown): unknown => {
+    if (typeof v === 'string') {
+      let out = v;
+      for (const f of forms) out = out.split(f).join('[stored]');
+      return out;
+    }
+    if (Array.isArray(v)) return v.map(walk);
+    if (v && typeof v === 'object') {
+      const o: Record<string, unknown> = {};
+      for (const [k, val] of Object.entries(v as Record<string, unknown>)) o[k] = walk(val);
+      return o;
+    }
+    return v;
+  };
+  return walk(data) as T;
+}
+
+/**
+ * Drop stored query credentials from a redirect target on another host. If
+ * the target still carries an injected value anywhere (path, another param
+ * such as an encoded returnUrl, fragment), refuse the redirect.
+ */
+function stripQueryAuthForRedirect(redirectUrl: URL, originalHost: string, resolved: string[], secrets: string[]): void {
   if (resolved.length === 0 || isSafeAuthRedirectHost(originalHost, redirectUrl.hostname)) return;
   for (const name of resolved) redirectUrl.searchParams.delete(name);
+  if (containsInjected(redirectUrl.href, secrets)) {
+    throw new Error('Redirect blocked: cross-host redirect target carries a stored query credential');
+  }
 }
 
 /**
@@ -663,7 +723,7 @@ export async function replayEndpoint(
     const location = response.headers.get('location');
     if (location) {
       const redirectUrl = new URL(location, url);
-      stripQueryAuthForRedirect(redirectUrl, url.hostname, queryAuth.resolved);
+      stripQueryAuthForRedirect(redirectUrl, url.hostname, queryAuth.resolved, injectedQueryValues(url, queryAuth.resolved));
       const redirectFetchUrl = redirectUrl.toString();
       // Release the unpooled socket before anything below can throw.
       await response.body?.cancel().catch(() => {});
@@ -721,7 +781,7 @@ export async function replayEndpoint(
         const location = retryResponse.headers.get('location');
         if (location) {
           const redirectUrl = new URL(location, url);
-          stripQueryAuthForRedirect(redirectUrl, url.hostname, queryAuth.resolved);
+          stripQueryAuthForRedirect(redirectUrl, url.hostname, queryAuth.resolved, injectedQueryValues(url, queryAuth.resolved));
           const retryRedirectFetchUrl = redirectUrl.toString();
           await retryResponse.body?.cancel().catch(() => {});
           if (!options._skipSsrfCheck) {
@@ -742,8 +802,9 @@ export async function replayEndpoint(
       }
 
       const retryHeaders: Record<string, string> = {};
+      const retrySecrets = injectedQueryValues(url, queryAuth.resolved);
       retryResponse.headers.forEach((value, key) => {
-        retryHeaders[key] = value;
+        retryHeaders[key] = redactInjected(value, retrySecrets);
       });
 
       let retryData: unknown;
@@ -754,6 +815,7 @@ export async function replayEndpoint(
       } else {
         retryData = retryText;
       }
+      retryData = redactInjected(retryData, retrySecrets);
 
       const retryFinalData = (retryResponse.status === 401 || retryResponse.status === 403)
         ? wrapAuthError(retryResponse.status, retryData, skill.domain, queryAuth.unresolved)
@@ -788,9 +850,10 @@ export async function replayEndpoint(
     }
   }
 
+  const secrets = injectedQueryValues(url, queryAuth.resolved);
   const responseHeaders: Record<string, string> = {};
   response.headers.forEach((value, key) => {
-    responseHeaders[key] = value;
+    responseHeaders[key] = redactInjected(value, secrets);
   });
 
   let data: unknown;
@@ -801,6 +864,7 @@ export async function replayEndpoint(
   } else {
     data = text;
   }
+  data = redactInjected(data, secrets);
 
   const finalData = (response.status === 401 || response.status === 403)
     ? wrapAuthError(response.status, data, skill.domain, queryAuth.unresolved)

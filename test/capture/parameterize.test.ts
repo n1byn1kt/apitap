@@ -89,6 +89,8 @@ describe('parameterizePath', () => {
     assert.equal(parameterizePath('/api/5'), '/api/:id');
     assert.equal(parameterizePath('/1/2'), '/:id/:id');
     assert.equal(parameterizePath('/items/1/details'), '/items/:item_id/details');
+    // Accepted tradeoff: a 1–2 digit root id followed by a word stays literal
+    assert.equal(parameterizePath('/7/profile'), '/7/profile');
   });
 
   // --- Edge cases ---

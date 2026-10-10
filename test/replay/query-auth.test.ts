@@ -11,6 +11,9 @@ import { scanOutboundRequest } from '../../src/replay/egress.js';
 import { AuthManager } from '../../src/auth/manager.js';
 import type { SkillFile } from '../../src/types.js';
 
+// Google-key-shaped test value, assembled so secret scanners don't match a literal
+const FAKE_GOOGLE_STYLE_KEY = ['AI', 'za'].join('') + 'FAKE0tEst1KeY2nOt3ReAl4vAlUe5xyz67';
+
 const KEY = 'test-algolia-key-not-real-0123456';
 
 describe('replayEndpoint query-param credentials (#87)', () => {
@@ -19,6 +22,7 @@ describe('replayEndpoint query-param credentials (#87)', () => {
   let port: number;
   let otherPort: number;
   let otherQuery: Record<string, string> | null = null;
+  let lastQuery: Record<string, string> | null = null;
   let testDir: string;
   let stateDir: string;
   let authManager: AuthManager;
@@ -28,6 +32,13 @@ describe('replayEndpoint query-param credentials (#87)', () => {
     server = createServer((req, res) => {
       const u = new URL(req.url!, 'http://x');
       const query = Object.fromEntries(u.searchParams);
+      lastQuery = query;
+      if (u.pathname === '/redirect-encoded') {
+        const back = encodeURIComponent(`http://localhost:${port}/search?x-algolia-api-key=${query['x-algolia-api-key'] ?? ''}`);
+        res.writeHead(302, { Location: `http://127.0.0.1:${otherPort}/landing?returnUrl=${back}` });
+        res.end();
+        return;
+      }
       if (u.pathname === '/redirect') {
         res.writeHead(302, { Location: `http://127.0.0.1:${otherPort}/landing?page=2&x-algolia-api-key=${query['x-algolia-api-key'] ?? ''}` });
         res.end();
@@ -58,6 +69,7 @@ describe('replayEndpoint query-param credentials (#87)', () => {
     process.env.XDG_STATE_HOME = stateDir;
     authManager = new AuthManager(testDir, 'test-machine-id');
     otherQuery = null;
+    lastQuery = null;
   });
 
   afterEach(async () => {
@@ -103,7 +115,40 @@ describe('replayEndpoint query-param credentials (#87)', () => {
     await storeKey();
     const result = await replayEndpoint(makeSkill('[stored]'), 'get-search', { authManager, domain: 'localhost', _skipSsrfCheck: true });
     assert.equal(result.status, 200);
-    assert.equal((result.data as any).query['x-algolia-api-key'], KEY);
+    assert.equal(lastQuery!['x-algolia-api-key'], KEY);
+  });
+
+  it('redacts an injected credential the API echoes back in the response', async () => {
+    await storeKey();
+    const result = await replayEndpoint(makeSkill('[stored]'), 'get-search', { authManager, domain: 'localhost', _skipSsrfCheck: true });
+    assert.equal(result.status, 200);
+    assert.equal((result.data as any).query['x-algolia-api-key'], '[stored]');
+    assert.ok(!JSON.stringify(result).includes(KEY));
+  });
+
+  it('does not fill a generic `key=[scrubbed]` from storage (may have been a sort key)', async () => {
+    await authManager.store('localhost', {
+      type: 'api-key', header: '', value: '',
+      queryParams: [{ name: 'key', value: FAKE_GOOGLE_STYLE_KEY }],
+    });
+    const skill = makeSkill('[stored]');
+    const ep = skill.endpoints[0];
+    delete ep.queryParams['x-algolia-api-key'];
+    ep.queryParams.key = { type: 'string', example: '[scrubbed]' };
+    ep.examples.request.url = `http://localhost:${port}${ep.path}?query=rust&key=[scrubbed]`;
+
+    await replayEndpoint(skill, 'get-search', { authManager, domain: 'localhost', _skipSsrfCheck: true });
+    assert.equal(lastQuery!.key, undefined);
+  });
+
+  it('does not inject a key pinned to a different host', async () => {
+    await authManager.store('localhost', {
+      type: 'api-key', header: '', value: '',
+      queryParams: [{ name: 'x-algolia-api-key', value: KEY, host: 'search.other-host.test' }],
+    });
+    const result = await replayEndpoint(makeSkill('[stored]'), 'get-search', { authManager, domain: 'localhost', _skipSsrfCheck: true });
+    assert.equal(result.status, 403);
+    assert.equal(lastQuery!['x-algolia-api-key'], undefined);
   });
 
   it('resolves [scrubbed] from older skill files by param name', async () => {
@@ -118,7 +163,7 @@ describe('replayEndpoint query-param credentials (#87)', () => {
     const data = result.data as any;
     assert.equal(data.error, 'Query credential missing');
     assert.match(data.suggestion, /x-algolia-api-key/);
-    assert.equal(data.originalResponse.query['x-algolia-api-key'], undefined, 'literal placeholder must not be sent');
+    assert.equal(lastQuery!['x-algolia-api-key'], undefined, 'literal placeholder must not be sent');
   });
 
   it('drops a scrubbed one-time param silently and keeps the login hint', async () => {
@@ -143,7 +188,7 @@ describe('replayEndpoint query-param credentials (#87)', () => {
       params: { 'x-algolia-api-key': 'caller-supplied-key' },
     });
     assert.equal(result.status, 403);
-    assert.equal((result.data as any).originalResponse.query['x-algolia-api-key'], 'caller-supplied-key');
+    assert.equal(lastQuery!['x-algolia-api-key'], 'caller-supplied-key');
   });
 
   it('egress scanner sees the pre-injection URL, so block mode does not self-block', async () => {
@@ -169,7 +214,7 @@ describe('replayEndpoint query-param credentials (#87)', () => {
       authManager, domain: 'localhost', _skipSsrfCheck: true, egressCheck: 'block',
     });
     assert.equal(result.warnings, undefined);
-    assert.equal((result.data as any).originalResponse.query.access_token, token);
+    assert.equal(lastQuery!.access_token, token);
   });
 
   it('strips the stored query credential on a cross-host redirect', async () => {
@@ -178,6 +223,15 @@ describe('replayEndpoint query-param credentials (#87)', () => {
     assert.ok(otherQuery, 'redirect target was reached');
     assert.equal(otherQuery!.page, '2');
     assert.equal(otherQuery!['x-algolia-api-key'], undefined);
+  });
+
+  it('refuses a cross-host redirect that carries the key inside another param', async () => {
+    await storeKey();
+    await assert.rejects(
+      () => replayEndpoint(makeSkill('[stored]', '/redirect-encoded'), 'get-search', { authManager, domain: 'localhost', _skipSsrfCheck: true }),
+      /cross-host redirect target carries a stored query credential/,
+    );
+    assert.equal(otherQuery, null, 'redirect target must not be reached');
   });
 
   it('round-trips stored auth without queryParams (pre-v2.3.1 auth.enc)', async () => {

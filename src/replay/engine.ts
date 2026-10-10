@@ -336,10 +336,14 @@ function injectedQueryValues(url: URL, resolved: string[]): string[] {
     .filter((v): v is string => !!v && v.length >= 4);
 }
 
-/** Whether text carries any injected value, raw or percent-encoded (up to 3 layers). */
+/**
+ * Whether text carries any injected value, raw or percent-/form-encoded.
+ * Fails closed: text still decoding after MAX_DECODE_LAYERS counts as a hit.
+ */
+const MAX_DECODE_LAYERS = 8;
 function containsInjected(text: string, secrets: string[]): boolean {
   let current = text;
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i <= MAX_DECODE_LAYERS; i++) {
     if (secrets.some(s => encodedForms(s).some(f => current.includes(f)))) return true;
     // Decode valid %XX runs only, so one malformed escape can't hide a deeper layer
     const decoded = current.replace(/\+/g, ' ').replace(/(?:%[0-9A-Fa-f]{2})+/g, run => {
@@ -348,7 +352,7 @@ function containsInjected(text: string, secrets: string[]): boolean {
     if (decoded === current) return false;
     current = decoded;
   }
-  return false;
+  return true;
 }
 
 /**

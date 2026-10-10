@@ -45,6 +45,19 @@ describe('replayEndpoint query-param credentials (#87)', () => {
         res.end(JSON.stringify({ raw: u.search }));
         return;
       }
+      if (u.pathname === '/redirect-deep') {
+        // Key wrapped in more encoding layers than the checker unwraps
+        let wrapped = `x-algolia-api-key=${query['x-algolia-api-key'] ?? ''}`;
+        for (let i = 0; i < 12; i++) wrapped = encodeURIComponent(wrapped);
+        res.writeHead(302, { Location: `http://127.0.0.1:${otherPort}/landing?next=${wrapped}` });
+        res.end();
+        return;
+      }
+      if (u.pathname === '/redirect-plain') {
+        res.writeHead(302, { Location: `http://127.0.0.1:${otherPort}/landing?next=${encodeURIComponent('https://example.com/a?b=c d+e')}` });
+        res.end();
+        return;
+      }
       if (u.pathname === '/redirect-malformed') {
         // A stray malformed escape plus a double-encoded copy of the key
         const twice = encodeURIComponent(encodeURIComponent(`x-algolia-api-key=${query['x-algolia-api-key'] ?? ''}`));
@@ -272,6 +285,25 @@ describe('replayEndpoint query-param credentials (#87)', () => {
       /cross-host redirect target carries a stored query credential/,
     );
     assert.equal(otherQuery, null);
+  });
+
+  it('fails closed on a redirect target encoded deeper than it unwraps', async () => {
+    await authManager.store('localhost', {
+      type: 'api-key', header: '', value: '',
+      queryParams: [{ name: 'x-algolia-api-key', value: 'k+y/Ab12=Cd34&Ef' }],
+    });
+    await assert.rejects(
+      () => replayEndpoint(makeSkill('[stored]', '/redirect-deep'), 'get-search', { authManager, domain: 'localhost', _skipSsrfCheck: true }),
+      /cross-host redirect target carries a stored query credential/,
+    );
+    assert.equal(otherQuery, null);
+  });
+
+  it('still follows an ordinary cross-host redirect without the key', async () => {
+    await storeKey();
+    await replayEndpoint(makeSkill('[stored]', '/redirect-plain'), 'get-search', { authManager, domain: 'localhost', _skipSsrfCheck: true });
+    assert.ok(otherQuery, 'redirect target was reached');
+    assert.equal(otherQuery!.next, 'https://example.com/a?b=c d+e');
   });
 
   it('round-trips stored auth without queryParams (pre-v2.3.1 auth.enc)', async () => {

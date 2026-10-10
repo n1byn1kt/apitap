@@ -1,5 +1,59 @@
 # Changelog
 
+## v2.3.1 — 2026-10-10
+
+Fixes capture and replay for APIs that pass their key as a query
+parameter, plus two endpoint-grouping bugs (PR #89; issues #86, #87, #88).
+Found while capturing hn.algolia.com, which used to come out as a
+mislabelled, un-replayable endpoint.
+
+### Fixed
+- **Query-param API keys (#87).** Keys sent as `?api_key=`,
+  `?x-algolia-api-key=`, `?key=` and similar were scrubbed from the skill
+  file but never stored. Replay then sent the literal `[scrubbed]`, got a
+  403, and suggested logging in. Reusable key-like params are now stored
+  in the encrypted auth store, pinned to the host they were captured on,
+  and written as `[stored]` in the skill file. Replay fills them in after
+  the domain-lock check. One-time params (`code`, `state`, `nonce`,
+  `sig*`, `otp`, `password`, session ids, refresh/id tokens) stay
+  `[scrubbed]` and are never stored. Skill files captured before this
+  release resolve `[scrubbed]` values for unambiguous key names once a key
+  is stored. A 401/403 with a missing query key now names the key instead
+  of suggesting a login.
+- **Search APIs misdetected as GraphQL (#86).** Any JSON body with a
+  string `query` field (Algolia's `{"query": "rust"}`) was treated as
+  GraphQL. Every such endpoint became `post-graphql-Anonymous`, and
+  distinct endpoints on a domain merged into one. A GraphQL document is
+  now required: shorthand `{`, `query|mutation|subscription … {`, or
+  `fragment X on Y {`.
+- **Numeric API versions (#88).** `/1/indexes/...` became
+  `/:id/indexes/...`, so `/1/x` and `/2/x` merged into one endpoint. A
+  1–2 digit segment at the path root (or right after `api`) followed by a
+  word is now kept as a version. Tradeoff: a short root id such as
+  `/7/profile` now stays literal.
+- CLI `capture` stored only the first captured auth entry. It now stores
+  the merged headers and query keys, as `attach` and the MCP capture
+  session already did.
+- OAuth refresh and login handoff now keep stored query keys instead of
+  dropping them.
+
+### Security
+- Stored query keys go only to the host they were captured on. On a
+  cross-host redirect the key's param is removed, and the redirect is
+  refused if the key still appears anywhere in the target: another
+  parameter such as an encoded `returnUrl`, the path, or the fragment,
+  raw or percent-/form-encoded, failing closed past 8 encoding layers.
+- A key the API echoes back is replaced with `[stored]` in response data
+  and headers, so it doesn't reach the caller or a skill file's
+  `responsePreview`.
+- The egress scanner checks the URL before the stored key is added, so a
+  stored vendor token doesn't block its own request.
+
+### Changed
+- `apitap auth` lists query keys (`queryAuth` in `--json`), and
+  `hasHeaderAuth` is no longer true for a query-only record. `inspect`,
+  `show` and the verifier count query keys as auth-required.
+
 ## v2.3.0 — 2026-09-29
 
 Security release: closes a DNS-rebinding SSRF class across every outbound

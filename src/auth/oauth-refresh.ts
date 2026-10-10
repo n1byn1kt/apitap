@@ -128,6 +128,8 @@ export async function refreshOAuth(
       session: existingAuth?.session,
       refreshToken: existingAuth?.refreshToken,
       clientSecret: existingAuth?.clientSecret,
+      // Query-param keys are independent of the OAuth token; keep them
+      ...(existingAuth?.queryParams ? { queryParams: existingAuth.queryParams } : {}),
       ...(expiresAt ? { expiresAt } : {}),
     });
 

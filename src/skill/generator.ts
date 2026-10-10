@@ -7,6 +7,7 @@ import { detectBodyVariables } from '../capture/body-variables.js';
 import { isGraphQLEndpoint, parseGraphQLBody, extractOperationName, detectGraphQLVariables } from '../capture/graphql.js';
 import { detectRefreshableTokens } from '../capture/token-detector.js';
 import { isLikelyToken } from '../capture/entropy.js';
+import { queryCredentialKind } from './placeholders.js';
 import { isOAuthTokenRequest, type OAuthInfo } from '../capture/oauth-detector.js';
 import { diffBodies } from '../capture/body-diff.js';
 import { snapshotSchema } from '../contract/schema.js';
@@ -166,17 +167,25 @@ export function deduplicateAuth(extractedAuth: StoredAuth[]): StoredAuth | null 
   };
 }
 
-/**
- * Query param names whose values are reusable credentials: captured into
- * encrypted auth storage and re-injected on replay. One-time or
- * request-bound params (code, state, nonce, sig*, otp, password, session ids,
- * refresh/id tokens, CSRF-shaped `token`) are deliberately excluded and stay
- * [scrubbed].
- */
-const REUSABLE_QUERY_AUTH = /^(?:access[-_]?token|api[-_]?token|auth[-_]?token|api[-_]?key|apikey|app[-_]?key|access[-_]?key|x-[a-z0-9-]+-api-key)$/i;
-/** Generic names that are only credentials when the value looks like a token (`?key=title` is a sort key). */
-const GENERIC_QUERY_AUTH = /^(?:key|appid)$/i;
 const MIN_QUERY_AUTH_LENGTH = 8;
+
+/**
+ * Mark captured query credentials as [stored] in the example URL. If the
+ * (PII-scrubbed) example no longer parses, never fall back to raw values:
+ * drop the query and keep only the [stored] markers.
+ */
+export function markStoredQueryAuth(exampleUrl: string, rawUrl: string, names: string[]): string {
+  try {
+    const stored = new URL(exampleUrl);
+    for (const name of names) stored.searchParams.set(name, '[stored]');
+    return stored.toString();
+  } catch {
+    const stored = new URL(rawUrl);
+    stored.search = '';
+    for (const name of names) stored.searchParams.set(name, '[stored]');
+    return stored.toString();
+  }
+}
 
 /** Extract reusable credentials carried in query params. */
 export function extractQueryAuth(url: URL): Array<{ name: string; value: string }> {
@@ -184,8 +193,9 @@ export function extractQueryAuth(url: URL): Array<{ name: string; value: string 
   for (const [name, value] of url.searchParams) {
     if (!value || value === '[stored]' || value === '[scrubbed]') continue;
     if (found.some(q => q.name === name)) continue;
-    const reusable = REUSABLE_QUERY_AUTH.test(name) && value.length >= MIN_QUERY_AUTH_LENGTH;
-    const generic = GENERIC_QUERY_AUTH.test(name) && isLikelyToken(name, value).isToken;
+    const kind = queryCredentialKind(name);
+    const reusable = kind === 'reusable' && value.length >= MIN_QUERY_AUTH_LENGTH;
+    const generic = kind === 'generic' && isLikelyToken(name, value).isToken;
     if (reusable || generic) found.push({ name, value });
   }
   return found;
@@ -483,16 +493,7 @@ export class SkillGenerator {
       for (const { name } of queryAuth) {
         queryParams[name] = { type: 'string', example: '[stored]' };
       }
-      try {
-        const stored = new URL(exampleUrl);
-        for (const { name } of queryAuth) stored.searchParams.set(name, '[stored]');
-        exampleUrl = stored.toString();
-      } catch {
-        // Unparseable after PII scrub — fall back to the raw URL with credentials marked
-        const stored = new URL(request.url);
-        for (const { name } of queryAuth) stored.searchParams.set(name, '[stored]');
-        exampleUrl = stored.toString();
-      }
+      exampleUrl = markStoredQueryAuth(exampleUrl, request.url, queryAuth.map(q => q.name));
     }
 
     // Generate endpoint ID - use GraphQL operation name if applicable

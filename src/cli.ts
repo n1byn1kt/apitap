@@ -2000,7 +2000,8 @@ async function handleAuth(positional: string[], flags: Record<string, string | b
 
   const status = {
     domain,
-    hasHeaderAuth: !!auth,
+    hasHeaderAuth: !!auth?.header,
+    queryAuth: auth?.queryParams?.map(q => q.name) ?? [],
     headerAuthType: auth?.type,
     jwtExpiry,
     tokens: tokens ? Object.keys(tokens) : [],

@@ -1,7 +1,7 @@
 // test/skill/generator.test.ts
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { SkillGenerator, isSensitiveBodyKey, deduplicateAuth } from '../../src/skill/generator.js';
+import { SkillGenerator, isSensitiveBodyKey, deduplicateAuth, markStoredQueryAuth } from '../../src/skill/generator.js';
 import type { CapturedExchange } from '../../src/types.js';
 
 // Google-key-shaped test value, assembled so secret scanners don't match a literal
@@ -882,5 +882,12 @@ describe('query-param credentials (#87)', () => {
     assert.equal(merged?.header, 'authorization');
     assert.deepEqual(merged?.headers, [{ header: 'authorization', value: 'Bearer abc' }]);
     assert.deepEqual(merged?.queryParams, [{ name: 'key', value: 'k1' }]);
+  });
+
+  it('never falls back to raw query values when the scrubbed example URL does not parse', () => {
+    const raw = 'https://example.com/q?api_key=SECRETKEY123&email=a@b.co&state=xyz123';
+    const out = markStoredQueryAuth('not a url', raw, ['api_key']);
+    assert.equal(out, 'https://example.com/q?api_key=%5Bstored%5D');
+    assert.ok(!out.includes('SECRETKEY123') && !out.includes('a@b.co') && !out.includes('xyz123'));
   });
 });

@@ -121,6 +121,21 @@ describe('replayEndpoint query-param credentials (#87)', () => {
     assert.equal(data.originalResponse.query['x-algolia-api-key'], undefined, 'literal placeholder must not be sent');
   });
 
+  it('drops a scrubbed one-time param silently and keeps the login hint', async () => {
+    const skill = makeSkill('[stored]');
+    const ep = skill.endpoints[0];
+    delete ep.queryParams['x-algolia-api-key'];
+    ep.queryParams.state = { type: 'string', example: '[scrubbed]' };
+    ep.examples.request.url = `http://localhost:${port}${ep.path}?query=rust&state=[scrubbed]`;
+
+    const result = await replayEndpoint(skill, 'get-search', { authManager, domain: 'localhost', _skipSsrfCheck: true });
+    assert.equal(result.status, 403);
+    const data = result.data as any;
+    assert.equal(data.error, 'Authentication required');
+    assert.match(data.suggestion, /log in/);
+    assert.equal(data.originalResponse.query.state, undefined);
+  });
+
   it('a caller-supplied value wins over the stored credential', async () => {
     await storeKey();
     const result = await replayEndpoint(makeSkill('[stored]'), 'get-search', {

@@ -1,5 +1,6 @@
 // src/replay/engine.ts
 import type { SkillFile, StoredAuth } from '../types.js';
+import { queryCredentialKind } from '../skill/placeholders.js';
 import type { AuthManager } from '../auth/manager.js';
 import { substituteBodyVariables } from '../capture/body-variables.js';
 import { parseJwtClaims } from '../capture/entropy.js';
@@ -294,7 +295,10 @@ function resolveQueryAuth(url: URL, auth: StoredAuth | null): { resolved: string
       if (!resolved.includes(name)) resolved.push(name);
     } else {
       url.searchParams.delete(name);
-      if (!unresolved.includes(name)) unresolved.push(name);
+      // Only report credentials; a scrubbed one-time param (state, code, …)
+      // is dropped silently so real session-auth errors keep the login hint
+      const isCredential = value === '[stored]' || queryCredentialKind(name) !== null;
+      if (isCredential && !unresolved.includes(name)) unresolved.push(name);
     }
   }
   return { resolved, unresolved };

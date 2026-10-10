@@ -17,11 +17,17 @@ export interface CapturedExchange {
   timestamp: string;
 }
 
-/** Stored auth credentials for a domain */
+/**
+ * Stored auth credentials for a domain.
+ * `header`/`value` are empty strings when the credential is query-only.
+ */
 export interface StoredAuth {
   type: 'bearer' | 'api-key' | 'cookie' | 'custom';
   header: string;
   value: string;
+  // v2.3.1: credentials sent as query params (e.g. ?x-algolia-api-key=, ?key=)
+  // `host` pins the credential to the host it was captured on
+  queryParams?: Array<{ name: string; value: string; host?: string }>;
   // v1.5.1: multi-header auth (e.g. Authorization + Client-ID for Twitch)
   headers?: Array<{ header: string; value: string }>;
   // v0.8: refreshable tokens (body-based, like CSRF)

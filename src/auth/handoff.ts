@@ -371,9 +371,13 @@ async function doHandoff(
       authDetected = 'bearer';
     }
 
+    // Query-param keys are independent of the login; carry them over
+    const existingAuth = await authManager.retrieve(domain);
+    const keepQueryAuth = existingAuth?.queryParams ? { queryParams: existingAuth.queryParams } : {};
+
     // Store detected auth header if found
     if (detectedAuth) {
-      await authManager.store(domain, detectedAuth);
+      await authManager.store(domain, { ...detectedAuth, ...keepQueryAuth });
     } else if (cookies.length > 0) {
       // Store as cookie auth
       const sessionCookies = cookies
@@ -389,6 +393,7 @@ async function doHandoff(
           type: 'cookie',
           header: 'cookie',
           value: cookieHeader,
+          ...keepQueryAuth,
         });
       }
     }

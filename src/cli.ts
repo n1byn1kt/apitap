@@ -32,6 +32,7 @@ import { createMcpServer } from './mcp.js';
 import { attach, parseDomainPatterns } from './capture/cdp-attach.js';
 import { isOpenAPISpec, convertOpenAPISpec } from './skill/openapi-converter.js';
 import { mergeSkillFile } from './skill/merge.js';
+import { deduplicateAuth } from './skill/generator.js';
 import { loadKnownSpecs, type KnownSpec } from './known-specs-loader.js';
 import { fetchApisGuruList, filterEntries, fetchSpec } from './skill/apis-guru.js';
 import { searchSwaggerHub, fetchSwaggerHubSpec } from './skill/swaggerhub.js';
@@ -51,6 +52,7 @@ import {
   CANONICAL_TOPICS,
   type RateLimit,
 } from './skill/github.js';
+import { hasAuthPlaceholder } from './skill/placeholders.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8'));
@@ -367,9 +369,11 @@ async function handleCapture(positional: string[], flags: Record<string, string 
     });
     if (skill.endpoints.length > 0) {
       // Store extracted auth
-      const extractedAuth = generator.getExtractedAuth();
-      if (extractedAuth.length > 0) {
-        await authManager.store(domain, extractedAuth[0]);
+      // Merge all extracted headers and query credentials, as the session and
+      // attach capture paths do
+      const auth = deduplicateAuth(generator.getExtractedAuth());
+      if (auth) {
+        await authManager.store(domain, auth);
       }
 
       // Store OAuth credentials if detected
@@ -519,7 +523,7 @@ async function handleShow(positional: string[], flags: Record<string, string | b
   for (const ep of skill.endpoints) {
     const shape = ep.responseShape.type;
     const fields = ep.responseShape.fields?.length ?? 0;
-    const hasAuth = Object.values(ep.headers).some(v => v === '[stored]');
+    const hasAuth = hasAuthPlaceholder(ep);
     const authBadge = hasAuth ? ' 🔑' : '';
     const tier = ep.replayability?.tier ?? 'unknown';
     const tierBadge = TIER_BADGES[tier];
@@ -574,7 +578,7 @@ async function handleReplay(positional: string[], flags: Record<string, string |
       ...endpoint,
       headers: { ...endpoint.headers },
     };
-    const hasStoredPlaceholder = Object.values(replayEndpoint.headers).some(v => v === '[stored]');
+    const hasStoredPlaceholder = hasAuthPlaceholder(replayEndpoint);
     if (hasStoredPlaceholder && !storedAuth) {
       const warnAuth = `Endpoint requires auth but no stored credentials found for "${domain}". Run \`apitap capture ${domain}\` to capture fresh credentials.`;
       if (json) notices.push(warnAuth);
@@ -582,7 +586,8 @@ async function handleReplay(positional: string[], flags: Record<string, string |
     }
 
     // Inject stored auth into replay-only endpoint headers (never mutate persisted skill template)
-    if (storedAuth) {
+    // (query-only credentials have no header; the engine injects those)
+    if (storedAuth?.header && storedAuth.value) {
       replayEndpoint.headers[storedAuth.header] = storedAuth.value;
     }
 
@@ -1995,7 +2000,8 @@ async function handleAuth(positional: string[], flags: Record<string, string | b
 
   const status = {
     domain,
-    hasHeaderAuth: !!auth,
+    hasHeaderAuth: !!auth?.header,
+    queryAuth: auth?.queryParams?.map(q => q.name) ?? [],
     headerAuthType: auth?.type,
     jwtExpiry,
     tokens: tokens ? Object.keys(tokens) : [],
@@ -2014,7 +2020,10 @@ async function handleAuth(positional: string[], flags: Record<string, string | b
     console.log(JSON.stringify(status, null, 2));
   } else {
     console.log(`\n  Auth status for ${domain}:`);
-    console.log(`    Header auth: ${auth ? `${auth.type} (${auth.header})` : 'none'}`);
+    console.log(`    Header auth: ${auth?.header ? `${auth.type} (${auth.header})` : 'none'}`);
+    if (auth?.queryParams?.length) {
+      console.log(`    Query auth: ${auth.queryParams.map(q => q.name).join(', ')}`);
+    }
     if (jwtExpiry) {
       console.log(`    JWT: ${jwtExpiry}`);
     }

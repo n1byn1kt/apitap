@@ -76,6 +76,21 @@ describe('refreshOAuth', () => {
     assert.equal(stored?.value, 'Bearer new-access-token');
   });
 
+  it('keeps stored query-param credentials across a refresh (#87)', async () => {
+    await authManager.store('example.com', {
+      type: 'bearer', header: 'authorization', value: 'Bearer old-token',
+      queryParams: [{ name: 'api_key', value: 'qk_123456789' }],
+    });
+    await authManager.storeOAuthCredentials('example.com', { refreshToken: 'rt_old' });
+    mockFetch({ status: 200, body: { access_token: 'new-access-token', token_type: 'bearer' } });
+
+    const result = await refreshOAuth('example.com', baseConfig, authManager, { _skipSsrfCheck: true });
+    assert.equal(result.success, true);
+    const stored = await authManager.retrieve('example.com');
+    assert.equal(stored?.value, 'Bearer new-access-token');
+    assert.deepEqual(stored?.queryParams, [{ name: 'api_key', value: 'qk_123456789' }]);
+  });
+
   it('sends correct parameters in refresh request', async () => {
     await authManager.storeOAuthCredentials('example.com', {
       refreshToken: 'rt_test',

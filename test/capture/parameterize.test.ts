@@ -80,6 +80,19 @@ describe('parameterizePath', () => {
     assert.equal(parameterizePath('/2.3/questions'), '/2.3/questions');
   });
 
+  it('keeps a bare leading API version literal (#88)', () => {
+    assert.equal(parameterizePath('/1/indexes/Item_dev/query'), '/1/indexes/Item_dev/query');
+    assert.equal(parameterizePath('/2/search'), '/2/search');
+    assert.equal(parameterizePath('/api/2/search'), '/api/2/search');
+    // still ids: 3+ digits, nothing after, numeric after, or not at the root
+    assert.equal(parameterizePath('/123/profile'), '/:id/profile');
+    assert.equal(parameterizePath('/api/5'), '/api/:id');
+    assert.equal(parameterizePath('/1/2'), '/:id/:id');
+    assert.equal(parameterizePath('/items/1/details'), '/items/:item_id/details');
+    // Accepted tradeoff: a 1–2 digit root id followed by a word stays literal
+    assert.equal(parameterizePath('/7/profile'), '/7/profile');
+  });
+
   // --- Edge cases ---
 
   it('handles root path', () => {

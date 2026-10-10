@@ -1,8 +1,11 @@
 // test/skill/generator.test.ts
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { SkillGenerator, isSensitiveBodyKey } from '../../src/skill/generator.js';
+import { SkillGenerator, isSensitiveBodyKey, deduplicateAuth, markStoredQueryAuth } from '../../src/skill/generator.js';
 import type { CapturedExchange } from '../../src/types.js';
+
+// Google-key-shaped test value, assembled so secret scanners don't match a literal
+const FAKE_GOOGLE_STYLE_KEY = ['AI', 'za'].join('') + 'FAKE0tEst1KeY2nOt3ReAl4vAlUe5xyz67';
 
 describe('isSensitiveBodyKey', () => {
   it('matches snake_case and bare credential keys', () => {
@@ -295,6 +298,15 @@ describe('SkillGenerator', () => {
     const skill = gen.toSkillFile('example.com');
     assert.equal(skill.endpoints[0].path, '/api/markets/:id');
     assert.equal(skill.endpoints[0].id, 'get-api-markets');
+  });
+
+  it('keeps bare API versions as separate endpoints (#88)', () => {
+    const gen = new SkillGenerator();
+    gen.addExchange(mockExchange({ url: 'https://example.com/1/items/list' }));
+    gen.addExchange(mockExchange({ url: 'https://example.com/2/items/list' }));
+
+    const skill = gen.toSkillFile('example.com');
+    assert.deepEqual(skill.endpoints.map(ep => ep.path).sort(), ['/1/items/list', '/2/items/list']);
   });
 
   it('deduplicates parameterized path variants', () => {
@@ -754,6 +766,24 @@ describe('GraphQL endpoint handling', () => {
     assert.equal(skill.endpoints.length, 1);
     assert.equal(skill.metadata.captureCount, 2);
   });
+
+  it('keeps distinct search endpoints whose body has a plain query string (#86)', () => {
+    const gen = new SkillGenerator();
+    for (const index of ['Item_dev', 'User']) {
+      const ex = mockExchange({
+        url: `https://search.example.com/indexes/${index}/query`,
+        method: 'POST',
+        body: JSON.stringify({ hits: [], nbHits: 0 }),
+        requestHeaders: { 'content-type': 'application/x-www-form-urlencoded' },
+      });
+      ex.request.postData = JSON.stringify({ query: 'rust', hitsPerPage: 30 });
+      gen.addExchange(ex);
+    }
+
+    const skill = gen.toSkillFile('search.example.com');
+    assert.equal(skill.endpoints.length, 2);
+    assert.ok(skill.endpoints.every(ep => !ep.id.includes('graphql')));
+  });
 });
 
 describe('SkillGenerator responseSchema', () => {
@@ -791,5 +821,73 @@ describe('SkillGenerator responseSchema', () => {
       // responseSchema should either be absent or handle gracefully
       assert.equal(skill.endpoints[0].responseSchema, undefined);
     }
+  });
+});
+
+describe('query-param credentials (#87)', () => {
+  const KEY = 'test-algolia-key-not-real-0123456';
+
+  it('captures a reusable query key into auth and marks it [stored]', () => {
+    const gen = new SkillGenerator();
+    gen.addExchange(mockExchange({ url: `https://search.example.com/1/indexes/Item/query?query=rust&x-algolia-api-key=${KEY}` }));
+
+    const skill = gen.toSkillFile('search.example.com');
+    const ep = skill.endpoints[0];
+    assert.equal(ep.queryParams['x-algolia-api-key'].example, '[stored]');
+    assert.ok(!ep.examples.request.url.includes(KEY), 'key must not reach the skill file');
+    assert.ok(!JSON.stringify(skill).includes(KEY), 'key must not appear anywhere in the skill file');
+
+    const auth = deduplicateAuth(gen.getExtractedAuth());
+    assert.deepEqual(auth?.queryParams, [{ name: 'x-algolia-api-key', value: KEY, host: 'search.example.com' }]);
+    assert.equal(auth?.header, '');
+  });
+
+  it('marks captured query keys [stored] even with scrubbing disabled', () => {
+    const gen = new SkillGenerator({ scrub: false });
+    gen.addExchange(mockExchange({ url: `https://search.example.com/q?api_key=${KEY}` }));
+
+    const skill = gen.toSkillFile('search.example.com');
+    assert.ok(!JSON.stringify(skill).includes(KEY));
+  });
+
+  it('does not store one-time or request-bound query params', () => {
+    const gen = new SkillGenerator();
+    gen.addExchange(mockExchange({
+      url: 'https://example.com/cb?code=AbC123xYz789QwE&state=s7a8t9e0s1t2a3t4&token=csrf9f8e7d6c5b4a3&sig=0a1b2c3d4e5f6a7b8c9d',
+    }));
+
+    assert.equal(deduplicateAuth(gen.getExtractedAuth()), null);
+    const qp = gen.toSkillFile('example.com').endpoints[0].queryParams;
+    for (const name of ['code', 'state', 'token', 'sig']) {
+      assert.equal(qp[name].example, '[scrubbed]', `${name} stays scrubbed`);
+    }
+  });
+
+  it('only treats a generic `key` param as a credential when the value looks like a token', () => {
+    const gen = new SkillGenerator();
+    gen.addExchange(mockExchange({ url: 'https://example.com/items?key=title' }));
+    gen.addExchange(mockExchange({ url: `https://example.com/maps?key=${FAKE_GOOGLE_STYLE_KEY}` }));
+
+    const auth = deduplicateAuth(gen.getExtractedAuth());
+    assert.deepEqual(auth?.queryParams?.map(q => q.name), ['key']);
+    assert.equal(auth?.queryParams?.[0].value.startsWith('AIza'), true);
+  });
+
+  it('merges header and query credentials, keeping the header as primary', () => {
+    const merged = deduplicateAuth([
+      { type: 'bearer', header: 'authorization', value: 'Bearer abc' },
+      { type: 'api-key', header: '', value: '', queryParams: [{ name: 'key', value: 'k1' }] },
+      { type: 'api-key', header: '', value: '', queryParams: [{ name: 'key', value: 'k2' }] },
+    ]);
+    assert.equal(merged?.header, 'authorization');
+    assert.deepEqual(merged?.headers, [{ header: 'authorization', value: 'Bearer abc' }]);
+    assert.deepEqual(merged?.queryParams, [{ name: 'key', value: 'k1' }]);
+  });
+
+  it('never falls back to raw query values when the scrubbed example URL does not parse', () => {
+    const raw = 'https://example.com/q?api_key=SECRETKEY123&email=a@b.co&state=xyz123';
+    const out = markStoredQueryAuth('not a url', raw, ['api_key']);
+    assert.equal(out, 'https://example.com/q?api_key=%5Bstored%5D');
+    assert.ok(!out.includes('SECRETKEY123') && !out.includes('a@b.co') && !out.includes('xyz123'));
   });
 });

@@ -1,6 +1,7 @@
 // src/inspect/report.ts
 import type { SkillFile, SkillEndpoint } from '../types.js';
 import { detectAntiBot, type AntiBotSignal } from '../capture/anti-bot.js';
+import { storedQueryAuthNames } from '../skill/placeholders.js';
 
 export interface InspectReport {
   domain: string;
@@ -202,6 +203,8 @@ function getAuthLabel(ep: SkillEndpoint): string {
   for (const [key, val] of Object.entries(headers)) {
     if (val === '[stored]') return key;
   }
+  const queryAuth = storedQueryAuthNames(ep);
+  if (queryAuth.length > 0) return `query:${queryAuth[0]}`;
   return 'none';
 }
 

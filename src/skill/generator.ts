@@ -7,6 +7,7 @@ import { detectBodyVariables } from '../capture/body-variables.js';
 import { isGraphQLEndpoint, parseGraphQLBody, extractOperationName, detectGraphQLVariables } from '../capture/graphql.js';
 import { detectRefreshableTokens } from '../capture/token-detector.js';
 import { isLikelyToken } from '../capture/entropy.js';
+import { queryCredentialKind } from './placeholders.js';
 import { isOAuthTokenRequest, type OAuthInfo } from '../capture/oauth-detector.js';
 import { diffBodies } from '../capture/body-diff.js';
 import { snapshotSchema } from '../contract/schema.js';
@@ -141,14 +142,63 @@ export function deduplicateAuth(extractedAuth: StoredAuth[]): StoredAuth | null 
   if (extractedAuth.length === 0) return null;
   const seen = new Set<string>();
   const headers: Array<{ header: string; value: string }> = [];
+  const seenQuery = new Set<string>();
+  const queryParams: NonNullable<StoredAuth['queryParams']> = [];
   for (const a of extractedAuth) {
-    if (!seen.has(a.header)) {
+    if (a.header && !seen.has(a.header)) {
       seen.add(a.header);
       headers.push({ header: a.header, value: a.value });
     }
+    for (const q of a.queryParams ?? []) {
+      if (!seenQuery.has(q.name)) {
+        seenQuery.add(q.name);
+        queryParams.push(q);
+      }
+    }
   }
-  const primary = extractedAuth[0];
-  return { type: primary.type, header: primary.header, value: primary.value, headers };
+  // Query-only credentials carry an empty header/value (see StoredAuth)
+  const primary = extractedAuth.find(a => a.header) ?? { type: 'api-key' as const, header: '', value: '' };
+  return {
+    type: primary.type,
+    header: primary.header,
+    value: primary.value,
+    headers,
+    ...(queryParams.length > 0 ? { queryParams } : {}),
+  };
+}
+
+const MIN_QUERY_AUTH_LENGTH = 8;
+
+/**
+ * Mark captured query credentials as [stored] in the example URL. If the
+ * (PII-scrubbed) example no longer parses, never fall back to raw values:
+ * drop the query and keep only the [stored] markers.
+ */
+export function markStoredQueryAuth(exampleUrl: string, rawUrl: string, names: string[]): string {
+  try {
+    const stored = new URL(exampleUrl);
+    for (const name of names) stored.searchParams.set(name, '[stored]');
+    return stored.toString();
+  } catch {
+    const stored = new URL(rawUrl);
+    stored.search = '';
+    for (const name of names) stored.searchParams.set(name, '[stored]');
+    return stored.toString();
+  }
+}
+
+/** Extract reusable credentials carried in query params. */
+export function extractQueryAuth(url: URL): Array<{ name: string; value: string; host: string }> {
+  const found: Array<{ name: string; value: string; host: string }> = [];
+  for (const [name, value] of url.searchParams) {
+    if (!value || value === '[stored]' || value === '[scrubbed]') continue;
+    if (found.some(q => q.name === name)) continue;
+    const kind = queryCredentialKind(name);
+    const reusable = kind === 'reusable' && value.length >= MIN_QUERY_AUTH_LENGTH;
+    const generic = kind === 'generic' && isLikelyToken(name, value).isToken;
+    if (reusable || generic) found.push({ name, value, host: url.hostname });
+  }
+  return found;
 }
 
 function generateEndpointId(method: string, parameterizedPath: string): string {
@@ -416,6 +466,10 @@ export class SkillGenerator {
     // Extract auth before filtering headers (includes entropy-based detection)
     const [auth, entropyDetected] = extractAuth(request.headers);
     this.extractedAuthList.push(...auth);
+    const queryAuth = extractQueryAuth(url);
+    if (queryAuth.length > 0) {
+      this.extractedAuthList.push({ type: 'api-key', header: '', value: '', queryParams: queryAuth });
+    }
 
     // Filter headers, then strip auth values (including entropy-detected tokens)
     const filtered = filterHeaders(request.headers);
@@ -431,6 +485,15 @@ export class SkillGenerator {
     let exampleUrl = request.url;
     if (this.options.scrub) {
       exampleUrl = scrubUrlQueryParams(scrubPII(exampleUrl));
+    }
+
+    // Query credentials captured into auth storage: mark [stored] (like auth
+    // headers), regardless of scrub — auth never lives in skill files
+    if (queryAuth.length > 0) {
+      for (const { name } of queryAuth) {
+        queryParams[name] = { type: 'string', example: '[stored]' };
+      }
+      exampleUrl = markStoredQueryAuth(exampleUrl, request.url, queryAuth.map(q => q.name));
     }
 
     // Generate endpoint ID - use GraphQL operation name if applicable

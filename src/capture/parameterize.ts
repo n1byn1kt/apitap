@@ -156,6 +156,20 @@ export function classifySegment(segment: string): string | null {
 }
 
 /**
+ * A 1–2 digit segment is an API version, not an id, when it is the first
+ * segment or directly follows `api`, and a non-numeric segment follows it.
+ * e.g. /1/indexes/Item_dev/query, /api/2/search → version
+ * e.g. /123/profile, /api/5, /1/2 → still :id
+ */
+function isBareVersionSegment(segments: string[], i: number): boolean {
+  if (!/^\d{1,2}$/.test(segments[i])) return false;
+  const prev = segments.slice(0, i).filter(s => s !== '');
+  const atRoot = prev.length === 0 || (prev.length === 1 && prev[0].toLowerCase() === 'api');
+  const next = segments[i + 1];
+  return atRoot && !!next && !PURE_NUMERIC_RE.test(next);
+}
+
+/**
  * Check if a segment looks like a lowercase word or hyphenated compound word.
  * e.g. "search", "location-metadata", "top-rated" → true
  * e.g. "n1byn1kt", "OxItOzEC", "ABC-123" → false
@@ -193,6 +207,9 @@ export function parameterizePath(path: string): string {
     if (UUID_RE.test(seg)) { result.push(':id'); nounSlots = []; continue; }
 
     if (PURE_NUMERIC_RE.test(seg)) {
+      // Bare API version (/1/indexes/..., /api/2/search): keep literal so
+      // versions don't collapse into one :id endpoint
+      if (isBareVersionSegment(segments, i)) { result.push(seg); nounSlots = []; continue; }
       // Use noun-derived name if available, otherwise :id
       const name = nounSlots.length > 0 ? nounSlots.shift()! : ':id';
       result.push(name);

@@ -2,6 +2,7 @@
 import type { SkillFile, SkillEndpoint, Replayability } from '../types.js';
 import { resolveAndValidateUrl, assertSsrfBypassAllowed } from '../skill/ssrf.js';
 import { transport, SsrfBlockedError } from '../net/transport.js';
+import { hasAuthPlaceholder, withoutStoredQueryAuth } from '../skill/placeholders.js';
 
 /**
  * Heuristic tier classification for non-GET endpoints (or when verification is skipped).
@@ -10,7 +11,7 @@ import { transport, SsrfBlockedError } from '../net/transport.js';
 export function classifyHeuristic(endpoint: SkillEndpoint): Replayability {
   const signals: string[] = [];
 
-  const hasAuth = Object.values(endpoint.headers).some(v => v === '[stored]');
+  const hasAuth = hasAuthPlaceholder(endpoint);
   if (hasAuth) signals.push('auth-required');
 
   const hasCsrf = Object.keys(endpoint.headers).some(k => {
@@ -60,7 +61,7 @@ async function verifySingle(
   try {
     // transport.fetch never follows redirects (an unvalidated Location could
     // target an internal host) and re-checks the address at connect time.
-    const response = await transport.fetch(url, {
+    const response = await transport.fetch(withoutStoredQueryAuth(url), {
       headers,
       skipSsrf,
       signal: AbortSignal.timeout(5000),
@@ -127,7 +128,7 @@ async function verifySinglePost(
     : endpoint.requestBody.template;
 
   try {
-    const response = await transport.fetch(url, {
+    const response = await transport.fetch(withoutStoredQueryAuth(url), {
       method: endpoint.method,
       headers,
       body,

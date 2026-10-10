@@ -1,7 +1,7 @@
 // test/skill/search.test.ts
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { writeSkillFile } from '../../src/skill/store.js';
@@ -41,10 +41,15 @@ function makeSkill(
 }
 
 describe('searchSkills', () => {
+  let baseDir: string;
   let testDir: string;
 
   beforeEach(async () => {
-    testDir = await mkdtemp(join(tmpdir(), 'apitap-search-'));
+    // Nested skills dir: the index lives in its parent, so a skills dir
+    // directly under tmpdir() would share /tmp/index.json with other suites (#81)
+    baseDir = await mkdtemp(join(tmpdir(), 'apitap-search-'));
+    testDir = join(baseDir, 'skills');
+    await mkdir(testDir, { recursive: true });
     // Write two skill files
     await writeSkillFile(makeSkill('gamma-api.polymarket.com', [
       { id: 'get-events', method: 'GET', path: '/events', tier: 'green' },
@@ -58,7 +63,7 @@ describe('searchSkills', () => {
   });
 
   afterEach(async () => {
-    await rm(testDir, { recursive: true, force: true });
+    await rm(baseDir, { recursive: true, force: true });
   });
 
   it('finds endpoints matching domain name', async () => {

@@ -2,6 +2,7 @@
 import type { SkillFile, SkillEndpoint, Replayability } from '../types.js';
 import { resolveAndValidateUrl, assertSsrfBypassAllowed } from '../skill/ssrf.js';
 import { transport, SsrfBlockedError } from '../net/transport.js';
+import { hasAuthPlaceholder } from '../skill/placeholders.js';
 
 /**
  * Heuristic tier classification for non-GET endpoints (or when verification is skipped).
@@ -10,7 +11,7 @@ import { transport, SsrfBlockedError } from '../net/transport.js';
 export function classifyHeuristic(endpoint: SkillEndpoint): Replayability {
   const signals: string[] = [];
 
-  const hasAuth = Object.values(endpoint.headers).some(v => v === '[stored]');
+  const hasAuth = hasAuthPlaceholder(endpoint);
   if (hasAuth) signals.push('auth-required');
 
   const hasCsrf = Object.keys(endpoint.headers).some(k => {

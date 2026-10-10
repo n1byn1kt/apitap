@@ -141,14 +141,54 @@ export function deduplicateAuth(extractedAuth: StoredAuth[]): StoredAuth | null 
   if (extractedAuth.length === 0) return null;
   const seen = new Set<string>();
   const headers: Array<{ header: string; value: string }> = [];
+  const seenQuery = new Set<string>();
+  const queryParams: Array<{ name: string; value: string }> = [];
   for (const a of extractedAuth) {
-    if (!seen.has(a.header)) {
+    if (a.header && !seen.has(a.header)) {
       seen.add(a.header);
       headers.push({ header: a.header, value: a.value });
     }
+    for (const q of a.queryParams ?? []) {
+      if (!seenQuery.has(q.name)) {
+        seenQuery.add(q.name);
+        queryParams.push(q);
+      }
+    }
   }
-  const primary = extractedAuth[0];
-  return { type: primary.type, header: primary.header, value: primary.value, headers };
+  // Query-only credentials carry an empty header/value (see StoredAuth)
+  const primary = extractedAuth.find(a => a.header) ?? { type: 'api-key' as const, header: '', value: '' };
+  return {
+    type: primary.type,
+    header: primary.header,
+    value: primary.value,
+    headers,
+    ...(queryParams.length > 0 ? { queryParams } : {}),
+  };
+}
+
+/**
+ * Query param names whose values are reusable credentials: captured into
+ * encrypted auth storage and re-injected on replay. One-time or
+ * request-bound params (code, state, nonce, sig*, otp, password, session ids,
+ * refresh/id tokens, CSRF-shaped `token`) are deliberately excluded and stay
+ * [scrubbed].
+ */
+const REUSABLE_QUERY_AUTH = /^(?:access[-_]?token|api[-_]?token|auth[-_]?token|api[-_]?key|apikey|app[-_]?key|access[-_]?key|x-[a-z0-9-]+-api-key)$/i;
+/** Generic names that are only credentials when the value looks like a token (`?key=title` is a sort key). */
+const GENERIC_QUERY_AUTH = /^(?:key|appid)$/i;
+const MIN_QUERY_AUTH_LENGTH = 8;
+
+/** Extract reusable credentials carried in query params. */
+export function extractQueryAuth(url: URL): Array<{ name: string; value: string }> {
+  const found: Array<{ name: string; value: string }> = [];
+  for (const [name, value] of url.searchParams) {
+    if (!value || value === '[stored]' || value === '[scrubbed]') continue;
+    if (found.some(q => q.name === name)) continue;
+    const reusable = REUSABLE_QUERY_AUTH.test(name) && value.length >= MIN_QUERY_AUTH_LENGTH;
+    const generic = GENERIC_QUERY_AUTH.test(name) && isLikelyToken(name, value).isToken;
+    if (reusable || generic) found.push({ name, value });
+  }
+  return found;
 }
 
 function generateEndpointId(method: string, parameterizedPath: string): string {
@@ -416,6 +456,10 @@ export class SkillGenerator {
     // Extract auth before filtering headers (includes entropy-based detection)
     const [auth, entropyDetected] = extractAuth(request.headers);
     this.extractedAuthList.push(...auth);
+    const queryAuth = extractQueryAuth(url);
+    if (queryAuth.length > 0) {
+      this.extractedAuthList.push({ type: 'api-key', header: '', value: '', queryParams: queryAuth });
+    }
 
     // Filter headers, then strip auth values (including entropy-detected tokens)
     const filtered = filterHeaders(request.headers);
@@ -431,6 +475,24 @@ export class SkillGenerator {
     let exampleUrl = request.url;
     if (this.options.scrub) {
       exampleUrl = scrubUrlQueryParams(scrubPII(exampleUrl));
+    }
+
+    // Query credentials captured into auth storage: mark [stored] (like auth
+    // headers), regardless of scrub — auth never lives in skill files
+    if (queryAuth.length > 0) {
+      for (const { name } of queryAuth) {
+        queryParams[name] = { type: 'string', example: '[stored]' };
+      }
+      try {
+        const stored = new URL(exampleUrl);
+        for (const { name } of queryAuth) stored.searchParams.set(name, '[stored]');
+        exampleUrl = stored.toString();
+      } catch {
+        // Unparseable after PII scrub — fall back to the raw URL with credentials marked
+        const stored = new URL(request.url);
+        for (const { name } of queryAuth) stored.searchParams.set(name, '[stored]');
+        exampleUrl = stored.toString();
+      }
     }
 
     // Generate endpoint ID - use GraphQL operation name if applicable

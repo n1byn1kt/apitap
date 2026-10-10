@@ -1,5 +1,5 @@
 // src/replay/engine.ts
-import type { SkillFile } from '../types.js';
+import type { SkillFile, StoredAuth } from '../types.js';
 import type { AuthManager } from '../auth/manager.js';
 import { substituteBodyVariables } from '../capture/body-variables.js';
 import { parseJwtClaims } from '../capture/entropy.js';
@@ -247,8 +247,22 @@ function wrapAuthError(
   status: number,
   originalData: unknown,
   domain: string,
+  unresolvedQueryAuth: string[] = [],
 ): unknown {
   if (status !== 401 && status !== 403) return originalData;
+
+  // A query-param credential was captured but none is stored: logging in won't help
+  if (unresolvedQueryAuth.length > 0) {
+    const names = unresolvedQueryAuth.map(n => `"${n}"`).join(', ');
+    return {
+      status,
+      error: 'Query credential missing',
+      suggestion: `Endpoint expects query credential ${names} but none is stored for ${domain}. ` +
+        `Re-capture with the key present, or pass it as a replay param (${unresolvedQueryAuth[0]}=...)`,
+      domain,
+      originalResponse: originalData,
+    };
+  }
 
   return {
     status,
@@ -257,6 +271,46 @@ function wrapAuthError(
     domain,
     originalResponse: originalData,
   };
+}
+
+const QUERY_AUTH_PLACEHOLDERS = new Set(['[stored]', '[scrubbed]']);
+
+/**
+ * Resolve query-param credential placeholders in place. A [stored] (or, for
+ * skill files captured before v2.3.1, [scrubbed]) value is filled from stored
+ * auth by param name; anything still unresolved is deleted, since sending the
+ * literal placeholder only produces an auth error. Caller-supplied params have
+ * already replaced their placeholder, so they win.
+ */
+function resolveQueryAuth(url: URL, auth: StoredAuth | null): { resolved: string[]; unresolved: string[] } {
+  const stored = new Map((auth?.queryParams ?? []).map(q => [q.name, q.value]));
+  const resolved: string[] = [];
+  const unresolved: string[] = [];
+  for (const [name, value] of [...url.searchParams]) {
+    if (!QUERY_AUTH_PLACEHOLDERS.has(value)) continue;
+    const storedValue = stored.get(name);
+    if (storedValue) {
+      url.searchParams.set(name, storedValue);
+      if (!resolved.includes(name)) resolved.push(name);
+    } else {
+      url.searchParams.delete(name);
+      if (!unresolved.includes(name)) unresolved.push(name);
+    }
+  }
+  return { resolved, unresolved };
+}
+
+/** Re-apply query credentials from refreshed auth to params previously resolved from storage. */
+function reapplyQueryAuth(url: URL, auth: StoredAuth, resolved: string[]): void {
+  for (const q of auth.queryParams ?? []) {
+    if (resolved.includes(q.name)) url.searchParams.set(q.name, q.value);
+  }
+}
+
+/** Drop stored query credentials from a redirect target on another host. */
+function stripQueryAuthForRedirect(redirectUrl: URL, originalHost: string, resolved: string[]): void {
+  if (resolved.length === 0 || isSafeAuthRedirectHost(originalHost, redirectUrl.hostname)) return;
+  for (const name of resolved) redirectUrl.searchParams.delete(name);
 }
 
 /**
@@ -380,7 +434,10 @@ export async function replayEndpoint(
   // the connection, so replayFetch re-checks the address the socket actually
   // connects to (src/net/transport.ts). The hostname stays in the URL, so
   // TLS/SNI still works for CDN-fronted sites.
-  const fetchUrl = url.toString();
+  // The egress scanner sees this pre-injection URL: stored query credentials
+  // go only to their own domain-locked host and must not trip the scanner.
+  const scanUrl = url.toString();
+  let fetchUrl = scanUrl;
   if (!options._skipSsrfCheck) {
     const ssrfCheck = await resolveAndValidateUrl(url.toString());
     if (!ssrfCheck.safe) {
@@ -527,7 +584,7 @@ export async function replayEndpoint(
               ? await authManager.retrieve(domain)
               : await authManager.retrieveWithFallback(domain);
             if (freshAuth) {
-              headers[freshAuth.header] = freshAuth.value;
+              injectAuthHeaders(headers, freshAuth);
             }
           }
         }
@@ -545,13 +602,22 @@ export async function replayEndpoint(
               ? await authManager.retrieve(domain)
               : await authManager.retrieveWithFallback(domain);
             if (freshAuth) {
-              headers[freshAuth.header] = freshAuth.value;
+              injectAuthHeaders(headers, freshAuth);
             }
           }
         }
       }
     }
   }
+
+  // Resolve query-param credentials (after domain-lock and any proactive refresh)
+  const queryAuthSource = authManager && domain
+    ? (endpoint.isolatedAuth
+      ? await authManager.retrieve(domain)
+      : await authManager.retrieveWithFallback(domain))
+    : null;
+  const queryAuth = resolveQueryAuth(url, queryAuthSource);
+  fetchUrl = url.toString();
 
   // ─── Trap-aware egress check ─────────────────────────────────
   // Resolves the precedence chain. When disabled (the default),
@@ -560,7 +626,7 @@ export async function replayEndpoint(
   const egressState = await resolveEgressCheck(options.egressCheck, skill);
   if (egressState.enabled) {
     const rawFindings = scanOutboundRequest({
-      url: fetchUrl,
+      url: scanUrl,
       method: endpoint.method,
       body,
       contentType: headers['content-type'],
@@ -593,6 +659,7 @@ export async function replayEndpoint(
     const location = response.headers.get('location');
     if (location) {
       const redirectUrl = new URL(location, url);
+      stripQueryAuthForRedirect(redirectUrl, url.hostname, queryAuth.resolved);
       const redirectFetchUrl = redirectUrl.toString();
       // Release the unpooled socket before anything below can throw.
       await response.body?.cancel().catch(() => {});
@@ -631,7 +698,9 @@ export async function replayEndpoint(
         ? await authManager.retrieve(domain)
         : await authManager.retrieveWithFallback(domain);
       if (freshAuth) {
-        headers[freshAuth.header] = freshAuth.value;
+        injectAuthHeaders(headers, freshAuth);
+        reapplyQueryAuth(url, freshAuth, queryAuth.resolved);
+        fetchUrl = url.toString();
       }
 
       // Retry the request
@@ -648,6 +717,7 @@ export async function replayEndpoint(
         const location = retryResponse.headers.get('location');
         if (location) {
           const redirectUrl = new URL(location, url);
+          stripQueryAuthForRedirect(redirectUrl, url.hostname, queryAuth.resolved);
           const retryRedirectFetchUrl = redirectUrl.toString();
           await retryResponse.body?.cancel().catch(() => {});
           if (!options._skipSsrfCheck) {
@@ -682,7 +752,7 @@ export async function replayEndpoint(
       }
 
       const retryFinalData = (retryResponse.status === 401 || retryResponse.status === 403)
-        ? wrapAuthError(retryResponse.status, retryData, skill.domain)
+        ? wrapAuthError(retryResponse.status, retryData, skill.domain, queryAuth.unresolved)
         : retryData;
 
       const retryUpgrade = (endpoint.confidence !== undefined && endpoint.confidence < 1.0
@@ -729,7 +799,7 @@ export async function replayEndpoint(
   }
 
   const finalData = (response.status === 401 || response.status === 403)
-    ? wrapAuthError(response.status, data, skill.domain)
+    ? wrapAuthError(response.status, data, skill.domain, queryAuth.unresolved)
     : data;
 
   // Contract validation: diff response schema against captured baseline

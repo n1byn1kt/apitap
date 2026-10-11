@@ -7,7 +7,7 @@ import { detectBodyVariables } from '../capture/body-variables.js';
 import { isGraphQLEndpoint, parseGraphQLBody, extractOperationName, detectGraphQLVariables } from '../capture/graphql.js';
 import { detectRefreshableTokens } from '../capture/token-detector.js';
 import { isLikelyToken } from '../capture/entropy.js';
-import { queryCredentialKind } from './placeholders.js';
+import { queryAuthTag, queryCredentialKind } from './placeholders.js';
 import { isOAuthTokenRequest, type OAuthInfo } from '../capture/oauth-detector.js';
 import { diffBodies } from '../capture/body-diff.js';
 import { snapshotSchema } from '../contract/schema.js';
@@ -142,20 +142,27 @@ export function deduplicateAuth(extractedAuth: StoredAuth[]): StoredAuth | null 
   if (extractedAuth.length === 0) return null;
   const seen = new Set<string>();
   const headers: Array<{ header: string; value: string }> = [];
-  const seenQuery = new Set<string>();
-  const queryParams: NonNullable<StoredAuth['queryParams']> = [];
+  // One entry per name + host + value; endpoints seen with the same value are
+  // unioned, so a second key under the same name is kept, not dropped (#92)
+  const queryByIdentity = new Map<string, NonNullable<StoredAuth['queryParams']>[number]>();
   for (const a of extractedAuth) {
     if (a.header && !seen.has(a.header)) {
       seen.add(a.header);
       headers.push({ header: a.header, value: a.value });
     }
     for (const q of a.queryParams ?? []) {
-      if (!seenQuery.has(q.name)) {
-        seenQuery.add(q.name);
-        queryParams.push(q);
+      const id = JSON.stringify([q.name, q.host ?? '', q.value]);
+      const existing = queryByIdentity.get(id);
+      if (!existing) {
+        queryByIdentity.set(id, { ...q, ...(q.endpoints ? { endpoints: [...q.endpoints] } : {}) });
+      } else if (existing.endpoints) {
+        // An untagged occurrence makes the entry domain-wide
+        if (!q.endpoints) delete existing.endpoints;
+        else for (const e of q.endpoints) if (!existing.endpoints.includes(e)) existing.endpoints.push(e);
       }
     }
   }
+  const queryParams = [...queryByIdentity.values()];
   // Query-only credentials carry an empty header/value (see StoredAuth)
   const primary = extractedAuth.find(a => a.header) ?? { type: 'api-key' as const, header: '', value: '' };
   return {
@@ -468,7 +475,11 @@ export class SkillGenerator {
     this.extractedAuthList.push(...auth);
     const queryAuth = extractQueryAuth(url);
     if (queryAuth.length > 0) {
-      this.extractedAuthList.push({ type: 'api-key', header: '', value: '', queryParams: queryAuth });
+      const endpoints = [queryAuthTag(method, paramPath)];
+      this.extractedAuthList.push({
+        type: 'api-key', header: '', value: '',
+        queryParams: queryAuth.map(q => ({ ...q, endpoints })),
+      });
     }
 
     // Filter headers, then strip auth values (including entropy-detected tokens)

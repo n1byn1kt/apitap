@@ -27,7 +27,9 @@ export interface StoredAuth {
   value: string;
   // v2.3.1: credentials sent as query params (e.g. ?x-algolia-api-key=, ?key=)
   // `host` pins the credential to the host it was captured on
-  queryParams?: Array<{ name: string; value: string; host?: string }>;
+  // `endpoints` (#92): queryAuthTag()s of the endpoints this value was captured
+  // on; absent = domain-wide (pre-#92 storage)
+  queryParams?: Array<{ name: string; value: string; host?: string; endpoints?: string[] }>;
   // v1.5.1: multi-header auth (e.g. Authorization + Client-ID for Twitch)
   headers?: Array<{ header: string; value: string }>;
   // v0.8: refreshable tokens (body-based, like CSRF)

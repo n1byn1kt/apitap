@@ -838,7 +838,7 @@ describe('query-param credentials (#87)', () => {
     assert.ok(!JSON.stringify(skill).includes(KEY), 'key must not appear anywhere in the skill file');
 
     const auth = deduplicateAuth(gen.getExtractedAuth());
-    assert.deepEqual(auth?.queryParams, [{ name: 'x-algolia-api-key', value: KEY, host: 'search.example.com' }]);
+    assert.deepEqual(auth?.queryParams, [{ name: 'x-algolia-api-key', value: KEY, host: 'search.example.com', endpoints: ['GET /1/indexes/Item/query'] }]);
     assert.equal(auth?.header, '');
   });
 
@@ -881,6 +881,40 @@ describe('query-param credentials (#87)', () => {
     ]);
     assert.equal(merged?.header, 'authorization');
     assert.deepEqual(merged?.headers, [{ header: 'authorization', value: 'Bearer abc' }]);
+    // Different values under one name are both kept (#92)
+    assert.deepEqual(merged?.queryParams, [{ name: 'key', value: 'k1' }, { name: 'key', value: 'k2' }]);
+  });
+
+  it('keeps a different key per endpoint under the same name, tagged by method + path (#92)', () => {
+    const gen = new SkillGenerator();
+    const RO = 'readonly-key-not-real-0123456789';
+    const ADMIN = 'admin-key-not-real-9876543210abc';
+    gen.addExchange(mockExchange({ method: 'GET', url: `https://api.example.com/search?api_key=${RO}` }));
+    gen.addExchange(mockExchange({ method: 'GET', url: `https://api.example.com/search/12345?api_key=${ADMIN}` }));
+
+    const auth = deduplicateAuth(gen.getExtractedAuth());
+    assert.deepEqual(auth?.queryParams, [
+      { name: 'api_key', value: RO, host: 'api.example.com', endpoints: ['GET /search'] },
+      { name: 'api_key', value: ADMIN, host: 'api.example.com', endpoints: ['GET /search/:id'] },
+    ]);
+  });
+
+  it('unions endpoints that share one key into a single entry (#92)', () => {
+    const gen = new SkillGenerator();
+    gen.addExchange(mockExchange({ method: 'GET', url: `https://api.example.com/a?api_key=${KEY}` }));
+    gen.addExchange(mockExchange({ method: 'GET', url: `https://api.example.com/b?api_key=${KEY}` }));
+
+    const auth = deduplicateAuth(gen.getExtractedAuth());
+    assert.deepEqual(auth?.queryParams, [
+      { name: 'api_key', value: KEY, host: 'api.example.com', endpoints: ['GET /a', 'GET /b'] },
+    ]);
+  });
+
+  it('an untagged occurrence of the same value makes the entry domain-wide', () => {
+    const merged = deduplicateAuth([
+      { type: 'api-key', header: '', value: '', queryParams: [{ name: 'key', value: 'k1', endpoints: ['GET /a'] }] },
+      { type: 'api-key', header: '', value: '', queryParams: [{ name: 'key', value: 'k1' }] },
+    ]);
     assert.deepEqual(merged?.queryParams, [{ name: 'key', value: 'k1' }]);
   });
 

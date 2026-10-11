@@ -1,6 +1,6 @@
 // src/replay/engine.ts
 import type { SkillFile, StoredAuth } from '../types.js';
-import { queryCredentialKind } from '../skill/placeholders.js';
+import { queryAuthTag, queryCredentialKind } from '../skill/placeholders.js';
 import type { AuthManager } from '../auth/manager.js';
 import { substituteBodyVariables } from '../capture/body-variables.js';
 import { parseJwtClaims } from '../capture/entropy.js';
@@ -254,8 +254,22 @@ function wrapAuthError(
   originalData: unknown,
   domain: string,
   unresolvedQueryAuth: string[] = [],
+  ambiguousQueryAuth: string[] = [],
 ): unknown {
   if (status !== 401 && status !== 403) return originalData;
+
+  // Several different keys stored under one name, none captured on this endpoint
+  if (ambiguousQueryAuth.length > 0) {
+    const names = ambiguousQueryAuth.map(n => `"${n}"`).join(', ');
+    return {
+      status,
+      error: 'Query credential ambiguous',
+      suggestion: `${domain} has more than one stored value for query credential ${names} and none was captured ` +
+        `on this endpoint, so none was sent. Re-capture this endpoint, or pass it as a replay param (${ambiguousQueryAuth[0]}=...)`,
+      domain,
+      originalResponse: originalData,
+    };
+  }
 
   // A query-param credential was captured but none is stored: logging in won't help
   if (unresolvedQueryAuth.length > 0) {
@@ -282,45 +296,73 @@ function wrapAuthError(
 const QUERY_AUTH_PLACEHOLDERS = new Set(['[stored]', '[scrubbed]']);
 
 /**
+ * Pick the stored value for one query credential on this endpoint (#92).
+ * Host pin first; then entries captured on this endpoint, else all remaining
+ * entries. Exactly one distinct value is sent. Several distinct values mean
+ * the key differs per endpoint and this one wasn't captured: sending any of
+ * them could hand a higher-privilege key to the wrong endpoint, so none is.
+ */
+function pickQueryCredential(
+  auth: StoredAuth | null,
+  name: string,
+  host: string,
+  tag: string,
+): { value?: string; ambiguous: boolean } {
+  const entries = (auth?.queryParams ?? []).filter(q => q.name === name && (!q.host || q.host === host));
+  const tagged = entries.filter(q => q.endpoints?.includes(tag));
+  const values = new Set((tagged.length > 0 ? tagged : entries).map(q => q.value));
+  if (values.size === 1) return { value: [...values][0], ambiguous: false };
+  return { ambiguous: values.size > 1 };
+}
+
+/**
  * Resolve query-param credential placeholders in place. A [stored] (or, for
  * skill files captured before v2.3.1, [scrubbed]) value is filled from stored
- * auth by param name; anything still unresolved is deleted, since sending the
- * literal placeholder only produces an auth error. Caller-supplied params have
- * already replaced their placeholder, so they win.
+ * auth by param name and endpoint (pickQueryCredential); anything still
+ * unresolved is deleted, since sending the literal placeholder only produces
+ * an auth error. Caller-supplied params have already replaced their
+ * placeholder, so they win.
  */
-function resolveQueryAuth(url: URL, auth: StoredAuth | null): { resolved: string[]; unresolved: string[] } {
-  const stored = new Map((auth?.queryParams ?? []).map(q => [q.name, q]));
+function resolveQueryAuth(
+  url: URL,
+  auth: StoredAuth | null,
+  tag: string,
+): { resolved: string[]; unresolved: string[]; ambiguous: string[] } {
   const resolved: string[] = [];
   const unresolved: string[] = [];
+  const ambiguous: string[] = [];
   for (const [name, value] of [...url.searchParams]) {
     if (!QUERY_AUTH_PLACEHOLDERS.has(value)) continue;
-    const entry = stored.get(name);
     // A pre-v2.3.1 [scrubbed] value is only filled for unambiguous credential
     // names: a generic `key` may have been a scrubbed sort key on this endpoint
     const fillable = value === '[stored]' || queryCredentialKind(name) === 'reusable';
-    // Pinned to the host the key was captured on (not just the skill domain)
-    const hostOk = !entry?.host || entry.host === url.hostname;
-    const storedValue = fillable && hostOk ? entry?.value : undefined;
-    if (storedValue) {
-      url.searchParams.set(name, storedValue);
+    const pick = fillable ? pickQueryCredential(auth, name, url.hostname, tag) : { ambiguous: false };
+    if (pick.value) {
+      url.searchParams.set(name, pick.value);
       if (!resolved.includes(name)) resolved.push(name);
     } else {
       url.searchParams.delete(name);
+      if (pick.ambiguous) {
+        if (!ambiguous.includes(name)) ambiguous.push(name);
+        continue;
+      }
       // Only report credentials; a scrubbed one-time param (state, code, …)
       // is dropped silently so real session-auth errors keep the login hint
       const isCredential = value === '[stored]' || queryCredentialKind(name) !== null;
       if (isCredential && !unresolved.includes(name)) unresolved.push(name);
     }
   }
-  return { resolved, unresolved };
+  return { resolved, unresolved, ambiguous };
 }
 
-/** Re-apply query credentials from refreshed auth to params previously resolved from storage. */
-function reapplyQueryAuth(url: URL, auth: StoredAuth, resolved: string[]): void {
-  for (const q of auth.queryParams ?? []) {
-    if (resolved.includes(q.name) && (!q.host || q.host === url.hostname)) {
-      url.searchParams.set(q.name, q.value);
-    }
+/**
+ * Re-apply query credentials from refreshed auth to params previously resolved
+ * from storage, with the same per-endpoint pick as the first request.
+ */
+export function reapplyQueryAuth(url: URL, auth: StoredAuth, resolved: string[], tag: string): void {
+  for (const name of resolved) {
+    const { value } = pickQueryCredential(auth, name, url.hostname, tag);
+    if (value) url.searchParams.set(name, value);
   }
 }
 
@@ -708,7 +750,8 @@ export async function replayEndpoint(
       ? await authManager.retrieve(domain)
       : await authManager.retrieveWithFallback(domain))
     : null;
-  const queryAuth = resolveQueryAuth(url, queryAuthSource);
+  const queryAuthTagForEndpoint = queryAuthTag(endpoint.method, endpoint.path);
+  const queryAuth = resolveQueryAuth(url, queryAuthSource, queryAuthTagForEndpoint);
   fetchUrl = url.toString();
 
   // ─── Trap-aware egress check ─────────────────────────────────
@@ -791,7 +834,7 @@ export async function replayEndpoint(
         : await authManager.retrieveWithFallback(domain);
       if (freshAuth) {
         injectAuthHeaders(headers, freshAuth);
-        reapplyQueryAuth(url, freshAuth, queryAuth.resolved);
+        reapplyQueryAuth(url, freshAuth, queryAuth.resolved, queryAuthTagForEndpoint);
         fetchUrl = url.toString();
       }
 
@@ -846,7 +889,7 @@ export async function replayEndpoint(
       retryData = redactInjected(retryData, retrySecrets);
 
       const retryFinalData = (retryResponse.status === 401 || retryResponse.status === 403)
-        ? wrapAuthError(retryResponse.status, retryData, skill.domain, queryAuth.unresolved)
+        ? wrapAuthError(retryResponse.status, retryData, skill.domain, queryAuth.unresolved, queryAuth.ambiguous)
         : retryData;
 
       const retryUpgrade = (endpoint.confidence !== undefined && endpoint.confidence < 1.0
@@ -895,7 +938,7 @@ export async function replayEndpoint(
   data = redactInjected(data, secrets);
 
   const finalData = (response.status === 401 || response.status === 403)
-    ? wrapAuthError(response.status, data, skill.domain, queryAuth.unresolved)
+    ? wrapAuthError(response.status, data, skill.domain, queryAuth.unresolved, queryAuth.ambiguous)
     : data;
 
   // Contract validation: diff response schema against captured baseline

@@ -19,6 +19,16 @@ export function queryCredentialKind(name: string): 'reusable' | 'generic' | null
   return null;
 }
 
+/**
+ * Tag binding a stored query credential to the endpoint it was captured on:
+ * method + parameterized path, the generator's dedup identity. Not the
+ * endpoint id, which drops :param segments (GET /search and GET /search/:q
+ * are both get-search).
+ */
+export function queryAuthTag(method: string, path: string): string {
+  return `${method.toUpperCase()} ${path}`;
+}
+
 /** Query params whose credential was captured into auth storage. */
 export function storedQueryAuthNames(ep: SkillEndpoint): string[] {
   return Object.entries(ep.queryParams ?? {})

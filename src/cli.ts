@@ -2001,7 +2001,7 @@ async function handleAuth(positional: string[], flags: Record<string, string | b
   const status = {
     domain,
     hasHeaderAuth: !!auth?.header,
-    queryAuth: auth?.queryParams?.map(q => q.name) ?? [],
+    queryAuth: [...new Set(auth?.queryParams?.map(q => q.name) ?? [])],
     headerAuthType: auth?.type,
     jwtExpiry,
     tokens: tokens ? Object.keys(tokens) : [],
@@ -2022,7 +2022,7 @@ async function handleAuth(positional: string[], flags: Record<string, string | b
     console.log(`\n  Auth status for ${domain}:`);
     console.log(`    Header auth: ${auth?.header ? `${auth.type} (${auth.header})` : 'none'}`);
     if (auth?.queryParams?.length) {
-      console.log(`    Query auth: ${auth.queryParams.map(q => q.name).join(', ')}`);
+      console.log(`    Query auth: ${[...new Set(auth.queryParams.map(q => q.name))].join(', ')}`);
     }
     if (jwtExpiry) {
       console.log(`    JWT: ${jwtExpiry}`);

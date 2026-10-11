@@ -6,7 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { replayEndpoint, containsInjected, stripAuthForRedirect, stripQueryAuthForRedirect } from '../../src/replay/engine.js';
+import { replayEndpoint, containsInjected, reapplyQueryAuth, stripAuthForRedirect, stripQueryAuthForRedirect } from '../../src/replay/engine.js';
 import { scanOutboundRequest } from '../../src/replay/egress.js';
 import { AuthManager } from '../../src/auth/manager.js';
 import type { SkillFile } from '../../src/types.js';
@@ -331,6 +331,57 @@ describe('replayEndpoint query-param credentials (#87)', () => {
     await replayEndpoint(makeSkill('[stored]', '/redirect-plain'), 'get-search', { authManager, domain: 'localhost', _skipSsrfCheck: true });
     assert.ok(otherQuery, 'redirect target was reached');
     assert.equal(otherQuery!.next, 'https://example.com/a?b=c d+e');
+  });
+
+  describe('per-endpoint keys under one name (#92)', () => {
+    const OTHER = 'second-key-not-real-abcdefghijk';
+    const storeTwo = (aTag: string, bTag: string) => authManager.store('localhost', {
+      type: 'api-key', header: '', value: '',
+      queryParams: [
+        { name: 'x-algolia-api-key', value: KEY, host: 'localhost', endpoints: [aTag] },
+        { name: 'x-algolia-api-key', value: OTHER, host: 'localhost', endpoints: [bTag] },
+      ],
+    });
+
+    it('sends each endpoint the key captured on it', async () => {
+      await storeTwo('GET /a', 'GET /b');
+      await replayEndpoint(makeSkill('[stored]', '/a'), 'get-search', { authManager, domain: 'localhost', _skipSsrfCheck: true });
+      assert.equal(lastQuery!['x-algolia-api-key'], KEY);
+      await replayEndpoint(makeSkill('[stored]', '/b'), 'get-search', { authManager, domain: 'localhost', _skipSsrfCheck: true });
+      assert.equal(lastQuery!['x-algolia-api-key'], OTHER);
+    });
+
+    it('sends no key and explains when several exist and none was captured here', async () => {
+      await storeTwo('GET /a', 'GET /b');
+      const result = await replayEndpoint(makeSkill('[stored]', '/c'), 'get-search', { authManager, domain: 'localhost', _skipSsrfCheck: true });
+      assert.equal(lastQuery!['x-algolia-api-key'], undefined, 'neither key may be sent');
+      assert.equal(result.status, 403);
+      const data = result.data as { error: string; suggestion: string };
+      assert.equal(data.error, 'Query credential ambiguous');
+      assert.ok(!JSON.stringify(data).includes(KEY) && !JSON.stringify(data).includes(OTHER), 'error names params, never values');
+    });
+
+    it('uses the only stored key on an endpoint it was not captured on', async () => {
+      await authManager.store('localhost', {
+        type: 'api-key', header: '', value: '',
+        queryParams: [{ name: 'x-algolia-api-key', value: KEY, host: 'localhost', endpoints: ['GET /a'] }],
+      });
+      const result = await replayEndpoint(makeSkill('[stored]', '/c'), 'get-search', { authManager, domain: 'localhost', _skipSsrfCheck: true });
+      assert.equal(result.status, 200);
+    });
+
+    it('re-applies the same per-endpoint key after a token refresh', () => {
+      // Old behaviour wrote every same-name entry, so the last (OTHER) won
+      const url = new URL('http://localhost/a?x-algolia-api-key=stale');
+      reapplyQueryAuth(url, {
+        type: 'api-key', header: '', value: '',
+        queryParams: [
+          { name: 'x-algolia-api-key', value: KEY, endpoints: ['GET /a'] },
+          { name: 'x-algolia-api-key', value: OTHER, endpoints: ['GET /b'] },
+        ],
+      }, ['x-algolia-api-key'], 'GET /a');
+      assert.equal(url.searchParams.get('x-algolia-api-key'), KEY);
+    });
   });
 
   it('round-trips stored auth without queryParams (pre-v2.3.1 auth.enc)', async () => {

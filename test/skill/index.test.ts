@@ -252,6 +252,26 @@ describe('search index', () => {
       assert.equal(result.reason, 'filecount-mismatch');
     });
 
+    it('reports an index of other domains with the same file count as stale (#81)', async () => {
+      await writeFile(
+        join(skillsDir, 'a.com.json'),
+        makeSkillJSON('a.com', [{ id: 'get-a', method: 'GET', path: '/a' }]),
+      );
+
+      const index: IndexFile = {
+        version: 1,
+        fileCount: 1,
+        builtAt: new Date().toISOString(),
+        domains: {
+          'foreign.com': { endpointCount: 0, provenance: 'self', capturedAt: '', endpoints: [] },
+        },
+      };
+
+      const result = await checkStale(index, skillsDir);
+      assert.equal(result.stale, true);
+      assert.equal(result.reason, 'domain-mismatch');
+    });
+
     it('reports fresh index as not stale', async () => {
       await writeFile(
         join(skillsDir, 'a.com.json'),

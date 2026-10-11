@@ -177,10 +177,15 @@ async function replayFetch(url: string, init: PinnedFetchInit): Promise<Response
 }
 
 /**
- * Check if redirect host is safe to send auth to.
- * Allows exact match or single-level subdomain only (H4 fix).
+ * Check if a redirect target is safe to send auth to.
+ * Allows exact host match or single-level subdomain only (H4 fix), and never
+ * an https → http downgrade: the follow-up would carry the credential in
+ * cleartext (#91).
  */
-function isSafeAuthRedirectHost(originalHost: string, redirectHost: string): boolean {
+function isSafeAuthRedirect(originalUrl: URL, redirectUrl: URL): boolean {
+  if (originalUrl.protocol === 'https:' && redirectUrl.protocol !== 'https:') return false;
+  const originalHost = originalUrl.hostname;
+  const redirectHost = redirectUrl.hostname;
   if (redirectHost === originalHost) return true;
   if (redirectHost.endsWith('.' + originalHost)) {
     const prefix = redirectHost.slice(0, -(originalHost.length + 1));
@@ -209,17 +214,17 @@ const SAFE_REDIRECT_HEADERS = new Set([
  * Strip auth headers from redirect request if cross-domain (H4 fix).
  * Shared between initial and retry redirect paths.
  */
-function stripAuthForRedirect(
+export function stripAuthForRedirect(
   headers: Record<string, string>,
-  originalHost: string,
-  redirectHost: string,
+  originalUrl: URL,
+  redirectUrl: URL,
 ): Record<string, string> {
-  // Same host / single-level subdomain: forward everything (the auth belongs
-  // to that origin).
-  if (isSafeAuthRedirectHost(originalHost, redirectHost)) {
+  // Same host / single-level subdomain, no scheme downgrade: forward
+  // everything (the auth belongs to that origin).
+  if (isSafeAuthRedirect(originalUrl, redirectUrl)) {
     return { ...headers };
   }
-  // Cross-domain: keep only the safe transport allowlist; drop any header that
+  // Cross-domain or downgrade: keep only the safe transport allowlist; drop any header that
   // could carry credentials regardless of its name.
   const redirectHeaders: Record<string, string> = {};
   for (const [key, value] of Object.entries(headers)) {
@@ -341,13 +346,17 @@ function injectedQueryValues(url: URL, resolved: string[]): string[] {
  * Fails closed: text still decoding after MAX_DECODE_LAYERS counts as a hit.
  */
 const MAX_DECODE_LAYERS = 8;
-function containsInjected(text: string, secrets: string[]): boolean {
+const lenientUtf8 = new TextDecoder('utf-8', { fatal: false });
+export function containsInjected(text: string, secrets: string[]): boolean {
   let current = text;
   for (let i = 0; i <= MAX_DECODE_LAYERS; i++) {
     if (secrets.some(s => encodedForms(s).some(f => current.includes(f)))) return true;
-    // Decode valid %XX runs only, so one malformed escape can't hide a deeper layer
+    // Decode valid %XX runs only, so one malformed escape can't hide a deeper
+    // layer. Bytes are decoded leniently: an invalid UTF-8 sequence becomes
+    // U+FFFD instead of leaving the whole run (and a key inside it) undecoded (#93).
     const decoded = current.replace(/\+/g, ' ').replace(/(?:%[0-9A-Fa-f]{2})+/g, run => {
-      try { return decodeURIComponent(run); } catch { return run; }
+      const bytes = Uint8Array.from(run.slice(1).split('%'), h => parseInt(h, 16));
+      return lenientUtf8.decode(bytes);
     });
     if (decoded === current) return false;
     current = decoded;
@@ -381,15 +390,16 @@ function redactInjected<T>(data: T, secrets: string[]): T {
 }
 
 /**
- * Drop stored query credentials from a redirect target on another host. If
+ * Drop stored query credentials from a redirect target on another host (or
+ * an https → http downgrade of the same host). If
  * the target still carries an injected value anywhere (path, another param
  * such as an encoded returnUrl, fragment), refuse the redirect.
  */
-function stripQueryAuthForRedirect(redirectUrl: URL, originalHost: string, resolved: string[], secrets: string[]): void {
-  if (resolved.length === 0 || isSafeAuthRedirectHost(originalHost, redirectUrl.hostname)) return;
+export function stripQueryAuthForRedirect(redirectUrl: URL, originalUrl: URL, resolved: string[], secrets: string[]): void {
+  if (resolved.length === 0 || isSafeAuthRedirect(originalUrl, redirectUrl)) return;
   for (const name of resolved) redirectUrl.searchParams.delete(name);
   if (containsInjected(redirectUrl.href, secrets)) {
-    throw new Error('Redirect blocked: cross-host redirect target carries a stored query credential');
+    throw new Error('Redirect blocked: cross-host or downgraded redirect target carries a stored query credential');
   }
 }
 
@@ -547,7 +557,9 @@ export async function replayEndpoint(
   // Domain-lock: verify request URL matches skill domain before injecting auth (C1 fix).
   // validateSkillFile() enforces baseUrl-domain consistency at load time.
   // This is defense-in-depth for manually-constructed SkillFile objects.
-  if (authManager && domain && !options._skipSsrfCheck) {
+  // Independent of --danger-disable-ssrf: that flag widens which addresses may
+  // be reached, not whose credentials may be sent there (#90).
+  if (authManager && domain) {
     const fetchHost = url.hostname;
     if (fetchHost !== skill.domain && !fetchHost.endsWith('.' + skill.domain)) {
       throw new Error(
@@ -741,7 +753,7 @@ export async function replayEndpoint(
       const redirectUrl = new URL(location, url);
       // Release the unpooled socket before anything below can throw.
       await response.body?.cancel().catch(() => {});
-      stripQueryAuthForRedirect(redirectUrl, url.hostname, queryAuth.resolved, injectedQueryValues(url, queryAuth.resolved));
+      stripQueryAuthForRedirect(redirectUrl, url, queryAuth.resolved, injectedQueryValues(url, queryAuth.resolved));
       const redirectFetchUrl = redirectUrl.toString();
       if (!options._skipSsrfCheck) {
         const redirectCheck = await resolveAndValidateUrl(redirectUrl.toString());
@@ -750,7 +762,7 @@ export async function replayEndpoint(
         }
       }
       // Strip auth headers before cross-domain redirect (uses shared function)
-      const redirectHeaders = stripAuthForRedirect(headers, url.hostname, redirectUrl.hostname);
+      const redirectHeaders = stripAuthForRedirect(headers, url, redirectUrl);
       // Follow the redirect manually (single hop to prevent chains)
       response = await replayFetch(redirectFetchUrl, {
         skipSsrf: options._skipSsrfCheck,
@@ -798,7 +810,7 @@ export async function replayEndpoint(
         if (location) {
           const redirectUrl = new URL(location, url);
           await retryResponse.body?.cancel().catch(() => {});
-          stripQueryAuthForRedirect(redirectUrl, url.hostname, queryAuth.resolved, injectedQueryValues(url, queryAuth.resolved));
+          stripQueryAuthForRedirect(redirectUrl, url, queryAuth.resolved, injectedQueryValues(url, queryAuth.resolved));
           const retryRedirectFetchUrl = redirectUrl.toString();
           if (!options._skipSsrfCheck) {
             const redirectCheck = await resolveAndValidateUrl(redirectUrl.toString());
@@ -807,7 +819,7 @@ export async function replayEndpoint(
             }
           }
           // Strip auth headers on cross-domain redirect (same logic as initial path)
-          const retryRedirectHeaders = stripAuthForRedirect(headers, url.hostname, redirectUrl.hostname);
+          const retryRedirectHeaders = stripAuthForRedirect(headers, url, redirectUrl);
           retryResponse = await replayFetch(retryRedirectFetchUrl, {
             skipSsrf: options._skipSsrfCheck,
             method: 'GET',

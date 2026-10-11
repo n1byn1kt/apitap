@@ -9,6 +9,20 @@ import { join } from 'node:path';
 import { replayEndpoint } from '../../src/replay/engine.js';
 import { AuthManager } from '../../src/auth/manager.js';
 import { transport } from '../../src/net/transport.js';
+
+/**
+ * Serve requests for `http://<host>` from a local test server, so a skill can
+ * keep its real domain (domain-lock compares the request host) while the
+ * traffic lands on localhost. Returns a restore function.
+ */
+function routeHostTo(host: string, localBase: string): () => void {
+  const realFetch = transport.fetch;
+  transport.fetch = ((url: string, init?: import('../../src/net/transport.js').PinnedFetchInit) => {
+    const u = new URL(url);
+    return realFetch(u.hostname === host ? localBase + u.pathname + u.search : url, init);
+  }) as typeof transport.fetch;
+  return () => { transport.fetch = realFetch; };
+}
 import type { SkillFile } from '../../src/types.js';
 
 describe('replayEndpoint', () => {
@@ -855,21 +869,23 @@ describe('replayEndpoint with retry-on-401', () => {
       type: 'bearer', header: 'authorization', value: 'Bearer valid-token',
     });
 
+    const base = 'http://api.example.com';
     const skill: SkillFile = {
       version: '1.2', domain: 'api.example.com', capturedAt: new Date().toISOString(),
-      baseUrl: retryBaseUrl, endpoints: [{
+      baseUrl: base, endpoints: [{
         id: 'get-api-data', method: 'GET', path: '/api/data',
         queryParams: {}, headers: {},
         responseShape: { type: 'object', fields: ['data'] },
-        examples: { request: { url: `${retryBaseUrl}/api/data`, headers: {} }, responsePreview: { data: 'success' } },
+        examples: { request: { url: `${base}/api/data`, headers: {} }, responsePreview: { data: 'success' } },
       }],
       metadata: { captureCount: 1, filteredCount: 0, toolVersion: '1.0.0' },
       provenance: 'self',
     };
 
+    const restore = routeHostTo('api.example.com', retryBaseUrl);
     const result = await replayEndpoint(skill, 'get-api-data', {
       authManager, domain: 'api.example.com', _skipSsrfCheck: true,
-    });
+    }).finally(restore);
 
     assert.equal(result.status, 200);
     assert.equal(lastAuthHeader, 'Bearer valid-token');
@@ -1102,19 +1118,20 @@ describe('replayEndpoint [stored] header resolution', () => {
 
     const skill: SkillFile = {
       version: '1.2', domain: 'api.example.com', capturedAt: new Date().toISOString(),
-      baseUrl: storedBaseUrl, endpoints: [{
+      baseUrl: 'http://api.example.com', endpoints: [{
         id: 'get-data', method: 'GET', path: '/data',
         queryParams: {}, headers: { 'x-client-id': '[stored]' },
         responseShape: { type: 'object' },
-        examples: { request: { url: `${storedBaseUrl}/data`, headers: {} }, responsePreview: null },
+        examples: { request: { url: 'http://api.example.com/data', headers: {} }, responsePreview: null },
       }],
       metadata: { captureCount: 1, filteredCount: 0, toolVersion: '1.0.0' },
       provenance: 'self',
     };
 
+    const restore = routeHostTo('api.example.com', storedBaseUrl);
     await replayEndpoint(skill, 'get-data', {
       authManager, domain: 'api.example.com', _skipSsrfCheck: true,
-    });
+    }).finally(restore);
 
     assert.equal(receivedHeaders['x-client-id'], 'parent-domain-client');
   });
@@ -1126,20 +1143,21 @@ describe('replayEndpoint [stored] header resolution', () => {
 
     const skill: SkillFile = {
       version: '1.2', domain: 'api.example.com', capturedAt: new Date().toISOString(),
-      baseUrl: storedBaseUrl, endpoints: [{
+      baseUrl: 'http://api.example.com', endpoints: [{
         id: 'get-data', method: 'GET', path: '/data',
         queryParams: {}, headers: { 'x-client-id': '[stored]' },
         responseShape: { type: 'object' },
-        examples: { request: { url: `${storedBaseUrl}/data`, headers: {} }, responsePreview: null },
+        examples: { request: { url: 'http://api.example.com/data', headers: {} }, responsePreview: null },
         isolatedAuth: true,
       }],
       metadata: { captureCount: 1, filteredCount: 0, toolVersion: '1.0.0' },
       provenance: 'self',
     };
 
+    const restore = routeHostTo('api.example.com', storedBaseUrl);
     await replayEndpoint(skill, 'get-data', {
       authManager, domain: 'api.example.com', _skipSsrfCheck: true,
-    });
+    }).finally(restore);
 
     // Parent auth should NOT be found because isolatedAuth prevents fallback
     assert.equal(receivedHeaders['x-client-id'], undefined, 'should not fallback with isolatedAuth');

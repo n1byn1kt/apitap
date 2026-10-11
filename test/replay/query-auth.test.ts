@@ -6,7 +6,7 @@ import type { AddressInfo } from 'node:net';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { replayEndpoint } from '../../src/replay/engine.js';
+import { replayEndpoint, containsInjected, stripAuthForRedirect, stripQueryAuthForRedirect } from '../../src/replay/engine.js';
 import { scanOutboundRequest } from '../../src/replay/egress.js';
 import { AuthManager } from '../../src/auth/manager.js';
 import type { SkillFile } from '../../src/types.js';
@@ -50,6 +50,13 @@ describe('replayEndpoint query-param credentials (#87)', () => {
         let wrapped = `x-algolia-api-key=${query['x-algolia-api-key'] ?? ''}`;
         for (let i = 0; i < 12; i++) wrapped = encodeURIComponent(wrapped);
         res.writeHead(302, { Location: `http://127.0.0.1:${otherPort}/landing?next=${wrapped}` });
+        res.end();
+        return;
+      }
+      if (u.pathname === '/redirect-bad-utf8') {
+        // Every byte of the key percent-encoded, in one run with an invalid UTF-8 byte (#93)
+        const hex = [...Buffer.from(query['x-algolia-api-key'] ?? '')].map(b => '%' + b.toString(16).padStart(2, '0')).join('');
+        res.writeHead(302, { Location: `http://127.0.0.1:${otherPort}/landing?next=%41%FF${hex}%42` });
         res.end();
         return;
       }
@@ -269,7 +276,7 @@ describe('replayEndpoint query-param credentials (#87)', () => {
     await storeKey();
     await assert.rejects(
       () => replayEndpoint(makeSkill('[stored]', '/redirect-encoded'), 'get-search', { authManager, domain: 'localhost', _skipSsrfCheck: true }),
-      /cross-host redirect target carries a stored query credential/,
+      /redirect target carries a stored query credential/,
     );
     assert.equal(otherQuery, null, 'redirect target must not be reached');
   });
@@ -282,7 +289,7 @@ describe('replayEndpoint query-param credentials (#87)', () => {
     });
     await assert.rejects(
       () => replayEndpoint(makeSkill('[stored]', '/redirect-malformed'), 'get-search', { authManager, domain: 'localhost', _skipSsrfCheck: true }),
-      /cross-host redirect target carries a stored query credential/,
+      /redirect target carries a stored query credential/,
     );
     assert.equal(otherQuery, null);
   });
@@ -294,9 +301,29 @@ describe('replayEndpoint query-param credentials (#87)', () => {
     });
     await assert.rejects(
       () => replayEndpoint(makeSkill('[stored]', '/redirect-deep'), 'get-search', { authManager, domain: 'localhost', _skipSsrfCheck: true }),
-      /cross-host redirect target carries a stored query credential/,
+      /redirect target carries a stored query credential/,
     );
     assert.equal(otherQuery, null);
+  });
+
+  it('catches a percent-encoded key inside an escape run with invalid UTF-8 (#93)', async () => {
+    await storeKey();
+    await assert.rejects(
+      () => replayEndpoint(makeSkill('[stored]', '/redirect-bad-utf8'), 'get-search', { authManager, domain: 'localhost', _skipSsrfCheck: true }),
+      /redirect target carries a stored query credential/,
+    );
+    assert.equal(otherQuery, null);
+  });
+
+  it('refuses stored auth for a foreign host even with SSRF checks disabled (#90)', async () => {
+    await storeKey();
+    const skill = makeSkill('[stored]');
+    skill.baseUrl = `http://127.0.0.1:${otherPort}`;
+    await assert.rejects(
+      () => replayEndpoint(skill, 'get-search', { authManager, domain: 'localhost', _skipSsrfCheck: true }),
+      /Domain-lock violation/,
+    );
+    assert.equal(otherQuery, null, 'foreign host must not be reached');
   });
 
   it('still follows an ordinary cross-host redirect without the key', async () => {
@@ -311,5 +338,63 @@ describe('replayEndpoint query-param credentials (#87)', () => {
     const auth = await authManager.retrieve('localhost');
     assert.equal(auth?.queryParams, undefined);
     assert.equal(auth?.header, 'authorization');
+  });
+});
+
+describe('redirect auth stripping on scheme downgrade (#91)', () => {
+  const headers = { Authorization: 'Bearer secret-token-value', Accept: 'application/json' };
+  const https = new URL('https://api.example.com/data?api_key=' + KEY);
+
+  it('drops auth headers on a same-host https → http redirect', () => {
+    const out = stripAuthForRedirect(headers, https, new URL('http://api.example.com/data'));
+    assert.deepEqual(out, { Accept: 'application/json' });
+  });
+
+  it('keeps auth headers on a same-host https → https redirect', () => {
+    assert.deepEqual(stripAuthForRedirect(headers, https, new URL('https://api.example.com/v2')), headers);
+  });
+
+  it('keeps auth headers on an http → https upgrade', () => {
+    const http = new URL('http://api.example.com/data');
+    assert.deepEqual(stripAuthForRedirect(headers, http, new URL('https://api.example.com/data')), headers);
+  });
+
+  it('strips the stored query key on a same-host https → http redirect', () => {
+    const target = new URL('http://api.example.com/data?api_key=' + KEY + '&page=2');
+    stripQueryAuthForRedirect(target, https, ['api_key'], [KEY]);
+    assert.equal(target.searchParams.get('api_key'), null);
+    assert.equal(target.searchParams.get('page'), '2');
+  });
+
+  it('refuses a downgraded redirect that carries the key elsewhere', () => {
+    const target = new URL('http://api.example.com/data?next=' + encodeURIComponent('/x?api_key=' + KEY));
+    assert.throws(() => stripQueryAuthForRedirect(target, https, ['api_key'], [KEY]), /redirect target carries/);
+  });
+
+  it('leaves a same-host https → https redirect untouched', () => {
+    const target = new URL('https://api.example.com/v2?api_key=' + KEY);
+    stripQueryAuthForRedirect(target, https, ['api_key'], [KEY]);
+    assert.equal(target.searchParams.get('api_key'), KEY);
+  });
+});
+
+describe('containsInjected lenient decoding (#93)', () => {
+  const hex = (s: string) => [...Buffer.from(s)].map(b => '%' + b.toString(16).padStart(2, '0')).join('');
+
+  it('finds a fully percent-encoded key next to an invalid UTF-8 byte', () => {
+    assert.equal(containsInjected(`/x?n=%41%FF${hex(KEY)}%42`, [KEY]), true);
+  });
+
+  it('finds it double-encoded next to an invalid byte', () => {
+    assert.equal(containsInjected(`/x?n=${encodeURIComponent('%FF' + hex(KEY))}`, [KEY]), true);
+  });
+
+  it('still decodes valid multibyte UTF-8 in the same run', () => {
+    const key = 'zażółć-key-1234';
+    assert.equal(containsInjected(`/x?n=%FF${hex(key)}`, [key]), true);
+  });
+
+  it('does not report a run without the key', () => {
+    assert.equal(containsInjected('/x?n=%41%FF%42%E2%82%AC', [KEY]), false);
   });
 });

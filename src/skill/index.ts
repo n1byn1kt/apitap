@@ -57,18 +57,18 @@ export async function readIndex(skillsDir: string = DEFAULT_SKILLS_DIR): Promise
 
 const STALE_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-async function countSkillFiles(skillsDir: string): Promise<number> {
+async function listSkillFiles(skillsDir: string): Promise<string[]> {
   try {
     const files = await readdir(skillsDir);
-    return files.filter(f => f.endsWith('.json')).length;
+    return files.filter(f => f.endsWith('.json'));
   } catch {
-    return 0;
+    return [];
   }
 }
 
 export interface StaleCheck {
   stale: boolean;
-  reason?: 'missing' | 'filecount-mismatch' | 'version-mismatch';
+  reason?: 'missing' | 'filecount-mismatch' | 'domain-mismatch' | 'version-mismatch';
   ageWarning?: boolean;
 }
 
@@ -83,8 +83,14 @@ export async function checkStale(
   if (!index) return { stale: true, reason: 'missing' };
   if (index.version !== INDEX_VERSION) return { stale: true, reason: 'version-mismatch' };
 
-  const diskCount = await countSkillFiles(skillsDir);
-  if (diskCount !== index.fileCount) return { stale: true, reason: 'filecount-mismatch' };
+  const diskFiles = await listSkillFiles(skillsDir);
+  if (diskFiles.length !== index.fileCount) return { stale: true, reason: 'filecount-mismatch' };
+  // File count alone is a weak fingerprint: an index built from another
+  // directory with the same count would pass as fresh (#81)
+  const onDisk = new Set(diskFiles);
+  if (Object.keys(index.domains).some(d => !onDisk.has(`${d}.json`))) {
+    return { stale: true, reason: 'domain-mismatch' };
+  }
 
   const age = Date.now() - new Date(index.builtAt).getTime();
   if (age > STALE_AGE_MS) return { stale: false, ageWarning: true };

@@ -1,5 +1,45 @@
 # Changelog
 
+## v2.3.2 — 2026-10-10
+
+Security follow-ups to v2.3.1's query-key support, found reviewing PR #89
+(PRs #94, #95; issues #81, #90, #91, #92, #93).
+
+### Security
+- **Per-endpoint query keys (#92).** Stored query keys were one value per
+  parameter name per domain, so a domain that used a read-only key on one
+  endpoint and an admin key on another replayed every endpoint with
+  whichever was captured first. Each key is now tagged with the endpoint
+  it was captured on (method + parameterized path), and replay sends an
+  endpoint the key captured on it. If only one key is stored it is used
+  everywhere, as before. If several are stored and none was captured on
+  this endpoint, none is sent, and a 401/403 reports `Query credential
+  ambiguous` with the param name. The retry after a token refresh picks
+  the same way; it used to send the last stored value. Keys combine only
+  within one capture: a re-capture still replaces the stored record.
+- **No credentials on an https → http redirect (#91).** A same-host
+  redirect that downgrades to plain HTTP used to count as safe and kept
+  auth headers and stored query keys. It is now treated like a cross-host
+  redirect: auth headers dropped, query keys stripped, and the redirect
+  refused if a key still appears in the target. http → https keeps auth.
+- **Domain-lock kept under `--danger-disable-ssrf` (#90).** Disabling
+  SSRF checks also skipped the check that keeps a domain's stored
+  credentials on that domain. The two are now independent: the flag
+  changes which addresses may be reached, not whose credentials go there.
+- **Malformed escapes (#93).** A stored key percent-encoded next to an
+  invalid UTF-8 byte (`%FF`) was not decoded, so the cross-host redirect
+  check missed it. Escapes are now decoded byte by byte.
+
+### Fixed
+- **Search index (#81).** An index whose domains don't match the skill
+  files on disk is rebuilt instead of trusted, even when the file count
+  matches. Also fixes a test suite that shared `/tmp/index.json` with
+  other suites and failed about one run in eight.
+
+### Changed
+- `apitap auth` lists each query key name once when several values are
+  stored under it.
+
 ## v2.3.1 — 2026-10-10
 
 Fixes capture and replay for APIs that pass their key as a query

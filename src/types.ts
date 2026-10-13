@@ -285,9 +285,14 @@ export interface ImportMeta {
 
 /** Result of converting an OpenAPI spec */
 export interface ImportResult {
+  /** Hostname only (no port). Used for the skill file name and domain lock. */
   domain: string;
+  /** Hostname plus non-default port, e.g. `api.example.com:8443`. Used for baseUrl. */
+  host: string;
   endpoints: SkillEndpoint[];
   meta: ImportMeta;
+  /** Non-fatal notices for the user (e.g. spec declared http://). */
+  warnings?: string[];
 }
 
 /** Result of merging imported endpoints into an existing skill file */

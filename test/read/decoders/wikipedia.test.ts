@@ -113,6 +113,26 @@ describe('wikipediaDecoder', () => {
       assert.equal(result, null);
     });
 
+    it('returns null (generic fallback) when neither API has an extract — Main_Page (#99)', async () => {
+      routes['/api/rest_v1/page/summary/Main_Page'] = {
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ type: 'no-extract', title: 'Main Page', extract: '' }),
+      };
+      routes['/w/api.php?action=query&prop=extracts&explaintext=1&redirects=1&format=json&titles=Main_Page'] = {
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ query: { pages: { '15580374': { title: 'Main Page', extract: '' } } } }),
+      };
+
+      const result = await wikipediaDecoder.decode(
+        'https://en.wikipedia.org/wiki/Main_Page',
+        { skipSsrf: true, _apiBaseUrl: baseUrl },
+      );
+
+      assert.equal(result, null);
+    });
+
     it('handles articles without thumbnail', async () => {
       const articleData = {
         title: 'Stub Article',

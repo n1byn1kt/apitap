@@ -18,18 +18,30 @@ const TITLE_PATTERNS: Array<{ pattern: RegExp; vendor: string }> = [
   { pattern: /enable javascript and cookies to continue/i, vendor: 'challenge' },
 ];
 
+/** A real interstitial carries a sentence or two, never an article. */
+const CHALLENGE_MAX_CONTENT = 500;
+
 /**
  * Returns the challenge vendor ('cloudflare', 'ddos-guard', or generic
  * 'challenge') when the page is a bot-verification interstitial, else null.
  */
-export function detectChallengePage(html: string, title: string | null): string | null {
+export function detectChallengePage(
+  html: string,
+  title: string | null,
+  contentLength?: number,
+): string | null {
   if (title) {
     for (const { pattern, vendor } of TITLE_PATTERNS) {
       if (pattern.test(title)) return vendor;
     }
   }
-  // Cloudflare's challenge orchestration script path is unique to real
-  // challenge pages — never present on ordinary CF-fronted content.
-  if (html.includes('/cdn-cgi/challenge-platform/')) return 'cloudflare';
+  // Cloudflare's challenge-platform script also rides along on ordinary pages
+  // that passed (JS detections / managed challenge on later paths): Stack
+  // Exchange and census.gov serve 20k+ chars of real content with it. Only a
+  // page with little content of its own is the interstitial.
+  if (
+    html.includes('/cdn-cgi/challenge-platform/') &&
+    (contentLength === undefined || contentLength < CHALLENGE_MAX_CONTENT)
+  ) return 'cloudflare';
   return null;
 }

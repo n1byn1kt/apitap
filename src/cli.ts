@@ -22,7 +22,7 @@ import { detectAntiBot, type AntiBotSignal } from './capture/anti-bot.js';
 import { discover } from './discovery/index.js';
 import { readIndexEntry } from './index/reader.js';
 import { peek } from './read/peek.js';
-import { read } from './read/index.js';
+import { readDetailed, type ReadFailure } from './read/index.js';
 import { homedir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { readFileSync } from 'node:fs';
@@ -2466,10 +2466,13 @@ async function handleRead(positional: string[], flags: Record<string, string | b
   const scanFlag = flags['no-scan'] !== true;
   const includeImages = flags['images'] === true;
 
-  const result = await read(fullUrl, { maxBytes, scan: scanFlag, includeImages });
+  const { result, failure } = await readDetailed(fullUrl, { maxBytes, scan: scanFlag, includeImages });
 
   if (!result) {
-    failCli(json, 'Failed to read content', { fields: { url: fullUrl } });
+    failCli(json, 'Failed to read content', {
+      fields: { url: fullUrl, ...(failure ?? {}) },
+      ...(failure ? { hint: readFailureHint(failure) } : {}),
+    });
   }
 
   if (json) {
@@ -2479,8 +2482,18 @@ async function handleRead(positional: string[], flags: Record<string, string | b
 
   if (result.title) console.log(`  ${result.title}`);
   console.log(`  Source: ${result.metadata.source} | ~${result.cost.tokens} tokens\n`);
+  if (result.needsBrowser) console.log(`  ⚠ ${result.hint}\n`);
   console.log(result.content);
   console.log();
+}
+
+function readFailureHint(failure: ReadFailure): string {
+  if (failure.cause === 'http_status') {
+    if (failure.botProtection) return `${failure.message}: bot protection refused the request; try \`apitap capture <url>\` with a real browser`;
+    if (failure.status === 404 || failure.status === 410) return `${failure.message}: the page does not exist`;
+    return failure.message;
+  }
+  return `${failure.cause} error: ${failure.message}`;
 }
 
 function getFlagValue(flags: Record<string, string | boolean>, name: string): string | undefined {

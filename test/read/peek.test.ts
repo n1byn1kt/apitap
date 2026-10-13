@@ -8,11 +8,12 @@ let server: Server;
 let baseUrl: string;
 let responseHeaders: Record<string, string>;
 let responseStatus: number;
+let headStatus: number | null;
 
 function setupServer(): Promise<void> {
   return new Promise((resolve) => {
     server = createServer((req: IncomingMessage, res: ServerResponse) => {
-      res.writeHead(responseStatus, responseHeaders);
+      res.writeHead(req.method === 'HEAD' && headStatus !== null ? headStatus : responseStatus, responseHeaders);
       res.end(req.method === 'HEAD' ? '' : 'ok');
     });
     server.listen(0, '127.0.0.1', () => {
@@ -34,6 +35,7 @@ describe('peek', () => {
   beforeEach(async () => {
     responseHeaders = { 'Content-Type': 'text/html' };
     responseStatus = 200;
+    headStatus = null;
     await setupServer();
   });
 
@@ -172,6 +174,46 @@ describe('peek', () => {
     responseHeaders['Content-Type'] = 'application/json; charset=utf-8';
     const result = await peek(baseUrl, { skipSsrf: true });
     assert.equal(result.contentType, 'application/json; charset=utf-8');
+  });
+
+  it('404 returns not_found, not read (#101)', async () => {
+    responseStatus = 404;
+    const result = await peek(baseUrl, { skipSsrf: true });
+    assert.equal(result.accessible, false);
+    assert.equal(result.recommendation, 'not_found');
+  });
+
+  it('410 returns not_found (#101)', async () => {
+    responseStatus = 410;
+    const result = await peek(baseUrl, { skipSsrf: true });
+    assert.equal(result.recommendation, 'not_found');
+  });
+
+  it('HEAD 405 retries with GET and reports the GET status (#101)', async () => {
+    headStatus = 405;
+    responseStatus = 200;
+    const result = await peek(baseUrl, { skipSsrf: true });
+    assert.equal(result.status, 200);
+    assert.equal(result.accessible, true);
+    assert.equal(result.recommendation, 'read');
+    assert.ok(result.signals.some((s) => s.includes('HEAD answered 405')));
+  });
+
+  it('HEAD 405 then GET 404 is not_found (#101)', async () => {
+    headStatus = 405;
+    responseStatus = 404;
+    const result = await peek(baseUrl, { skipSsrf: true });
+    assert.equal(result.status, 404);
+    assert.equal(result.recommendation, 'not_found');
+  });
+
+  it('AWS WAF 202 challenge is blocked, not read (#101)', async () => {
+    responseStatus = 202;
+    responseHeaders = { 'Content-Type': 'text/html', 'x-amzn-waf-action': 'challenge' };
+    const result = await peek(baseUrl, { skipSsrf: true });
+    assert.equal(result.botProtection, 'aws-waf');
+    assert.equal(result.recommendation, 'blocked');
+    assert.equal(result.accessible, false);
   });
 
   it('5xx returns blocked', async () => {

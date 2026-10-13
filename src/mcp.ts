@@ -15,7 +15,7 @@ import { discover } from './discovery/index.js';
 import { readIndexEntry } from './index/reader.js';
 import { SessionCache } from './orchestration/cache.js';
 import { peek } from './read/peek.js';
-import { read } from './read/index.js';
+import { readDetailed } from './read/index.js';
 import { resolveAndValidateUrl } from './skill/ssrf.js';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
@@ -385,7 +385,8 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     {
       description:
         'HTTP HEAD triage of a URL — checks accessibility, bot protection, framework. ' +
-        'Returns { accessible, recommendation, botProtection, framework }.',
+        'Returns { accessible, recommendation, botProtection, framework }. ' +
+        'recommendation is one of read | capture | auth_required | blocked | not_found | error.',
       inputSchema: z.object({
         url: z.string().describe('URL to peek at (e.g. "https://example.com")'),
       }),
@@ -423,7 +424,9 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
     {
       description:
         'Extract content from a URL without a browser. Uses native APIs for Reddit/YouTube/Wikipedia/HN, ' +
-        'HTML extraction elsewhere. Returns clean markdown. ~10K tokens vs 200K for browser.',
+        'HTML extraction elsewhere. Returns clean markdown. ~10K tokens vs 200K for browser. ' +
+        'If the result has needsBrowser: true, content is NOT the page (client-rendered, JS redirect, or bot challenge) — use apitap_capture. ' +
+        'On failure the error carries cause/status/botProtection.',
       inputSchema: z.object({
         url: z.string().describe('URL to read (e.g. "https://en.wikipedia.org/wiki/TypeScript")'),
         maxBytes: z.number().optional().describe('Maximum size in bytes of the full serialized response. Large responses are truncated to fit.'),
@@ -446,7 +449,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
             throw new Error(validation.reason ?? 'URL validation failed');
           }
         }
-        const result = await read(url, {
+        const { result, failure } = await readDetailed(url, {
           maxBytes: maxBytes ?? undefined,
           scan: scan !== false,
           includeImages: includeImages === true,
@@ -454,7 +457,7 @@ export function createMcpServer(options: McpServerOptions = {}): McpServer {
         });
         if (!result) {
           return {
-            content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Failed to read content', url }) }],
+            content: [{ type: 'text' as const, text: JSON.stringify({ error: 'Failed to read content', url, ...(failure ?? {}) }) }],
             isError: true,
           };
         }

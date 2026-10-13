@@ -298,7 +298,9 @@ export function convertOpenAPISpec(
   const { domain, host, basePath } = extractDomainAndBasePath(spec, specUrl);
   const warnings: string[] = [];
   const serverUrl = spec.servers?.[0]?.url;
-  if (typeof serverUrl === 'string' && /^http:\/\//i.test(serverUrl)) {
+  const swaggerHttpOnly = !serverUrl && Array.isArray(spec.schemes) &&
+    spec.schemes.includes('http') && !spec.schemes.includes('https');
+  if ((typeof serverUrl === 'string' && /^http:\/\//i.test(serverUrl)) || swaggerHttpOnly) {
     warnings.push(`spec declares http://${host}; imported as https://${host} (replays always use https)`);
   }
   const { requiresAuth, authType } = detectAuth(spec);
@@ -442,4 +444,37 @@ export function convertOpenAPISpec(
   };
 
   return { domain, host, endpoints, meta, ...(warnings.length ? { warnings } : {}) };
+}
+
+/**
+ * baseUrl for an imported skill file. Stored auth is keyed by hostname, so a
+ * spec must never silently move an existing skill file — and the credentials
+ * replayed through it — to another origin (a different port on the same
+ * host). An existing baseUrl with a different origin is kept, with a warning;
+ * a fresh import on a non-default port gets a notice naming the port (#96).
+ */
+export function resolveImportBaseUrl(
+  existingBaseUrl: string | undefined,
+  host: string,
+): { baseUrl: string; warnings: string[] } {
+  const target = new URL(`https://${host}`);
+  if (existingBaseUrl) {
+    let existingOrigin: string | null = null;
+    try {
+      existingOrigin = new URL(existingBaseUrl).origin;
+    } catch { /* unparseable: replace it */ }
+    if (existingOrigin === target.origin) return { baseUrl: target.origin, warnings: [] };
+    if (existingOrigin) {
+      return {
+        baseUrl: existingBaseUrl,
+        warnings: [
+          `spec targets ${target.origin} but the existing skill file uses ${existingOrigin}; kept ${existingOrigin} so stored credentials are not sent to a new port. Delete the skill file and re-import to change it.`,
+        ],
+      };
+    }
+  }
+  return {
+    baseUrl: target.origin,
+    warnings: target.port ? [`replays will target port ${target.port} (${target.origin})`] : [],
+  };
 }

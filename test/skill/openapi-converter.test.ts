@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveRef, extractDomainAndBasePath, convertOpenAPISpec, isOpenAPISpec } from '../../src/skill/openapi-converter.js';
+import { resolveRef, extractDomainAndBasePath, convertOpenAPISpec, isOpenAPISpec, resolveImportBaseUrl } from '../../src/skill/openapi-converter.js';
 
 describe('resolveRef', () => {
   it('resolves a simple $ref like #/components/schemas/User', () => {
@@ -442,5 +442,48 @@ describe('isOpenAPISpec', () => {
 
   it('returns false for unrelated object', () => {
     assert.strictEqual(isOpenAPISpec({ foo: 'bar', baz: 123 }), false);
+  });
+});
+
+describe('resolveImportBaseUrl (#96 review)', () => {
+  it('fresh import on the default port: plain origin, no warning', () => {
+    assert.deepStrictEqual(resolveImportBaseUrl(undefined, 'api.example.com'), {
+      baseUrl: 'https://api.example.com',
+      warnings: [],
+    });
+  });
+
+  it('fresh import on a non-default port names the port', () => {
+    const r = resolveImportBaseUrl(undefined, 'api.example.com:8443');
+    assert.strictEqual(r.baseUrl, 'https://api.example.com:8443');
+    assert.strictEqual(r.warnings.length, 1);
+    assert.match(r.warnings[0], /port 8443/);
+  });
+
+  it('never moves an existing skill file to another port — stored auth stays put', () => {
+    const r = resolveImportBaseUrl('https://api.example.com', 'api.example.com:8443');
+    assert.strictEqual(r.baseUrl, 'https://api.example.com');
+    assert.match(r.warnings[0], /kept https:\/\/api\.example\.com/);
+  });
+
+  it('existing skill file on the same origin is unchanged and silent', () => {
+    const r = resolveImportBaseUrl('https://api.example.com:8443', 'api.example.com:8443');
+    assert.deepStrictEqual(r, { baseUrl: 'https://api.example.com:8443', warnings: [] });
+  });
+
+  it('Swagger 2 with schemes [http] only warns about the https rewrite', () => {
+    const r = convertOpenAPISpec(
+      { swagger: '2.0', info: { title: 't', version: '1' }, host: 'api.example.com:8080', schemes: ['http'], paths: {} },
+      'https://docs.example.com/swagger.json',
+    );
+    assert.ok(r.warnings?.some((w) => /declares http:\/\//.test(w)));
+  });
+
+  it('Swagger 2 offering https gets no scheme warning', () => {
+    const r = convertOpenAPISpec(
+      { swagger: '2.0', info: { title: 't', version: '1' }, host: 'api.example.com', schemes: ['http', 'https'], paths: {} },
+      'https://docs.example.com/swagger.json',
+    );
+    assert.strictEqual(r.warnings, undefined);
   });
 });

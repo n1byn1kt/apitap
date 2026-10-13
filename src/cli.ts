@@ -30,7 +30,7 @@ import { stat, unlink } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createMcpServer } from './mcp.js';
 import { attach, parseDomainPatterns } from './capture/cdp-attach.js';
-import { isOpenAPISpec, convertOpenAPISpec } from './skill/openapi-converter.js';
+import { isOpenAPISpec, convertOpenAPISpec, resolveImportBaseUrl } from './skill/openapi-converter.js';
 import { mergeSkillFile } from './skill/merge.js';
 import { deduplicateAuth } from './skill/generator.js';
 import { loadKnownSpecs, type KnownSpec } from './known-specs-loader.js';
@@ -899,7 +899,10 @@ async function handleOpenAPIImport(
 
   // Ensure domain and baseUrl reflect the API, not the spec source URL
   skillFile.domain = domain;
-  skillFile.baseUrl = `https://${host}`;
+  const resolvedBase = resolveImportBaseUrl(existing?.baseUrl, host);
+  skillFile.baseUrl = resolvedBase.baseUrl;
+  printImportWarnings(resolvedBase);
+  const importWarnings = [...(importResult.warnings ?? []), ...resolvedBase.warnings];
 
   if (dryRun) {
     if (json) {
@@ -909,6 +912,7 @@ async function handleOpenAPIImport(
         domain,
         diff,
         totalEndpoints: skillFile.endpoints.length,
+        ...(importWarnings.length ? { warnings: importWarnings } : {}),
       }));
     } else {
       printOpenAPIDiff(diff, skillFile, skillsDir);
@@ -933,6 +937,7 @@ async function handleOpenAPIImport(
       skillFile: filePath,
       diff,
       totalEndpoints: signed.endpoints.length,
+      ...(importWarnings.length ? { warnings: importWarnings } : {}),
     }));
   } else {
     printOpenAPIDiff(diff, signed, filePath);
@@ -1074,7 +1079,9 @@ async function handleApisGuruImport(flags: Record<string, string | boolean>): Pr
 
       // Ensure domain and baseUrl reflect the API, not the spec source URL
       skillFile.domain = domain;
-      skillFile.baseUrl = `https://${host}`;
+      const resolvedBase = resolveImportBaseUrl(existing?.baseUrl, host);
+      skillFile.baseUrl = resolvedBase.baseUrl;
+      printImportWarnings(resolvedBase);
 
       if (!dryRun) {
         // Sign and write
@@ -1247,7 +1254,9 @@ async function handleSwaggerHubImport(flags: Record<string, string | boolean>): 
       // Merge
       const { skillFile, diff } = mergeSkillFile(existing, endpoints, meta);
       skillFile.domain = domain;
-      skillFile.baseUrl = `https://${host}`;
+      const resolvedBase = resolveImportBaseUrl(existing?.baseUrl, host);
+      skillFile.baseUrl = resolvedBase.baseUrl;
+      printImportWarnings(resolvedBase);
 
       // Sign and write — minimum-trust provenance (see provenanceForSigning).
       const signed = signSkillFileAs(skillFile, key, provenanceForSigning(skillFile));
@@ -1501,7 +1510,9 @@ async function handleGitHubImport(flags: Record<string, string | boolean>): Prom
       // Merge
       const { skillFile, diff } = mergeSkillFile(existing, endpoints, meta);
       skillFile.domain = domain;
-      skillFile.baseUrl = `https://${host}`;
+      const resolvedBase = resolveImportBaseUrl(existing?.baseUrl, host);
+      skillFile.baseUrl = resolvedBase.baseUrl;
+      printImportWarnings(resolvedBase);
 
       if (dryRun) {
         if (!json) {
@@ -1753,7 +1764,9 @@ async function handleKnownSpecsImport(flags: Record<string, string | boolean>): 
       // Merge
       const { skillFile, diff } = mergeSkillFile(existing, endpoints, meta);
       skillFile.domain = domain;
-      skillFile.baseUrl = `https://${host}`;
+      const resolvedBase = resolveImportBaseUrl(existing?.baseUrl, host);
+      skillFile.baseUrl = resolvedBase.baseUrl;
+      printImportWarnings(resolvedBase);
 
       if (!dryRun) {
         // Sign and write — minimum-trust provenance (see provenanceForSigning).

@@ -136,6 +136,30 @@ describe('extractContent', () => {
     assert.ok(result.content.includes('Real paragraph text'));
   });
 
+  it('keeps a short real <article> over a longer sibling region that lacks it (#98)', () => {
+    const html = `
+      <html><body>
+        <article><p>Short release note: v1.2 fixes the crash.</p></article>
+        <div id="content"><p>${filler}</p></div>
+      </body></html>
+    `;
+    const result = extractContent(html);
+    assert.ok(result.content.includes('Short release note'));
+  });
+
+  it('does not treat role="main-navigation" as the main region (#98)', () => {
+    const menu = 'Menu item link text. '.repeat(15);
+    const html = `
+      <html><body>
+        <div role="main-navigation"><p>${menu}</p></div>
+        <div class="entry-content"><p>${filler}</p></div>
+      </body></html>
+    `;
+    const result = extractContent(html);
+    assert.ok(result.content.includes('Real paragraph text'));
+    assert.ok(!result.content.includes('Menu item link text'));
+  });
+
   it('still prefers a short <article> over noise when no root is long (#98)', () => {
     const html = `
       <html><body>

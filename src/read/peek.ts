@@ -94,7 +94,7 @@ export async function peek(url: string, options: PeekOptions = {}): Promise<Peek
   // passing status means THIS request got through — report the vendor and
   // warn, but don't call a 200 "blocked". Conversely, a passing HEAD on a
   // landing page proves little about deeper data paths.
-  const recommendation = computeRecommendation(status, botProtection);
+  const recommendation = computeRecommendation(status, headers['x-amzn-waf-action']);
   const accessible = status >= 200 && status < 400 && recommendation !== 'blocked';
   if (botProtection && accessible) {
     signals.push(`${botProtection} present but this request passed — deeper paths may challenge`);
@@ -230,14 +230,16 @@ function detectFramework(
   return null;
 }
 
-function computeRecommendation(status: number, botProtection: string | null): PeekResult['recommendation'] {
+function computeRecommendation(status: number, wafAction: string | undefined): PeekResult['recommendation'] {
   // Gone: reading would fetch an error page, not content (#101)
   if (status === 404 || status === 410) {
     return 'not_found';
   }
 
-  // WAF challenge: AWS WAF answers 202 with an interstitial, not content
-  if (status === 202 && botProtection) {
+  // WAF challenge: AWS WAF answers 202 + x-amzn-waf-action: challenge|captcha
+  // with an interstitial. A plain 202 Accepted (async job) behind a WAF or
+  // with a __cf_bm cookie is a real answer and stays readable.
+  if (status === 202 && wafAction && /^(?:challenge|captcha)$/i.test(wafAction)) {
     return 'blocked';
   }
 

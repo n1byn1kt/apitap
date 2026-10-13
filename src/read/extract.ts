@@ -161,7 +161,8 @@ function findContentRoot(html: string): string {
 
   // role="main" can sit on any element; extract it balanced (a non-greedy
   // match up to the first </div> cut gnu.org/software to 15 chars).
-  const roleMain = html.match(/role=["']?main\b/i);
+  // Exact value only: role="main-navigation" is a menu, not the content.
+  const roleMain = html.match(/role=(?:"main"|'main'|main(?=[\s>/]))/i);
   if (roleMain) {
     const extracted = extractTagContent(html, roleMain.index!);
     if (extracted) candidates.push(extracted);
@@ -192,10 +193,18 @@ function findContentRoot(html: string): string {
   const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
   candidates.push(bodyMatch ? bodyMatch[1] : html);
 
-  const lens = candidates.map((c) => getTextContent(c).length);
-  const rich = lens.findIndex((len) => len >= MIN_ROOT_TEXT);
-  if (rich !== -1) return candidates[rich];
-  const nonEmpty = lens.findIndex((len) => len > 0);
+  // A later candidate may only replace a short earlier one if it contains that
+  // candidate's text — <body> always does; a sibling region (comments, a
+  // related-posts block) does not, so a short real <article> is never traded
+  // for something that drops it.
+  const texts = candidates.map((c) => getTextContent(c));
+  const skipped: string[] = [];
+  for (let i = 0; i < candidates.length; i++) {
+    const text = texts[i];
+    if (text.length >= MIN_ROOT_TEXT && skipped.every((t) => text.includes(t))) return candidates[i];
+    if (text.length > 0) skipped.push(text);
+  }
+  const nonEmpty = texts.findIndex((t) => t.length > 0);
   return candidates[nonEmpty === -1 ? candidates.length - 1 : nonEmpty];
 }
 

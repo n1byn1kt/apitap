@@ -199,7 +199,9 @@ export async function readDetailed(
       failure: {
         cause: error?.kind === 'ssrf' ? 'ssrf' : 'transport',
         code: error?.code ?? 'UNKNOWN',
-        message: error?.message ?? 'fetch failed',
+        // BAD_REDIRECT messages embed the site's raw Location header: keep
+        // site-controlled text out of the (non-untrusted-wrapped) error body.
+        message: error?.code === 'BAD_REDIRECT' ? 'invalid redirect location' : (error?.message ?? 'fetch failed'),
       },
     };
   }

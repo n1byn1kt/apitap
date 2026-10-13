@@ -216,6 +216,21 @@ describe('peek', () => {
     assert.equal(result.accessible, false);
   });
 
+  it('202 Accepted with a WAF allow action stays readable (async job API)', async () => {
+    responseStatus = 202;
+    responseHeaders = { 'Content-Type': 'application/json', 'x-amzn-waf-action': 'allow' };
+    const result = await peek(baseUrl, { skipSsrf: true });
+    assert.equal(result.recommendation, 'read');
+  });
+
+  it('202 Accepted with a __cf_bm cookie stays readable', async () => {
+    responseStatus = 202;
+    responseHeaders = { 'Content-Type': 'text/html', 'Set-Cookie': '__cf_bm=abc; path=/' };
+    const result = await peek(baseUrl, { skipSsrf: true });
+    assert.equal(result.botProtection, 'cloudflare');
+    assert.equal(result.recommendation, 'read');
+  });
+
   it('5xx returns blocked', async () => {
     responseStatus = 502;
     const result = await peek(baseUrl, { skipSsrf: true });

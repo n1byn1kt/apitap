@@ -1,5 +1,46 @@
 # Changelog
 
+## v2.3.3 — 2026-10-13
+
+`read` and `peek` now say when they could not get the page instead of
+returning an empty success, and OpenAPI import keeps a spec's port
+(PRs #102, #103; issues #96–#101). Found by the nightly dogfood run over
+180 public URLs: 18 previous failures now pass, 0 regressions.
+
+### Security
+- **Import keeps credentials on their port (#96).** Stored auth is keyed
+  by hostname. Re-importing a spec served on another port of the same
+  host used to move the skill file's base URL there, so stored
+  credentials would follow. An existing skill file now keeps its origin
+  and the import warns. A fresh import on a non-default port prints which
+  port replays will target, and specs that list only `http` warn.
+
+### Fixed
+- **Import port (#96).** OpenAPI/Swagger import dropped the port from the
+  server URL, so specs on `:8443` and similar replayed against `:443`.
+- **Content root (#98).** A stub `<article>`/`<main>` (a card, a
+  breadcrumb) no longer hides the real content; `role="main"` is
+  extracted whole instead of up to its first `</div>`.
+- **Wikipedia (#99).** Pages with an empty REST extract (Main Page,
+  portals) fall back to normal HTML extraction.
+- **Challenge false positive.** The Cloudflare challenge script also loads
+  on normal pages; it now marks a page as a challenge only when the page
+  has under 500 chars of content.
+- **peek (#101).** 404/410 → new `not_found` recommendation (was `read`).
+  A HEAD answered with 405/501 is retried with GET. A 202 carrying an AWS
+  WAF challenge action → `blocked`.
+
+### Added
+- **`needsBrowser` (#97).** When `read` gets no readable body without a
+  browser (`og-tags-only`, `spa-shell`, `challenge-page`, new
+  `js-redirect`), the result carries `needsBrowser: true` and a `hint`.
+- **Failure cause (#100).** Failed reads in CLI `--json` and MCP add
+  `cause` (`http_status` | `ssrf` | `transport`), `status`, `code` and
+  `botProtection`. The `error` string is unchanged. New library export
+  `readDetailed()`; `read()` is unchanged.
+- `import --json` includes `warnings`.
+
+
 ## v2.3.2 — 2026-10-10
 
 Security follow-ups to v2.3.1's query-key support, found reviewing PR #89

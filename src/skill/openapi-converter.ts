@@ -62,32 +62,35 @@ export function resolveRef(
 export function extractDomainAndBasePath(
   spec: Record<string, any>,
   specUrl: string,
-): { domain: string; basePath: string } {
+): { domain: string; host: string; basePath: string } {
   const serverUrl = spec.servers?.[0]?.url;
   if (serverUrl) {
     try {
       const parsed = new URL(serverUrl);
-      return { domain: parsed.hostname, basePath: parsed.pathname.replace(/\/$/, '') };
+      return { domain: parsed.hostname, host: parsed.host, basePath: parsed.pathname.replace(/\/$/, '') };
     } catch {
       if (serverUrl.startsWith('/')) {
         const providerName = spec.info?.['x-providerName'];
-        const domain = (providerName && /^[a-zA-Z0-9][a-zA-Z0-9._-]+$/.test(providerName))
-          ? providerName
-          : new URL(specUrl).hostname;
-        return { domain, basePath: serverUrl.replace(/\/$/, '') };
+        const hasProviderName = !!providerName && /^[a-zA-Z0-9][a-zA-Z0-9._-]+$/.test(providerName);
+        const domain = hasProviderName ? providerName : new URL(specUrl).hostname;
+        // Provider name carries no port; fall back to the spec URL's host.
+        const host = hasProviderName ? providerName : new URL(specUrl).host;
+        return { domain, host, basePath: serverUrl.replace(/\/$/, '') };
       }
     }
   }
   if (spec.host) {
+    const basePath = (spec.basePath || '').replace(/\/$/, '');
     try {
       const parsed = new URL(`https://${spec.host}`);
-      return { domain: parsed.hostname, basePath: (spec.basePath || '').replace(/\/$/, '') };
+      return { domain: parsed.hostname, host: parsed.host, basePath };
     } catch {
-      return { domain: spec.host.split(':')[0], basePath: (spec.basePath || '').replace(/\/$/, '') };
+      return { domain: spec.host.split(':')[0], host: spec.host, basePath };
     }
   }
   try {
-    return { domain: new URL(specUrl).hostname, basePath: '' };
+    const parsed = new URL(specUrl);
+    return { domain: parsed.hostname, host: parsed.host, basePath: '' };
   } catch {
     throw new Error(`Cannot determine API domain from spec (no servers, host, or valid specUrl)`);
   }
@@ -289,7 +292,12 @@ export function convertOpenAPISpec(
   spec: Record<string, any>,
   specUrl: string,
 ): ImportResult {
-  const { domain, basePath } = extractDomainAndBasePath(spec, specUrl);
+  const { domain, host, basePath } = extractDomainAndBasePath(spec, specUrl);
+  const warnings: string[] = [];
+  const serverUrl = spec.servers?.[0]?.url;
+  if (typeof serverUrl === 'string' && /^http:\/\//i.test(serverUrl)) {
+    warnings.push(`spec declares http://${host}; imported as https://${host} (replays always use https)`);
+  }
   const { requiresAuth, authType } = detectAuth(spec);
   const specVersion: 'openapi3' | 'swagger2' = spec.swagger ? 'swagger2' : 'openapi3';
 
@@ -364,7 +372,7 @@ export function convertOpenAPISpec(
       // Add non-empty query params to URL
       const queryEntries = Object.entries(queryParams).filter(([, v]) => v.example !== '');
       const queryString = queryEntries.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v.example)}`).join('&');
-      const exampleUrl = `https://${domain}${examplePath}${queryString ? '?' + queryString : ''}`;
+      const exampleUrl = `https://${host}${examplePath}${queryString ? '?' + queryString : ''}`;
 
       // Extract response shape
       const responseShape = extractResponseShape(operation.responses, spec);
@@ -430,5 +438,5 @@ export function convertOpenAPISpec(
     endpointCount: endpoints.length,
   };
 
-  return { domain, endpoints, meta };
+  return { domain, host, endpoints, meta, ...(warnings.length ? { warnings } : {}) };
 }

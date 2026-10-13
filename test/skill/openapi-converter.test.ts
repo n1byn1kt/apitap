@@ -355,6 +355,61 @@ describe('convertOpenAPISpec', () => {
   });
 });
 
+describe('server port preservation (#96)', () => {
+  const itemsPath = {
+    '/items': { get: { operationId: 'listItems', responses: { 200: { description: 'ok' } } } },
+  };
+
+  it('OpenAPI server with non-default port keeps host:port, domain stays hostname-only', () => {
+    const spec = { openapi: '3.0.0', servers: [{ url: 'https://api.example.com:8443/v1' }], paths: itemsPath };
+    const r = extractDomainAndBasePath(spec, 'https://example.com/spec.json');
+    assert.strictEqual(r.domain, 'api.example.com');
+    assert.strictEqual(r.host, 'api.example.com:8443');
+    assert.strictEqual(r.basePath, '/v1');
+  });
+
+  it('OpenAPI default port is normalized away by URL (host has no port)', () => {
+    const spec = { openapi: '3.0.0', servers: [{ url: 'https://api.example.com:443/v1' }], paths: itemsPath };
+    const r = extractDomainAndBasePath(spec, 'https://example.com/spec.json');
+    assert.strictEqual(r.host, 'api.example.com');
+  });
+
+  it('Swagger 2.0 host with port keeps port in host, domain is hostname', () => {
+    const spec = { swagger: '2.0', host: 'api.example.com:8443', basePath: '/v1' };
+    const r = extractDomainAndBasePath(spec, 'https://example.com/spec.json');
+    assert.strictEqual(r.domain, 'api.example.com');
+    assert.strictEqual(r.host, 'api.example.com:8443');
+    assert.strictEqual(r.basePath, '/v1');
+  });
+
+  it('specUrl fallback carries the spec URL port into host', () => {
+    const spec = { openapi: '3.0.0', paths: {} };
+    const r = extractDomainAndBasePath(spec, 'https://my-api.example.com:9443/openapi.json');
+    assert.strictEqual(r.domain, 'my-api.example.com');
+    assert.strictEqual(r.host, 'my-api.example.com:9443');
+  });
+
+  it('convertOpenAPISpec example URL and result host include the port', () => {
+    const spec = { openapi: '3.0.0', servers: [{ url: 'https://api.example.com:8443/v1' }], paths: itemsPath };
+    const result = convertOpenAPISpec(spec, 'https://example.com/spec.json');
+    assert.strictEqual(result.domain, 'api.example.com');
+    assert.strictEqual(result.host, 'api.example.com:8443');
+    const ep = result.endpoints.find(e => e.path === '/v1/items')!;
+    assert.ok(ep);
+    assert.strictEqual(ep.examples.request.url, 'https://api.example.com:8443/v1/items');
+    assert.strictEqual(result.warnings, undefined);
+  });
+
+  it('http:// server is imported as https with a warning', () => {
+    const spec = { openapi: '3.0.0', servers: [{ url: 'http://api.example.com:8080/v1' }], paths: itemsPath };
+    const result = convertOpenAPISpec(spec, 'https://example.com/spec.json');
+    assert.strictEqual(result.host, 'api.example.com:8080');
+    const ep = result.endpoints.find(e => e.path === '/v1/items')!;
+    assert.ok(ep.examples.request.url.startsWith('https://api.example.com:8080/v1/items'));
+    assert.ok(result.warnings?.some(w => /declares http:\/\/api\.example\.com:8080/.test(w)), 'expected http warning');
+  });
+});
+
 describe('isOpenAPISpec', () => {
   it('detects OpenAPI 3.x spec', () => {
     assert.strictEqual(isOpenAPISpec({ openapi: '3.0.0', info: {}, paths: {} }), true);

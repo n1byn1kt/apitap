@@ -108,6 +108,21 @@ describe('validateSkillFile', () => {
     assert.equal(result.baseUrl, 'https://api.example.com');
   });
 
+  it('accepts a baseUrl with a non-default port when hostname matches domain (#96)', () => {
+    const s = validSkill();
+    s.domain = 'api.example.com';
+    s.baseUrl = 'https://api.example.com:8443';
+    const result = validateSkillFile(s);
+    assert.equal(result.baseUrl, 'https://api.example.com:8443');
+  });
+
+  it('still rejects a port-bearing baseUrl whose hostname differs from domain (#96)', () => {
+    const s = validSkill();
+    s.domain = 'api.example.com';
+    s.baseUrl = 'https://evil.com:8443';
+    assert.throws(() => validateSkillFile(s), /does not match domain/i);
+  });
+
   it('rejects missing endpoints', () => {
     const s = validSkill();
     delete (s as any).endpoints;

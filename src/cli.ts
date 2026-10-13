@@ -829,6 +829,13 @@ async function handleSkillFileImport(filePath: string, json: boolean): Promise<v
   }
 }
 
+/** Surface non-fatal converter notices on stderr (same channel as the other import warnings). */
+function printImportWarnings(importResult: { warnings?: string[] }): void {
+  for (const w of importResult.warnings ?? []) {
+    console.error(`  Warning: ${w}`);
+  }
+}
+
 async function handleOpenAPIImport(
   spec: Record<string, any>,
   specUrl: string,
@@ -849,7 +856,7 @@ async function handleOpenAPIImport(
     failCli(json, msg, { legacyReason: true });
   }
 
-  const { domain, endpoints, meta } = importResult;
+  const { domain, host, endpoints, meta } = importResult; printImportWarnings(importResult);
   const specVersion = spec.openapi || spec.swagger || 'unknown';
 
   if (!json) {
@@ -857,7 +864,7 @@ async function handleOpenAPIImport(
   }
 
   // SSRF validate the domain
-  const dnsCheck = await resolveAndValidateUrl(`https://${domain}`);
+  const dnsCheck = await resolveAndValidateUrl(`https://${host}`);
   if (!dnsCheck.safe) {
     const msg = `DNS rebinding risk for ${domain}: ${dnsCheck.reason}`;
     failCli(json, msg, { legacyReason: true });
@@ -890,7 +897,7 @@ async function handleOpenAPIImport(
 
   // Ensure domain and baseUrl reflect the API, not the spec source URL
   skillFile.domain = domain;
-  skillFile.baseUrl = `https://${domain}`;
+  skillFile.baseUrl = `https://${host}`;
 
   if (dryRun) {
     if (json) {
@@ -1004,7 +1011,7 @@ async function handleApisGuruImport(flags: Record<string, string | boolean>): Pr
 
       // Convert
       const importResult = convertOpenAPISpec(spec, entry.specUrl);
-      const { domain, endpoints, meta } = importResult;
+      const { domain, host, endpoints, meta } = importResult; printImportWarnings(importResult);
 
       if (endpoints.length === 0) {
         if (!json) {
@@ -1026,7 +1033,7 @@ async function handleApisGuruImport(flags: Record<string, string | boolean>): Pr
       }
 
       // SSRF validate
-      const dnsCheck = await resolveAndValidateUrl(`https://${domain}`);
+      const dnsCheck = await resolveAndValidateUrl(`https://${host}`);
       if (!dnsCheck.safe) {
         if (!json) {
           console.log(`  [${idx}/${total}] SKIP ${domain.padEnd(24)} SSRF risk  (${entry.title})`);
@@ -1064,7 +1071,7 @@ async function handleApisGuruImport(flags: Record<string, string | boolean>): Pr
 
       // Ensure domain and baseUrl reflect the API, not the spec source URL
       skillFile.domain = domain;
-      skillFile.baseUrl = `https://${domain}`;
+      skillFile.baseUrl = `https://${host}`;
 
       if (!dryRun) {
         // Sign and write
@@ -1185,7 +1192,7 @@ async function handleSwaggerHubImport(flags: Record<string, string | boolean>): 
 
       // Convert
       const importResult = convertOpenAPISpec(spec, entry.specUrl);
-      const { domain, endpoints, meta } = importResult;
+      const { domain, host, endpoints, meta } = importResult; printImportWarnings(importResult);
 
       if (endpoints.length === 0) {
         if (!json) {
@@ -1205,7 +1212,7 @@ async function handleSwaggerHubImport(flags: Record<string, string | boolean>): 
       }
 
       // SSRF validate
-      const dnsCheck = await resolveAndValidateUrl(`https://${domain}`);
+      const dnsCheck = await resolveAndValidateUrl(`https://${host}`);
       if (!dnsCheck.safe) {
         if (!json) {
           console.log(`  [${idx}/${total}] SKIP ${label.padEnd(40)} SSRF risk`);
@@ -1236,7 +1243,7 @@ async function handleSwaggerHubImport(flags: Record<string, string | boolean>): 
       // Merge
       const { skillFile, diff } = mergeSkillFile(existing, endpoints, meta);
       skillFile.domain = domain;
-      skillFile.baseUrl = `https://${domain}`;
+      skillFile.baseUrl = `https://${host}`;
 
       // Sign and write — minimum-trust provenance (see provenanceForSigning).
       const signed = signSkillFileAs(skillFile, key, provenanceForSigning(skillFile));
@@ -1424,7 +1431,7 @@ async function handleGitHubImport(flags: Record<string, string | boolean>): Prom
 
       // Convert
       const importResult = convertOpenAPISpec(spec, result.specUrl);
-      const { domain, endpoints, meta } = importResult;
+      const { domain, host, endpoints, meta } = importResult; printImportWarnings(importResult);
 
       if (endpoints.length === 0) {
         if (!json) {
@@ -1436,7 +1443,7 @@ async function handleGitHubImport(flags: Record<string, string | boolean>): Prom
       }
 
       // SSRF validate
-      const dnsCheck = await resolveAndValidateUrl(`https://${domain}`);
+      const dnsCheck = await resolveAndValidateUrl(`https://${host}`);
       if (!dnsCheck.safe) {
         if (!json) {
           console.log(`  [${idx}/${total}] SKIP ${domain.padEnd(40)} SSRF risk`);
@@ -1489,7 +1496,7 @@ async function handleGitHubImport(flags: Record<string, string | boolean>): Prom
       // Merge
       const { skillFile, diff } = mergeSkillFile(existing, endpoints, meta);
       skillFile.domain = domain;
-      skillFile.baseUrl = `https://${domain}`;
+      skillFile.baseUrl = `https://${host}`;
 
       if (dryRun) {
         if (!json) {
@@ -1685,7 +1692,7 @@ async function handleKnownSpecsImport(flags: Record<string, string | boolean>): 
 
       // Convert
       const importResult = convertOpenAPISpec(spec, entry.specUrl);
-      const { domain, endpoints, meta } = importResult;
+      const { domain, host, endpoints, meta } = importResult; printImportWarnings(importResult);
 
       if (endpoints.length === 0) {
         if (!json) {
@@ -1707,7 +1714,7 @@ async function handleKnownSpecsImport(flags: Record<string, string | boolean>): 
       }
 
       // SSRF validate
-      const dnsCheck = await resolveAndValidateUrl(`https://${domain}`);
+      const dnsCheck = await resolveAndValidateUrl(`https://${host}`);
       if (!dnsCheck.safe) {
         if (!json) {
           console.log(`  [${idx}/${total}] SKIP ${entry.provider.padEnd(24)} SSRF risk`);
@@ -1740,7 +1747,7 @@ async function handleKnownSpecsImport(flags: Record<string, string | boolean>): 
       // Merge
       const { skillFile, diff } = mergeSkillFile(existing, endpoints, meta);
       skillFile.domain = domain;
-      skillFile.baseUrl = `https://${domain}`;
+      skillFile.baseUrl = `https://${host}`;
 
       if (!dryRun) {
         // Sign and write — minimum-trust provenance (see provenanceForSigning).

@@ -85,7 +85,10 @@ export function extractDomainAndBasePath(
       const parsed = new URL(`https://${spec.host}`);
       return { domain: parsed.hostname, host: parsed.host, basePath };
     } catch {
-      return { domain: spec.host.split(':')[0], host: spec.host, basePath };
+      // Unparseable host: keep the old hostname-only answer rather than put
+      // an invalid authority into baseUrl.
+      const domain = spec.host.split(':')[0];
+      return { domain, host: domain, basePath };
     }
   }
   try {

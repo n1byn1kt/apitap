@@ -856,7 +856,9 @@ async function handleOpenAPIImport(
     failCli(json, msg, { legacyReason: true });
   }
 
-  const { domain, host, endpoints, meta } = importResult; printImportWarnings(importResult);
+  const { domain, host, endpoints, meta } = importResult;
+
+  printImportWarnings(importResult);
   const specVersion = spec.openapi || spec.swagger || 'unknown';
 
   if (!json) {
@@ -1011,7 +1013,8 @@ async function handleApisGuruImport(flags: Record<string, string | boolean>): Pr
 
       // Convert
       const importResult = convertOpenAPISpec(spec, entry.specUrl);
-      const { domain, host, endpoints, meta } = importResult; printImportWarnings(importResult);
+      const { domain, host, endpoints, meta } = importResult;
+      printImportWarnings(importResult);
 
       if (endpoints.length === 0) {
         if (!json) {
@@ -1192,7 +1195,8 @@ async function handleSwaggerHubImport(flags: Record<string, string | boolean>): 
 
       // Convert
       const importResult = convertOpenAPISpec(spec, entry.specUrl);
-      const { domain, host, endpoints, meta } = importResult; printImportWarnings(importResult);
+      const { domain, host, endpoints, meta } = importResult;
+      printImportWarnings(importResult);
 
       if (endpoints.length === 0) {
         if (!json) {
@@ -1431,7 +1435,8 @@ async function handleGitHubImport(flags: Record<string, string | boolean>): Prom
 
       // Convert
       const importResult = convertOpenAPISpec(spec, result.specUrl);
-      const { domain, host, endpoints, meta } = importResult; printImportWarnings(importResult);
+      const { domain, host, endpoints, meta } = importResult;
+      printImportWarnings(importResult);
 
       if (endpoints.length === 0) {
         if (!json) {
@@ -1692,7 +1697,8 @@ async function handleKnownSpecsImport(flags: Record<string, string | boolean>): 
 
       // Convert
       const importResult = convertOpenAPISpec(spec, entry.specUrl);
-      const { domain, host, endpoints, meta } = importResult; printImportWarnings(importResult);
+      const { domain, host, endpoints, meta } = importResult;
+      printImportWarnings(importResult);
 
       if (endpoints.length === 0) {
         if (!json) {

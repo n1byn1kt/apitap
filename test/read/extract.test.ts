@@ -109,6 +109,69 @@ describe('extractContent', () => {
     assert.ok(!result.content.includes('noise'));
   });
 
+  // Issue #98: a stub root must not shadow the real content.
+  const filler = 'Real paragraph text that an agent actually wants to read. '.repeat(6);
+
+  it('extracts the whole role="main" element, not up to its first </div> (#98)', () => {
+    const html = `
+      <html><body>
+        <div id="content" role="main">
+          <div class="crumb">Software</div>
+          <div><p>${filler}</p></div>
+        </div>
+      </body></html>
+    `;
+    const result = extractContent(html);
+    assert.ok(result.content.includes('Real paragraph text'));
+  });
+
+  it('skips a stub <article> card when a later root has the content (#98)', () => {
+    const html = `
+      <html><body>
+        <article><a href="/x">Card</a></article>
+        <main><p>${filler}</p></main>
+      </body></html>
+    `;
+    const result = extractContent(html);
+    assert.ok(result.content.includes('Real paragraph text'));
+  });
+
+  it('keeps a short real <article> over a longer sibling region that lacks it (#98)', () => {
+    const html = `
+      <html><body>
+        <article><p>Short release note: v1.2 fixes the crash.</p></article>
+        <div id="content"><p>${filler}</p></div>
+      </body></html>
+    `;
+    const result = extractContent(html);
+    assert.ok(result.content.includes('Short release note'));
+  });
+
+  it('does not treat role="main-navigation" as the main region (#98)', () => {
+    const menu = 'Menu item link text. '.repeat(15);
+    const html = `
+      <html><body>
+        <div role="main-navigation"><p>${menu}</p></div>
+        <div class="entry-content"><p>${filler}</p></div>
+      </body></html>
+    `;
+    const result = extractContent(html);
+    assert.ok(result.content.includes('Real paragraph text'));
+    assert.ok(!result.content.includes('Menu item link text'));
+  });
+
+  it('still prefers a short <article> over noise when no root is long (#98)', () => {
+    const html = `
+      <html><body>
+        <div>noise</div>
+        <article><p>Short but real</p></article>
+      </body></html>
+    `;
+    const result = extractContent(html);
+    assert.ok(result.content.includes('Short but real'));
+    assert.ok(!result.content.includes('noise'));
+  });
+
   it('strips nav, header, footer, aside', () => {
     const html = `
       <html><body>

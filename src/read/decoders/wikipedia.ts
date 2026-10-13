@@ -70,6 +70,11 @@ export const wikipediaDecoder: Decoder = {
         } catch { /* lede fallback */ }
       }
 
+      // Non-article pages (Main_Page, portals) have no extract from either
+      // API. Hand off to the generic HTML pipeline instead of returning an
+      // empty success (issue #99).
+      if (content.trim().length === 0) return null;
+
       const links: Array<{ text: string; href: string }> = [];
       if (data.content_urls?.desktop?.page) {
         links.push({ text: 'Full article', href: data.content_urls.desktop.page });

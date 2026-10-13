@@ -23,7 +23,7 @@ apitap_peek(url: string) → PeekResult
 
 **Returns:** `{ status, accessible, server, framework, botProtection, signals[], recommendation }`
 
-`recommendation` is one of: `read` | `capture` | `auth_required` | `blocked`
+`recommendation` is one of: `read` | `capture` | `auth_required` | `blocked` | `not_found` | `error`
 
 **Example:**
 ```
@@ -41,6 +41,8 @@ apitap_read(url: string, maxBytes?: number) → ReadResult
 **Use when:** You need page content, article text, post data, or listing info. Always try this before capture.
 
 **Returns:** `{ title, author, description, content (markdown), links[], images[], metadata: { source, type, publishedAt }, cost: { tokens } }`
+
+If the result has `needsBrowser: true` (with a `hint`), `content` is **not** the page: it renders client-side, redirects via script, or is a bot challenge. Use `apitap_capture`. A failed read carries `cause` (`http_status` | `ssrf` | `transport`) plus `status` and `botProtection` when known.
 
 **Site-specific decoders (free, structured):**
 | Site | Side Channel | What You Get |
@@ -181,7 +183,8 @@ Need web data?
 │   ├─ recommendation: "blocked" → STOP, tell user
 │   ├─ recommendation: "read" → apitap_read (no browser)
 │   ├─ recommendation: "capture" → apitap_capture (browser)
-│   └─ recommendation: "auth_required" → needs human login
+│   ├─ recommendation: "auth_required" → needs human login
+│   └─ recommendation: "not_found" → STOP, the page does not exist (404/410)
 │
 ├─ Just need article/post content → apitap_read directly
 │

@@ -23,14 +23,18 @@ export async function peek(url: string, options: PeekOptions = {}): Promise<Peek
   let result = headAttempt.result;
   let fetchError: SafeFetchFailure | null = headAttempt.error;
 
-  // Fall back to GET if HEAD fails (null = network/SSRF error)
-  if (!result) {
+  // Fall back to GET if HEAD fails (null = network/SSRF error), or if the
+  // server just refuses the HEAD method (HN, Twitch answer 405) — the GET
+  // status is the one read will actually see (#101).
+  if (!result || result.status === 405 || result.status === 501) {
+    const headResult = result;
     const getAttempt = await safeFetchDetailed(url, {
       method: 'GET',
       skipSsrf: options.skipSsrf,
     });
-    result = getAttempt.result;
+    result = getAttempt.result ?? headResult;
     if (!result) fetchError = getAttempt.error ?? fetchError;
+    else if (headResult && result !== headResult) signals.push(`HEAD answered ${headResult.status}; status is from GET`);
   }
 
   // Both HEAD and GET failed — say why, honestly. A client-side transport
@@ -90,7 +94,7 @@ export async function peek(url: string, options: PeekOptions = {}): Promise<Peek
   // passing status means THIS request got through — report the vendor and
   // warn, but don't call a 200 "blocked". Conversely, a passing HEAD on a
   // landing page proves little about deeper data paths.
-  const recommendation = computeRecommendation(status);
+  const recommendation = computeRecommendation(status, headers['x-amzn-waf-action']);
   const accessible = status >= 200 && status < 400 && recommendation !== 'blocked';
   if (botProtection && accessible) {
     signals.push(`${botProtection} present but this request passed — deeper paths may challenge`);
@@ -109,7 +113,7 @@ export async function peek(url: string, options: PeekOptions = {}): Promise<Peek
   };
 }
 
-function detectBotProtection(
+export function detectBotProtection(
   headers: Record<string, string>,
   signals: string[],
 ): string | null {
@@ -226,7 +230,19 @@ function detectFramework(
   return null;
 }
 
-function computeRecommendation(status: number): PeekResult['recommendation'] {
+function computeRecommendation(status: number, wafAction: string | undefined): PeekResult['recommendation'] {
+  // Gone: reading would fetch an error page, not content (#101)
+  if (status === 404 || status === 410) {
+    return 'not_found';
+  }
+
+  // WAF challenge: AWS WAF answers 202 + x-amzn-waf-action: challenge|captcha
+  // with an interstitial. A plain 202 Accepted (async job) behind a WAF or
+  // with a __cf_bm cookie is a real answer and stays readable.
+  if (status === 202 && wafAction && /^(?:challenge|captcha)$/i.test(wafAction)) {
+    return 'blocked';
+  }
+
   // Auth required
   if (status === 401 || status === 407) {
     return 'auth_required';

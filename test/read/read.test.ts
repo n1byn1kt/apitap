@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { read } from '../../src/read/index.js';
+import { read, readDetailed } from '../../src/read/index.js';
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 
 let server: Server;
@@ -162,6 +162,38 @@ describe('read', () => {
     assert.equal(result.metadata.source, 'challenge-page');
   });
 
+  it('does not flag a content-rich page that merely carries the CF challenge-platform script', async () => {
+    const para = 'A long answer with real content that the reader came here for. '.repeat(12);
+    routes['/'] = {
+      status: 200,
+      contentType: 'text/html',
+      body: `<html><head><title>Questions</title></head>
+        <body><main><p>${para}</p></main>
+        <script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script></body></html>`,
+    };
+
+    const result = await read(baseUrl, { skipSsrf: true });
+    assert.ok(result);
+    assert.equal(result.botProtection, undefined);
+    assert.equal(result.metadata.source, 'readability');
+    assert.equal(result.needsBrowser, undefined);
+  });
+
+  it('still flags an untitled short page carrying the CF challenge-platform script', async () => {
+    routes['/'] = {
+      status: 200,
+      contentType: 'text/html',
+      body: `<html><head><title>example.com</title></head>
+        <body><script src="/cdn-cgi/challenge-platform/h/b/orchestrate/chl_page/v1"></script>
+        <p>One moment.</p></body></html>`,
+    };
+
+    const result = await read(baseUrl, { skipSsrf: true });
+    assert.ok(result);
+    assert.equal(result.botProtection, 'cloudflare');
+    assert.equal(result.needsBrowser, true);
+  });
+
   it('does not flag an article that merely talks about human verification', async () => {
     routes['/'] = {
       status: 200,
@@ -176,5 +208,89 @@ describe('read', () => {
     assert.ok(result);
     assert.equal(result.botProtection, undefined);
     assert.equal(result.metadata.source, 'readability');
+  });
+  describe('needsBrowser and failure cause (#97, #100)', () => {
+    it('og-tags-only sets needsBrowser with a capture hint', async () => {
+      routes['/'] = {
+        status: 200,
+        contentType: 'text/html',
+        body: '<html><head><meta property="og:title" content="Title"></head><body></body></html>',
+      };
+      const result = await read(baseUrl, { skipSsrf: true });
+      assert.ok(result);
+      assert.equal(result.needsBrowser, true);
+      assert.match(result.hint ?? '', /apitap capture/);
+    });
+
+    it('spa-shell sets needsBrowser', async () => {
+      routes['/'] = {
+        status: 200,
+        contentType: 'text/html',
+        body: '<html><head><title>App</title></head><body><div id="root"></div><script src="/bundle.js"></script></body></html>',
+      };
+      const result = await read(baseUrl, { skipSsrf: true });
+      assert.equal(result?.needsBrowser, true);
+    });
+
+    it('a script redirect stub is labelled js-redirect with needsBrowser', async () => {
+      routes['/'] = {
+        status: 200,
+        contentType: 'text/html',
+        body: '<html><head><title>Docs</title></head><body><main><script>window.location.replace("/43/intro")</script><p>Redirecting...</p></main></body></html>',
+      };
+      const result = await read(baseUrl, { skipSsrf: true });
+      assert.equal(result?.metadata.source, 'js-redirect');
+      assert.equal(result?.needsBrowser, true);
+    });
+
+    it('a real article never sets needsBrowser, even with location.href in a script', async () => {
+      const para = 'Plenty of real article text for the reader to enjoy. '.repeat(8);
+      routes['/'] = {
+        status: 200,
+        contentType: 'text/html',
+        body: `<html><body><article><p>${para}</p></article><script>if(x)location.href="/login"</script></body></html>`,
+      };
+      const result = await read(baseUrl, { skipSsrf: true });
+      assert.equal(result?.metadata.source, 'readability');
+      assert.equal(result?.needsBrowser, undefined);
+      assert.equal(result?.hint, undefined);
+    });
+
+    it('legacy (scan: false) envelope also carries needsBrowser', async () => {
+      routes['/'] = {
+        status: 200,
+        contentType: 'text/html',
+        body: '<html><head><meta property="og:title" content="Title"></head><body></body></html>',
+      };
+      const result = await read(baseUrl, { skipSsrf: true, scan: false });
+      assert.equal(result?.needsBrowser, true);
+    });
+
+    it('non-200 failure reports status and bot vendor', async () => {
+      routes['/'] = {
+        status: 403,
+        contentType: 'text/html',
+        body: 'Forbidden',
+        headers: { 'x-datadome': 'protected' },
+      };
+      const { result, failure } = await readDetailed(baseUrl, { skipSsrf: true });
+      assert.equal(result, null);
+      assert.equal(failure?.cause, 'http_status');
+      assert.equal(failure?.status, 403);
+      assert.equal(failure?.botProtection, 'datadome');
+    });
+
+    it('SSRF-blocked target reports cause ssrf', async () => {
+      const { result, failure } = await readDetailed('http://192.168.1.1/test');
+      assert.equal(result, null);
+      assert.equal(failure?.cause, 'ssrf');
+    });
+
+    it('success has no failure', async () => {
+      routes['/'] = { status: 200, contentType: 'text/html', body: '<html><body><article><p>Hi</p></article></body></html>' };
+      const { result, failure } = await readDetailed(baseUrl, { skipSsrf: true });
+      assert.ok(result);
+      assert.equal(failure, null);
+    });
   });
 });

@@ -1,10 +1,11 @@
 // src/read/index.ts
 export { peek } from './peek.js';
 export type { PeekOptions } from './peek.js';
-export type { PeekResult, ReadResult, Decoder } from './types.js';
+export type { PeekResult, ReadResult, ReadFailure, Decoder } from './types.js';
 
-import type { ReadResult } from './types.js';
-import { safeFetch } from '../discovery/fetch.js';
+import type { ReadResult, ReadFailure } from './types.js';
+import { safeFetchDetailed } from '../discovery/fetch.js';
+import { detectBotProtection } from './peek.js';
 import { findDecoder } from './decoders/index.js';
 import { parseHead, extractContent } from './extract.js';
 import { detectChallengePage } from './challenge.js';
@@ -139,6 +140,30 @@ function dietImages(images: Array<{ alt: string; src: string }>): Array<{ alt: s
  * same content-injection attack surface.
  */
 export async function read(url: string, options: ReadOptions = {}): Promise<ReadResult | null> {
+  return (await readDetailed(url, options)).result;
+}
+
+/** Sources that mean "no readable body without a browser" (#97). */
+const NEEDS_BROWSER_HINTS: Record<string, string> = {
+  'og-tags-only': 'page renders its content client-side; use `apitap capture <url>` to get it',
+  'spa-shell': 'page is a JavaScript app shell; use `apitap capture <url>` to get its data',
+  'js-redirect': 'page redirects via JavaScript; read the target URL or use `apitap capture <url>`',
+  'challenge-page': 'site served a bot challenge; a real browser (`apitap capture <url>`) may pass it',
+};
+
+/** Script-driven navigation on a page with no content of its own (kafka.apache.org/documentation). */
+const JS_REDIRECT_RE = /\blocation\.(?:replace|assign)\s*\(|\blocation\.href\s*=(?!=)/;
+
+/**
+ * Like read(), but when there is no result says why (#100): the HTTP status
+ * and any bot-protection vendor on a non-200, or the SSRF/transport error.
+ * A decoder that returns null falls through to the generic pipeline, so the
+ * failure always describes the generic fetch.
+ */
+export async function readDetailed(
+  url: string,
+  options: ReadOptions = {},
+): Promise<{ result: ReadResult | null; failure: ReadFailure | null }> {
   assertSsrfBypassAllowed(options.skipSsrf);
   const scanEnabled = options.scan !== false;
 
@@ -161,14 +186,37 @@ export async function read(url: string, options: ReadOptions = {}): Promise<Read
       fitAndFinalize(result, options.maxBytes);
       // Decoders bypass scanning — they extract from structured sources.
       // Do NOT attach a findings field; preserve existing decoder envelope.
-      return result;
+      return { result, failure: null };
     }
     // Decoder returned null — fall through to generic
   }
 
   // Generic pipeline: fetch HTML -> scan -> parse head -> extract body
-  const fetchResult = await safeFetch(url, { skipSsrf: options.skipSsrf });
-  if (!fetchResult || fetchResult.status !== 200) return null;
+  const { result: fetchResult, error } = await safeFetchDetailed(url, { skipSsrf: options.skipSsrf });
+  if (!fetchResult) {
+    return {
+      result: null,
+      failure: {
+        cause: error?.kind === 'ssrf' ? 'ssrf' : 'transport',
+        code: error?.code ?? 'UNKNOWN',
+        // BAD_REDIRECT messages embed the site's raw Location header: keep
+        // site-controlled text out of the (non-untrusted-wrapped) error body.
+        message: error?.code === 'BAD_REDIRECT' ? 'invalid redirect location' : (error?.message ?? 'fetch failed'),
+      },
+    };
+  }
+  if (fetchResult.status !== 200) {
+    const botProtection = detectBotProtection(fetchResult.headers, []);
+    return {
+      result: null,
+      failure: {
+        cause: 'http_status',
+        status: fetchResult.status,
+        ...(botProtection ? { botProtection } : {}),
+        message: `site answered HTTP ${fetchResult.status}${botProtection ? ` (${botProtection})` : ''}`,
+      },
+    };
+  }
 
   const html = fetchResult.body;
 
@@ -188,7 +236,7 @@ export async function read(url: string, options: ReadOptions = {}): Promise<Read
   // Bot-challenge interstitial (Reddit "please wait for verification",
   // Cloudflare "Just a moment…"): a 200 whose body is a verification page,
   // not content. Label it honestly instead of returning an empty success.
-  const challenge = detectChallengePage(html, head.ogTitle || head.title || null);
+  const challenge = detectChallengePage(html, head.ogTitle || head.title || null, body.content.trim().length);
 
   // Determine source
   let source: string;
@@ -196,6 +244,8 @@ export async function read(url: string, options: ReadOptions = {}): Promise<Read
     source = 'challenge-page';
   } else if (body.isSpaShell) {
     source = 'spa-shell';
+  } else if (body.content.trim().length < 200 && JS_REDIRECT_RE.test(html)) {
+    source = 'js-redirect';
   } else if (body.content.trim().length === 0) {
     source = 'og-tags-only';
   } else {
@@ -216,10 +266,13 @@ export async function read(url: string, options: ReadOptions = {}): Promise<Read
     content = `[bot-challenge interstitial (${challenge}): the site withheld content pending human verification — no real page content was served]`;
   }
 
+  const browserHint = NEEDS_BROWSER_HINTS[source];
+  const browserSignal = browserHint ? { needsBrowser: true as const, hint: browserHint } : {};
+
   const legacy = !scanEnabled;
 
   if (legacy) {
-    return {
+    const legacyResult: ReadResult = {
       url,
       title,
       author: head.author || null,
@@ -228,6 +281,7 @@ export async function read(url: string, options: ReadOptions = {}): Promise<Read
       links: body.links,
       images: body.images,
       ...(challenge ? { botProtection: challenge } : {}),
+      ...browserSignal,
       metadata: {
         type: head.ogType || 'unknown',
         publishedAt: head.publishedTime || null,
@@ -237,6 +291,7 @@ export async function read(url: string, options: ReadOptions = {}): Promise<Read
       },
       cost: { tokens: Math.ceil(content.length / 4) },
     };
+    return { result: legacyResult, failure: null };
   }
 
   const dietedLinks = dietLinks(body.links);
@@ -258,6 +313,7 @@ export async function read(url: string, options: ReadOptions = {}): Promise<Read
     ...(imagesOmitted > 0 ? { imagesOmitted } : {}),
     ...(contentTruncated ? { contentTruncated: true } : {}),
     ...(challenge ? { botProtection: challenge } : {}),
+    ...browserSignal,
     metadata: {
       type: head.ogType || 'unknown',
       publishedAt: head.publishedTime || null,
@@ -274,5 +330,5 @@ export async function read(url: string, options: ReadOptions = {}): Promise<Read
   // own bytes are budgeted during the diet, then overwritten with the real
   // serialized size (fitReadEnvelope also recomputes cost.tokens).
   fitAndFinalize(envelope, options.maxBytes);
-  return envelope;
+  return { result: envelope, failure: null };
 }

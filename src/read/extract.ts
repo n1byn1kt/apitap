@@ -143,17 +143,29 @@ function stripTags(html: string, tags: string[]): string {
   return result;
 }
 
-function findContentRoot(html: string): string {
-  // Priority order for content root
-  const selectors: Array<{ re: RegExp }> = [
-    { re: /<article[^>]*>([\s\S]*?)<\/article>/i },
-    { re: /<main[^>]*>([\s\S]*?)<\/main>/i },
-    { re: /<[^>]+role=["']main["'][^>]*>([\s\S]*?)<\/div>/i },
-  ];
+/** A content root with less visible text than this is a stub (a card, a
+ *  "Redirecting..." placeholder, a role=main wrapper's first child) — keep
+ *  looking instead of returning it (issue #98). */
+const MIN_ROOT_TEXT = 200;
 
-  for (const { re } of selectors) {
-    const m = html.match(re);
-    if (m) return m[1];
+function findContentRoot(html: string): string {
+  // Candidates in priority order. The first one with real text wins. If none
+  // reaches MIN_ROOT_TEXT the page is genuinely short, so keep the old answer:
+  // the highest-priority non-empty candidate.
+  const candidates: string[] = [];
+
+  const article = html.match(/<article[^>]*>([\s\S]*?)<\/article>/i);
+  if (article) candidates.push(article[1]);
+  const main = html.match(/<main[^>]*>([\s\S]*?)<\/main>/i);
+  if (main) candidates.push(main[1]);
+
+  // role="main" can sit on any element; extract it balanced (a non-greedy
+  // match up to the first </div> cut gnu.org/software to 15 chars).
+  // Exact value only: role="main-navigation" is a menu, not the content.
+  const roleMain = html.match(/role=(?:"main"|'main'|main(?=[\s>/]))/i);
+  if (roleMain) {
+    const extracted = extractTagContent(html, roleMain.index!);
+    if (extracted) candidates.push(extracted);
   }
 
   // Class-based selectors
@@ -162,14 +174,11 @@ function findContentRoot(html: string): string {
     /class=["'][^"']*\barticle-body\b/i,
     /class=["'][^"']*\bentry-content\b/i,
   ];
-
   for (const cp of classPatterns) {
     const m = html.match(cp);
     if (m) {
-      // Find the enclosing tag and extract its content
-      const idx = m.index!;
-      const extracted = extractTagContent(html, idx);
-      if (extracted) return extracted;
+      const extracted = extractTagContent(html, m.index!);
+      if (extracted) candidates.push(extracted);
     }
   }
 
@@ -177,14 +186,26 @@ function findContentRoot(html: string): string {
   const contentId = html.match(/id=["']content["']/i);
   if (contentId) {
     const extracted = extractTagContent(html, contentId.index!);
-    if (extracted) return extracted;
+    if (extracted) candidates.push(extracted);
   }
 
   // Fallback: <body>
   const bodyMatch = html.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-  if (bodyMatch) return bodyMatch[1];
+  candidates.push(bodyMatch ? bodyMatch[1] : html);
 
-  return html;
+  // A later candidate may only replace a short earlier one if it contains that
+  // candidate's text — <body> always does; a sibling region (comments, a
+  // related-posts block) does not, so a short real <article> is never traded
+  // for something that drops it.
+  const texts = candidates.map((c) => getTextContent(c));
+  const skipped: string[] = [];
+  for (let i = 0; i < candidates.length; i++) {
+    const text = texts[i];
+    if (text.length >= MIN_ROOT_TEXT && skipped.every((t) => text.includes(t))) return candidates[i];
+    if (text.length > 0) skipped.push(text);
+  }
+  const nonEmpty = texts.findIndex((t) => t.length > 0);
+  return candidates[nonEmpty === -1 ? candidates.length - 1 : nonEmpty];
 }
 
 function extractTagContent(html: string, attrIndex: number): string | null {

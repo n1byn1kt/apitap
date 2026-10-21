@@ -7,8 +7,10 @@ const DEFAULT_API_BASE = 'https://hacker-news.firebaseio.com';
 
 const ITEM_URL = /news\.ycombinator\.com\/item\?id=\d+/;
 // Front page and listing pages. Optional trailing ?query/#fragment (e.g. ?p=2) is ignored.
+// Anchored at the scheme so a URL that merely ends in an HN listing path
+// (/from?site=news.ycombinator.com/best) is not decoded as that listing.
 // Anything else (/user?id=, /from?site=, /newcomments, /item) does not match.
-const LISTING_URL = /news\.ycombinator\.com\/?(news|best|newest|ask|show|jobs)?\/?(?:[?#]\S*)?$/;
+const LISTING_URL = /^https?:\/\/(?:www\.)?news\.ycombinator\.com\/?(news|best|newest|ask|show|jobs)?\/?(?:[?#]\S*)?$/;
 
 const LISTINGS: Record<string, { endpoint: string; title: string; canonical: string }> = {
   news: { endpoint: 'topstories', title: 'Top Stories', canonical: 'https://news.ycombinator.com/' },

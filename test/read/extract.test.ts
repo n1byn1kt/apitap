@@ -318,7 +318,7 @@ describe('extractContent', () => {
 
   it('detects Angular SPA shell (<app-root>)', () => {
     const html = `
-      <html><head><script src="main.js"></script></head>
+      <html><head></head>
       <body><app-root></app-root></body></html>
     `;
     assert.equal(extractContent(html).isSpaShell, true);
@@ -331,6 +331,11 @@ describe('extractContent', () => {
       </body></html>
     `;
     assert.equal(extractContent(html).isSpaShell, true);
+  });
+
+  it('does not flag a short static page whose ids merely start with "ember"', () => {
+    const html = '<html><body><p id="ember-notice">Scheduled maintenance. Back in ten minutes.</p></body></html>';
+    assert.equal(extractContent(html).isSpaShell, false);
   });
 
   it('does not flag a content-rich page that contains <app-root>', () => {

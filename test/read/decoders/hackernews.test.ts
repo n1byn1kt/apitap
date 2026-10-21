@@ -333,6 +333,8 @@ describe('hackernewsDecoder', () => {
         'https://news.ycombinator.com/newcomments',
         'https://news.ycombinator.com/item',
         'https://news.ycombinator.com/newsfoo',
+        'https://news.ycombinator.com/from?site=news.ycombinator.com/best',
+        'https://example.com/notes/news.ycombinator.com/ask',
       ]) {
         assert.ok(!match(u), u);
       }

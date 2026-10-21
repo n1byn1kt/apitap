@@ -130,7 +130,6 @@ const SPA_MARKERS = [
   'window.__NUXT__',
   '<app-root',
   'class="ember-application',
-  'id="ember',
 ];
 
 function stripTags(html: string, tags: string[]): string {

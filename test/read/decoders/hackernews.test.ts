@@ -259,4 +259,85 @@ describe('hackernewsDecoder', () => {
       assert.equal(result, null);
     });
   });
+
+  describe('listing pages', () => {
+    function serveListing(endpoint: string, ids: number[]): void {
+      routes[`/v0/${endpoint}.json`] = {
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(ids),
+      };
+      for (const id of ids) {
+        routes[`/v0/item/${id}.json`] = {
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ id, title: `Story ${id}`, by: 'writer', score: id, descendants: 1, type: 'story', url: `https://example.com/${id}` }),
+        };
+      }
+    }
+
+    const cases: Array<{ url: string; endpoint: string; title: string; canonical: string }> = [
+      { url: 'https://news.ycombinator.com/best', endpoint: 'beststories', title: 'Hacker News — Best Stories', canonical: 'https://news.ycombinator.com/best' },
+      { url: 'https://news.ycombinator.com/newest', endpoint: 'newstories', title: 'Hacker News — Newest Stories', canonical: 'https://news.ycombinator.com/newest' },
+      { url: 'https://news.ycombinator.com/ask', endpoint: 'askstories', title: 'Hacker News — Ask HN', canonical: 'https://news.ycombinator.com/ask' },
+      { url: 'https://news.ycombinator.com/show', endpoint: 'showstories', title: 'Hacker News — Show HN', canonical: 'https://news.ycombinator.com/show' },
+      { url: 'https://news.ycombinator.com/jobs', endpoint: 'jobstories', title: 'Hacker News — Jobs', canonical: 'https://news.ycombinator.com/jobs' },
+      { url: 'https://news.ycombinator.com/news', endpoint: 'topstories', title: 'Hacker News — Top Stories', canonical: 'https://news.ycombinator.com/' },
+      { url: 'https://news.ycombinator.com/best?p=2', endpoint: 'beststories', title: 'Hacker News — Best Stories', canonical: 'https://news.ycombinator.com/best' },
+    ];
+
+    for (const c of cases) {
+      it(`decodes ${c.url} via ${c.endpoint}`, async () => {
+        const ids = [2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009, 2010, 2011, 2012];
+        serveListing(c.endpoint, ids);
+
+        const result = await hackernewsDecoder.decode(c.url, { skipSsrf: true, _apiBaseUrl: baseUrl });
+
+        assert.ok(result, `expected a result for ${c.url}`);
+        assert.equal(result!.title, c.title);
+        assert.equal(result!.metadata.canonical, c.canonical);
+        assert.equal(result!.metadata.type, 'listing');
+        // First 10 only, paging ignored
+        assert.ok(result!.content.includes('Story 2010'));
+        assert.ok(!result!.content.includes('Story 2011'));
+      });
+    }
+
+    it('returns null when the listing endpoint fails', async () => {
+      routes['/v0/beststories.json'] = { status: 500, contentType: 'text/plain', body: 'err' };
+      const result = await hackernewsDecoder.decode('https://news.ycombinator.com/best', { skipSsrf: true, _apiBaseUrl: baseUrl });
+      assert.equal(result, null);
+    });
+
+    it('matches listing URLs (with optional query)', () => {
+      const match = (u: string) => hackernewsDecoder.patterns.some(p => p.test(u));
+      for (const u of [
+        'https://news.ycombinator.com/best',
+        'https://news.ycombinator.com/newest',
+        'https://news.ycombinator.com/ask',
+        'https://news.ycombinator.com/show',
+        'https://news.ycombinator.com/jobs',
+        'https://news.ycombinator.com/news',
+        'https://news.ycombinator.com/best?p=2',
+        'https://news.ycombinator.com/?p=2',
+      ]) {
+        assert.ok(match(u), u);
+      }
+    });
+
+    it('does not match other HN paths', () => {
+      const match = (u: string) => hackernewsDecoder.patterns.some(p => p.test(u));
+      for (const u of [
+        'https://news.ycombinator.com/user?id=pg',
+        'https://news.ycombinator.com/from?site=example.com',
+        'https://news.ycombinator.com/newcomments',
+        'https://news.ycombinator.com/item',
+        'https://news.ycombinator.com/newsfoo',
+        'https://news.ycombinator.com/from?site=news.ycombinator.com/best',
+        'https://example.com/notes/news.ycombinator.com/ask',
+      ]) {
+        assert.ok(!match(u), u);
+      }
+    });
+  });
 });

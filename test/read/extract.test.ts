@@ -316,6 +316,41 @@ describe('extractContent', () => {
     assert.equal(result.isSpaShell, false);
   });
 
+  it('detects Angular SPA shell (<app-root>)', () => {
+    const html = `
+      <html><head></head>
+      <body><app-root></app-root></body></html>
+    `;
+    assert.equal(extractContent(html).isSpaShell, true);
+  });
+
+  it('detects Ember SPA shell (ember-application)', () => {
+    const html = `
+      <html><body class="ember-application">
+        <div id="ember42" class="ember-view"></div>
+      </body></html>
+    `;
+    assert.equal(extractContent(html).isSpaShell, true);
+  });
+
+  it('does not flag a short static page whose ids merely start with "ember"', () => {
+    const html = '<html><body><p id="ember-notice">Scheduled maintenance. Back in ten minutes.</p></body></html>';
+    assert.equal(extractContent(html).isSpaShell, false);
+  });
+
+  it('does not flag a content-rich page that contains <app-root>', () => {
+    const html = `
+      <html><body>
+        <app-root>
+          <article>
+            <p>${'Real article prose about Angular components and routing. '.repeat(10)}</p>
+          </article>
+        </app-root>
+      </body></html>
+    `;
+    assert.equal(extractContent(html).isSpaShell, false);
+  });
+
   it('converts tables to markdown', () => {
     const html = `
       <html><body><article>

@@ -5,16 +5,29 @@ import { htmlSnippetToText } from '../extract.js';
 
 const DEFAULT_API_BASE = 'https://hacker-news.firebaseio.com';
 
+const ITEM_URL = /news\.ycombinator\.com\/item\?id=\d+/;
+// Front page and listing pages. Optional trailing ?query/#fragment (e.g. ?p=2) is ignored.
+// Anchored at the scheme so a URL that merely ends in an HN listing path
+// (/from?site=news.ycombinator.com/best) is not decoded as that listing.
+// Anything else (/user?id=, /from?site=, /newcomments, /item) does not match.
+const LISTING_URL = /^https?:\/\/(?:www\.)?news\.ycombinator\.com\/?(news|best|newest|ask|show|jobs)?\/?(?:[?#]\S*)?$/;
+
+const LISTINGS: Record<string, { endpoint: string; title: string; canonical: string }> = {
+  news: { endpoint: 'topstories', title: 'Top Stories', canonical: 'https://news.ycombinator.com/' },
+  best: { endpoint: 'beststories', title: 'Best Stories', canonical: 'https://news.ycombinator.com/best' },
+  newest: { endpoint: 'newstories', title: 'Newest Stories', canonical: 'https://news.ycombinator.com/newest' },
+  ask: { endpoint: 'askstories', title: 'Ask HN', canonical: 'https://news.ycombinator.com/ask' },
+  show: { endpoint: 'showstories', title: 'Show HN', canonical: 'https://news.ycombinator.com/show' },
+  jobs: { endpoint: 'jobstories', title: 'Jobs', canonical: 'https://news.ycombinator.com/jobs' },
+};
+
 function estimateTokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 
 export const hackernewsDecoder: Decoder = {
   name: 'hackernews',
-  patterns: [
-    /news\.ycombinator\.com\/item\?id=\d+/,
-    /news\.ycombinator\.com\/?(?:\?|$)/,
-  ],
+  patterns: [ITEM_URL, LISTING_URL],
 
   async decode(url: string, options: { skipSsrf?: boolean; [key: string]: any } = {}): Promise<ReadResult | null> {
     try {
@@ -28,7 +41,12 @@ export const hackernewsDecoder: Decoder = {
         return decodeItem(url, itemMatch[1], apiBase, fetchOpts);
       }
 
-      return decodeFrontPage(url, apiBase, fetchOpts);
+      const listingMatch = url.match(LISTING_URL);
+      if (listingMatch) {
+        return decodeListing(url, listingMatch[1] ?? 'news', apiBase, fetchOpts);
+      }
+
+      return null;
     } catch {
       return null;
     }
@@ -102,13 +120,16 @@ async function decodeItem(
   }
 }
 
-async function decodeFrontPage(
+async function decodeListing(
   url: string,
+  listing: string,
   apiBase: string,
   fetchOpts: { skipSsrf?: boolean },
 ): Promise<ReadResult | null> {
+  const meta = LISTINGS[listing];
+  if (!meta) return null;
   try {
-    const result = await safeFetch(`${apiBase}/v0/topstories.json`, fetchOpts);
+    const result = await safeFetch(`${apiBase}/v0/${meta.endpoint}.json`, fetchOpts);
     if (!result || result.status !== 200) return null;
 
     let storyIds: number[];
@@ -134,7 +155,7 @@ async function decodeFrontPage(
 
     return {
       url,
-      title: 'Hacker News — Top Stories',
+      title: `Hacker News — ${meta.title}`,
       author: null,
       description: `Top ${stories.length} stories`,
       content,
@@ -144,7 +165,7 @@ async function decodeFrontPage(
         type: 'listing',
         publishedAt: null,
         source: 'hackernews-firebase',
-        canonical: 'https://news.ycombinator.com/',
+        canonical: meta.canonical,
         siteName: 'Hacker News',
       },
       cost: { tokens: estimateTokens(content) },

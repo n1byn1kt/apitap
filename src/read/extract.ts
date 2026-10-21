@@ -128,6 +128,8 @@ const SPA_MARKERS = [
   '__NEXT_DATA__',
   'window.__INITIAL_STATE__',
   'window.__NUXT__',
+  '<app-root',
+  'class="ember-application',
 ];
 
 function stripTags(html: string, tags: string[]): string {

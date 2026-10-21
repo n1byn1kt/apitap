@@ -1,5 +1,22 @@
 # Changelog
 
+## v2.3.4 — 2026-10-20
+
+Hacker News listing pages read through the API, and Angular/Ember app
+shells are labelled as SPAs (PR #105). Found by the nightly dogfood run
+after its scorer was fixed to read apitap's own failure labels.
+
+### Fixed
+- **HN listings.** `/news`, `/best`, `/newest`, `/ask`, `/show` and
+  `/jobs` now read the matching Firebase list (top 10) instead of falling
+  through to HTML extraction. Only `/` and `item?id=` were decoded before.
+  Paging (`?p=2`) is ignored. The URL match is anchored, so a URL that
+  only ends in an HN path is not decoded as an HN listing.
+- **SPA detection.** Angular (`<app-root`) and Ember
+  (`class="ember-application"`) shells are now `spa-shell` instead of
+  `og-tags-only`. Both already carried `needsBrowser`. Pages under 200
+  chars of content text are still the only ones flagged.
+
 ## v2.3.3 — 2026-10-13
 
 `read` and `peek` now say when they could not get the page instead of
